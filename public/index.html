@@ -852,7 +852,14 @@ function checkRule(id,val){ dayRec().checks[id]=val; saveDaily(); updateProgress
 /* 【v9】当日"有效根部"集合：主链根部 + 已激活支链（父崩溃或支链已被勾选），未激活支链不计入分母 */
 function activeRoots(rec){
   return rules.filter(r=>r.lv===lv0id()&&r.on!==false)
-    .filter(r=>!r.parent || (rec.broken&&rec.broken[r.parent]) || (rec.checks&&rec.checks[r.id]));
+    .filter(r=>{
+      if(r.parent){ /* 支链：仅当父崩溃或自身被勾选时才计入分母 */
+        return (rec.broken&&rec.broken[r.parent]) || (rec.checks&&rec.checks[r.id]);
+      }
+      /* 主链：若崩溃且有支链，则被支链替代、移出分母（落实"走B计划不扣分"） */
+      const superseded = (rec.broken&&rec.broken[r.id]) && rules.some(k=>k.parent===r.id&&k.on!==false);
+      return !superseded;
+    });
 }
 function updateProgress(){
   const rec=dayRec();
