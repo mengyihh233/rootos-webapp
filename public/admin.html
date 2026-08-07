@@ -5,34 +5,69 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>业务数据看板 · 底层创造者OS</title>
 <style>
-  :root { --bg:#0f1115; --card:#1a1d24; --line:#2a2e37; --text:#e6e8eb; --muted:#9aa0aa; --accent:#4fc1ff; --green:#4ec9b0; --amber:#e8912d; }
+  :root { --bg:#0f1115; --card:#1a1d24; --line:#2a2e37; --text:#e6e8eb; --muted:#9aa0aa;
+    --accent:#4fc1ff; --green:#4ec9b0; --amber:#e8912d; --red:#f44747; }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; padding:24px; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    padding:24px; -webkit-font-smoothing:antialiased; }
   h1 { font-size:20px; margin:0 0 4px; }
-  .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
-  .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  .sub { color:var(--muted); font-size:13px; }
+  .topbar { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:20px; }
+  .topbar .right { display:flex; gap:8px; align-items:center; }
   button { background:var(--accent); color:#06121c; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  button:hover { filter:brightness(1.15); }
   button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:24px; }
+  button.mini { padding:4px 10px; font-size:12px; border-radius:6px; }
+  button.ok { background:var(--green); }
+  button.danger { background:var(--red); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:24px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
-  .card .num { font-size:28px; font-weight:700; }
+  .card .num { font-size:26px; font-weight:700; line-height:1.2; }
   .card .lbl { color:var(--muted); font-size:12px; margin-top:4px; }
+  .card .hint { color:var(--muted); font-size:11px; margin-top:2px; }
+  .card.hl { border-color:var(--accent); }
+  .card.warn { border-color:var(--amber); }
   .section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:24px; }
   .section h2 { font-size:14px; margin:0 0 12px; color:var(--muted); font-weight:500; }
   .bar-row { display:flex; align-items:center; gap:10px; margin:6px 0; font-size:12px; }
-  .bar-row .d { width:92px; color:var(--muted); }
+  .bar-row .d { width:88px; color:var(--muted); flex-shrink:0; }
   .bar-track { flex:1; background:#0c0e12; border-radius:6px; height:18px; overflow:hidden; }
-  .bar-fill { height:100%; background:var(--accent); border-radius:6px; }
-  .bar-row .c { width:28px; text-align:right; }
+  .bar-fill { height:100%; background:var(--accent); border-radius:6px; min-width:2px; transition:width .3s; }
+  .bar-fill.green { background:var(--green); }
+  .bar-fill.amber { background:var(--amber); }
+  .bar-row .c { width:28px; text-align:right; flex-shrink:0; }
+  .trend-toggle { display:flex; gap:6px; margin-bottom:12px; }
+  .trend-toggle button { flex:1; max-width:110px; background:transparent; color:var(--muted); border:1px solid var(--line); font-weight:500; }
+  .trend-toggle button.active { border-color:var(--accent); color:var(--accent); }
   table { width:100%; border-collapse:collapse; font-size:13px; display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
-  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
   th { color:var(--muted); font-weight:500; font-size:12px; }
   td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  tr.active-row td { background:rgba(78,201,176,.06); }
+  .search { width:100%; max-width:280px; padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font-size:13px; margin-bottom:12px; }
   .login { max-width:360px; margin:80px auto; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:28px; }
   .login h1 { margin-bottom:14px; }
-  input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font-size:14px; margin-bottom:12px; }
+  input[type=password] { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font-size:14px; margin-bottom:12px; }
   .err { color:#ff6b6b; font-size:13px; min-height:18px; margin-bottom:8px; }
   .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; background:#223; color:var(--green); }
+  .tpl-card { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .tpl-card:last-child { border-bottom:none; }
+  .tpl-actions { display:flex; gap:6px; flex-shrink:0; }
+  .modal-mask { display:none; position:fixed; inset:0; z-index:100; background:rgba(0,0,0,.7); align-items:center; justify-content:center; padding:20px; }
+  .modal-mask.show { display:flex; }
+  .modal { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; max-width:560px; width:100%; max-height:86vh; overflow-y:auto; }
+  .modal h3 { margin:0 0 6px; }
+  .modal .close { float:right; }
+  .modal .kv { font-size:13px; margin:4px 0; }
+  .modal .kv b { color:var(--muted); font-weight:500; }
+  .modal pre { background:#0c0e12; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; overflow-x:auto; max-height:320px; overflow-y:auto; white-space:pre-wrap; }
+  .empty { color:var(--muted); font-size:13px; }
+  @media (max-width:600px){
+    body { padding:14px; }
+    .cards { grid-template-columns:repeat(2,1fr); gap:10px; }
+    .card .num { font-size:22px; }
+    .bar-row .d { width:72px; }
+  }
 </style>
 </head>
 <body>
@@ -48,6 +83,9 @@ function fmt(dt) {
   const p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
 
 async function api(path, opts) {
   const r = await fetch(path, Object.assign({ credentials:'include', headers:{'Content-Type':'application/json'} }, opts));
@@ -56,6 +94,7 @@ async function api(path, opts) {
   return { ok: r.ok, status: r.status, body };
 }
 
+/* ---------- 登录 ---------- */
 function loginView() {
   app.innerHTML = `
     <div class="login">
@@ -67,139 +106,254 @@ function loginView() {
     </div>`;
   document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 }
-
 async function doLogin() {
   const token = document.getElementById('token').value.trim();
   const r = await api('/api/admin/login', { method:'POST', body: JSON.stringify({ token }) });
   if (r.ok) { dashboard(); }
   else { document.getElementById('err').textContent = (r.body && r.body.error) || '登录失败'; }
 }
-
 async function doLogout() {
   await api('/api/admin/logout', { method:'POST', body: JSON.stringify({}) });
   loginView();
 }
 
+/* ---------- 主看板 ---------- */
+let S = null;               /* 最近一次 stats */
+let userFilter = '';        /* 用户搜索 */
+let trendRange = 'all';     /* 趋势范围 */
+let statTimer = null;
+
 async function dashboard() {
   const r = await api('/api/admin/stats');
   if (!r.ok) { loginView(); return; }
-  const s = r.body;
-  const maxDay = Math.max(1, ...s.registrationsByDay.map(x => x.count));
+  S = r.body;
+  render();
+}
 
-  const trend = s.registrationsByDay.map(x => `
-    <div class="bar-row">
-      <span class="d">${x.date}</span>
-      <div class="bar-track"><div class="bar-fill" style="width:${(x.count/maxDay*100).toFixed(1)}%"></div></div>
-      <span class="c">${x.count}</span>
-    </div>`).join('') || '<div class="sub">暂无注册记录</div>';
-
-  const rows = s.users.map(u => `
-    <tr>
-      <td>${u.id}</td>
-      <td>${escapeHtml(u.username)}</td>
-      <td>${fmt(u.created_at)}</td>
-      <td class="num">${u.rules}</td>
-      <td class="num">${u.phases}</td>
-      <td class="num">${u.cats}</td>
-      <td class="num">${u.tags}</td>
-      <td>${fmt(u.updated_at)}</td>
-    </tr>`).join('');
-
-  const fa = s.failureAnalysis || { totalCrashes:0, totalRecovered:0, branchRate:0, topCrashed:[] };
-  const faRows = (fa.topCrashed||[]).map(x => `
-    <tr>
-      <td>${escapeHtml(x.rule)}</td>
-      <td class="num">${x.count}</td>
-      <td class="num">${x.recovered}</td>
-      <td class="num">${x.rate}%</td>
-    </tr>`).join('') || '<tr><td colspan="4" class="sub">暂无崩溃记录</td></tr>';
-
+function render() {
+  const s = S;
+  const ts = s.tplStats || { total:0, pending:0, approved:0, rejected:0 };
   app.innerHTML = `
     <div class="topbar">
       <div>
         <h1>业务数据看板</h1>
-        <div class="sub">生成于 ${fmt(s.generatedAt)}</div>
+        <div class="sub">生成于 ${fmt(s.generatedAt)} · 点击「刷新」获取最新</div>
       </div>
-      <button class="ghost" onclick="doLogout()">退出登录</button>
+      <div class="right">
+        <button class="ghost" onclick="refreshStats()">⟳ 刷新</button>
+        <button class="ghost" onclick="doLogout()">退出登录</button>
+      </div>
     </div>
 
     <div class="cards">
       <div class="card"><div class="num">${s.totalUsers}</div><div class="lbl">总用户数</div></div>
-      <div class="card"><div class="num">${s.last7}</div><div class="lbl">近 7 天新增</div></div>
-      <div class="card"><div class="num">${s.last30}</div><div class="lbl">近 30 天新增</div></div>
+      <div class="card"><div class="num" style="color:var(--green);">+${s.last7}</div><div class="lbl">近 7 天新增</div></div>
+      <div class="card"><div class="num" style="color:var(--amber);">+${s.last30}</div><div class="lbl">近 30 天新增</div></div>
+      <div class="card hl"><div class="num" style="color:var(--accent);">${s.active7}</div><div class="lbl">近 7 天活跃</div><div class="hint">有数据更新的用户</div></div>
+      <div class="card warn"><div class="num" style="color:var(--amber);">${ts.pending}</div><div class="lbl">待审模板</div><div class="hint">共 ${ts.total} 份提交</div></div>
+      <div class="card"><div class="num" style="color:var(--green);">${ts.approved}</div><div class="lbl">已通过模板</div><div class="hint">已拒绝 ${ts.rejected}</div></div>
     </div>
 
     <div class="section">
       <h2>注册趋势（按天）</h2>
-      ${trend}
+      <div class="trend-toggle">
+        ${['all','90','30','7'].map(k => `<button class="${trendRange===k?'active':''}" onclick="setTrend('${k}')">${k==='all'?'全部':k+'天'}</button>`).join('')}
+      </div>
+      <div id="trendBox">${trendHTML()}</div>
     </div>
 
     <div class="section">
-      <h2>用户明细（${s.users.length}）</h2>
-      <table>
-        <thead><tr>
-          <th>ID</th><th>用户名</th><th>注册时间</th>
-          <th class="num">定式</th><th class="num">阶段</th><th class="num">门类</th><th class="num">标签</th>
-          <th>更新时间</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+        <h2 style="margin:0;">用户明细（${s.users.length}）</h2>
+        <input class="search" id="userSearch" placeholder="🔍 按用户名过滤…" value="${escapeHtml(userFilter)}">
+      </div>
+      <div id="userTable">${usersHTML()}</div>
     </div>
 
     <div class="section">
       <h2>失败模式分析 · 崩溃最多的定式（全站汇总）</h2>
       <div class="cards" style="margin-bottom:12px;">
-        <div class="card"><div class="num">${fa.totalCrashes}</div><div class="lbl">总崩溃次数</div></div>
-        <div class="card"><div class="num">${fa.branchRate}%</div><div class="lbl">崩溃后支链恢复率</div></div>
+        <div class="card"><div class="num">${s.failureAnalysis.totalCrashes}</div><div class="lbl">总崩溃次数</div></div>
+        <div class="card"><div class="num" style="color:${s.failureAnalysis.branchRate>=50?'var(--green)':'var(--amber)'};">${s.failureAnalysis.branchRate}%</div><div class="lbl">崩溃后支链恢复率</div></div>
       </div>
-      <table>
-        <thead><tr><th>定式</th><th class="num">崩溃次数</th><th class="num">支链恢复</th><th class="num">恢复率</th></tr></thead>
-        <tbody>${faRows}</tbody>
-      </table>
+      <div id="faBox">${faHTML()}</div>
     </div>
 
     <div class="section">
-      <h2>社区模板审核</h2>
+      <h2>社区模板审核（待审优先）</h2>
       <div id="tplReviewBody"><div class="sub">加载中…</div></div>
     </div>`;
 
+  const us = document.getElementById('userSearch');
+  if (us) us.addEventListener('input', () => { userFilter = us.value.trim(); renderUserTableOnly(); });
   loadTplReview();
 }
 
+/* 只重渲染用户表（搜索输入时调用，避免整页闪烁） */
+function renderUserTableOnly() {
+  const box = document.getElementById('userTable'); if (!box) return;
+  box.innerHTML = usersHTML();
+}
+
+/* ---------- 注册趋势 ---------- */
+function setTrend(k) { trendRange = k; const b = document.getElementById('trendBox'); if (b) b.innerHTML = trendHTML(); renderTrendToggle(); }
+function renderTrendToggle() {
+  document.querySelectorAll('.trend-toggle button').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('onclick').includes("'"+trendRange+"'"));
+  });
+}
+function trendHTML() {
+  const days = S.registrationsByDay || [];
+  let list = days;
+  if (trendRange !== 'all') {
+    const n = Number(trendRange);
+    const from = new Date(); from.setDate(from.getDate() - n);
+    const fromStr = from.toISOString().slice(0,10);
+    list = days.filter(x => x.date >= fromStr);
+  }
+  if (!list.length) return '<div class="empty">暂无注册记录</div>';
+  const max = Math.max(1, ...list.map(x => x.count));
+  return list.map(x => `
+    <div class="bar-row">
+      <span class="d">${x.date}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${(x.count/max*100).toFixed(1)}%"></div></div>
+      <span class="c">${x.count}</span>
+    </div>`).join('');
+}
+
+/* ---------- 用户明细 ---------- */
+function usersHTML() {
+  const kw = userFilter.toLowerCase();
+  let rows = S.users.slice();
+  if (kw) rows = rows.filter(u => (u.username||'').toLowerCase().includes(kw));
+  /* 按最后更新时间降序（活跃在前），无更新时间排最后 */
+  rows.sort((a,b) => {
+    const ta = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+    const tb = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+    return tb - ta;
+  });
+  if (!rows.length) return '<div class="empty">没有匹配的用户</div>';
+  const now = Date.now();
+  return `<table>
+    <thead><tr>
+      <th>ID</th><th>用户名</th><th>注册时间</th>
+      <th class="num">定式</th><th class="num">阶段</th><th class="num">门类</th><th class="num">标签</th>
+      <th>最后更新</th>
+    </tr></thead>
+    <tbody>${rows.map(u => {
+      const active = u.updated_at && (now - new Date(u.updated_at).getTime()) <= 7*86400000;
+      return `<tr class="${active?'active-row':''}">
+        <td>${u.id}</td>
+        <td>${escapeHtml(u.username)}${active?' <span class="badge">活跃</span>':''}</td>
+        <td>${fmt(u.created_at)}</td>
+        <td class="num">${u.rules}</td>
+        <td class="num">${u.phases}</td>
+        <td class="num">${u.cats}</td>
+        <td class="num">${u.tags}</td>
+        <td>${fmt(u.updated_at)}</td>
+      </tr>`;}).join('')}</tbody>
+  </table>`;
+}
+
+/* ---------- 失败模式分析 ---------- */
+function faHTML() {
+  const fa = S.failureAnalysis || { topCrashed: [] };
+  const list = fa.topCrashed || [];
+  if (!list.length) return '<div class="empty">暂无崩溃记录</div>';
+  const max = Math.max(1, ...list.map(x => x.count));
+  return `<table>
+    <thead><tr><th>定式</th><th style="text-align:right;">崩溃次数</th><th style="text-align:right;">支链恢复</th><th style="text-align:right;">恢复率</th><th style="width:30%;">分布</th></tr></thead>
+    <tbody>${list.map(x => `<tr>
+      <td>${escapeHtml(x.rule)}</td>
+      <td class="num">${x.count}</td>
+      <td class="num">${x.recovered}</td>
+      <td class="num" style="color:${x.rate>=50?'var(--green)':'var(--amber)'};">${x.rate}%</td>
+      <td><div class="bar-track"><div class="bar-fill ${x.rate>=50?'green':'amber'}" style="width:${(x.count/max*100).toFixed(0)}%"></div></div></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+/* ---------- 模板审核 ---------- */
 async function loadTplReview() {
   const box = document.getElementById('tplReviewBody');
   if (!box) return;
   const r = await api('/api/admin/templates');
-  if (!r.ok) { box.innerHTML = '<div class="sub">无权限或加载失败</div>'; return; }
+  if (!r.ok) { box.innerHTML = '<div class="empty">无权限或加载失败</div>'; return; }
   const list = r.body || [];
-  if (!list.length) { box.innerHTML = '<div class="sub">暂无模板提交</div>'; return; }
+  if (!list.length) { box.innerHTML = '<div class="empty">暂无模板提交</div>'; return; }
+  /* 待审优先，其次按创建时间倒序 */
+  const order = { pending:0, approved:1, rejected:2 };
+  list.sort((a,b) => (order[a.status]-order[b.status]) || (new Date(b.created_at)-new Date(a.created_at)));
   box.innerHTML = list.map(t => {
     const badge = t.status === 'approved' ? '<span class="badge">已通过</span>'
       : t.status === 'rejected' ? '<span class="badge" style="background:#322;color:#f88;">已拒绝</span>'
       : '<span class="badge" style="background:#332;color:#fd8;">待审核</span>';
     const c = t.counts || {};
     const actions = t.status === 'approved'
-      ? '<span class="sub">已公开</span>'
-      : `<button onclick="tplAct(${t.id},'approve')">通过</button> <button class="ghost" onclick="tplAct(${t.id},'reject')">拒绝</button>`;
-    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);">
-      <div>
+      ? `<button class="mini ghost" onclick="viewTpl(${t.id})">查看</button>`
+      : `<button class="mini ghost" onclick="viewTpl(${t.id})">查看</button> <button class="mini ok" onclick="tplAct(${t.id},'approve')">通过</button> <button class="mini danger" onclick="tplAct(${t.id},'reject')">拒绝</button>`;
+    return `<div class="tpl-card">
+      <div style="min-width:0;">
         <b>${escapeHtml(t.title)}</b> ${badge}
         <div class="sub">作者：${escapeHtml(t.author)} · 含 ${c.rules||0} 规则 / ${c.phases||0} 阶段 / ${c.resources||0} 资源 · ${fmt(t.created_at)}</div>
         <div class="sub">${escapeHtml(t.desc || '')}</div>
       </div>
-      <div style="white-space:nowrap;">${actions}</div>
+      <div class="tpl-actions">${actions}</div>
     </div>`;
   }).join('');
 }
-
 async function tplAct(id, action) {
+  if (action === 'reject' && !confirm('确定拒绝该模板？作者将收到通知。')) return;
   const r = await api('/api/admin/templates/' + id + '/' + action, { method: 'POST', body: JSON.stringify({}) });
-  if (r.ok) loadTplReview();
+  if (r.ok) { toast('已' + (action==='approve'?'通过':'拒绝')); loadTplReview(); refreshStatsSilent(); }
   else alert((r.body && r.body.error) || '操作失败');
 }
+/* 审核预览：拉完整数据并弹窗展示摘要 */
+async function viewTpl(id) {
+  const r = await api('/api/admin/templates/' + id);
+  if (!r.ok) { alert('加载模板失败'); return; }
+  const t = r.body, d = t.data || {};
+  const rulesList = (d.rules||[]).slice(0, 25).map(x => '• ' + x.t).join('\n') + ((d.rules||[]).length>25 ? '\n…共 ' + (d.rules||[]).length + ' 条' : '');
+  const phasesList = (d.phases||[]).filter(p=>!p.parent).map(p => '• ' + p.name + (p.start?('（'+p.start+' ~ '+(p.end||'至今')+'）'):'')).join('\n');
+  const resList = (d.resources||[]).slice(0, 12).map(x => '• ' + (x.title||'')).join('\n');
+  openModal(`
+    <h3>${escapeHtml(t.title)}</h3>
+    <div class="sub" style="margin-bottom:10px;">作者 ${escapeHtml(t.author)} · 提交于 ${fmt(t.created_at)} · 状态：${t.status}</div>
+    <div class="kv"><b>简介：</b>${escapeHtml(t.desc||'—')}</div>
+    <div class="kv"><b>标签：</b>${(t.tags||[]).map(escapeHtml).join('、')||'—'}</div>
+    <h3 style="margin-top:14px;">规则（${(d.rules||[]).length}）</h3><pre>${escapeHtml(rulesList||'（无）')}</pre>
+    <h3>阶段（顶层 ${(d.phases||[]).filter(p=>!p.parent).length} / 共 ${(d.phases||[]).length}）</h3><pre>${escapeHtml(phasesList||'（无）')}</pre>
+    <h3>资源（${(d.resources||[]).length}）</h3><pre>${escapeHtml(resList||'（无）')}</pre>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;">
+      ${t.status==='pending' ? `<button class="ok" onclick="closeModal();tplAct(${t.id},'approve')">通过</button>
+      <button class="danger" onclick="closeModal();tplAct(${t.id},'reject')">拒绝</button>` : ''}
+      <button class="ghost" onclick="closeModal()">关闭</button>
+    </div>`);
+}
+function openModal(html) {
+  let m = document.getElementById('adminModal');
+  if (!m) { m = document.createElement('div'); m.id='adminModal'; m.className='modal-mask'; document.body.appendChild(m); }
+  m.innerHTML = `<div class="modal" style="position:relative;">${html}</div>`;
+  m.classList.add('show');
+  m.onclick = e => { if (e.target === m) closeModal(); };
+}
+function closeModal() { const m = document.getElementById('adminModal'); if (m) m.classList.remove('show'); }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* ---------- 刷新 ---------- */
+async function refreshStats() {
+  const r = await api('/api/admin/stats');
+  if (!r.ok) { alert('刷新失败，请重新登录'); loginView(); return; }
+  S = r.body; render();
+  toast('已刷新');
+}
+function refreshStatsSilent() { api('/api/admin/stats').then(r => { if (r.ok) S = r.body; }).catch(()=>{}); }
+function toast(msg) {
+  let t = document.getElementById('adminToast');
+  if (!t) { t = document.createElement('div'); t.id='adminToast';
+    t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(20,22,28,.96);color:#e6e6e6;border:1px solid var(--accent);padding:10px 16px;border-radius:10px;z-index:999;font-size:13px;';
+    document.body.appendChild(t); }
+  t.textContent = msg; t.style.opacity='1';
+  clearTimeout(t._t); t._t = setTimeout(()=>{ t.style.opacity='0'; }, 1600);
 }
 
 loginView();

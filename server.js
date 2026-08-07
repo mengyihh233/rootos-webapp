@@ -380,12 +380,24 @@ async function start() {
 
     const now = Date.now();
     const inLast = (d, days) => (now - new Date(d).getTime()) <= days * 86400000;
+    /* 近 7 天「活跃」：数据在 7 天内更新过的用户（updated_at 来自 profiles，未建档为 null） */
+    const active7 = users.filter(u => u.updated_at && inLast(u.updated_at, 7)).length;
+    /* 社区模板统计 */
+    const allTpl = await db.templateListAll();
+    const tplStats = {
+      total: allTpl.length,
+      pending: allTpl.filter(t => t.status === 'pending').length,
+      approved: allTpl.filter(t => t.status === 'approved').length,
+      rejected: allTpl.filter(t => t.status === 'rejected').length
+    };
     res.json({
       totalUsers: users.length,
       last7: users.filter(u => inLast(u.created_at, 7)).length,
       last30: users.filter(u => inLast(u.created_at, 30)).length,
+      active7,
       registrationsByDay: Object.keys(regDays).sort().map(d => ({ date: d, count: regDays[d] })),
       users,
+      tplStats,
       failureAnalysis: {
         totalCrashes: merged.totalCrashes,
         totalRecovered: merged.totalRecovered,
@@ -460,6 +472,18 @@ async function start() {
       id: r.id, author: r.author, title: r.title, desc: r.desc,
       tags: r.tags || [], counts: r.counts || {}, status: r.status, created_at: r.created_at
     })));
+  }));
+
+  /* 管理后台：单个模板完整数据（审核预览用，仅管理员） */
+  app.get('/api/admin/templates/:id', requireAdmin, wrap(async (req, res) => {
+    const row = await db.templateGet(Number(req.params.id));
+    if (!row) return res.status(404).json({ error: '模板不存在' });
+    let data = {};
+    try { data = JSON.parse(row.data); } catch (e) { data = {}; }
+    res.json({
+      id: row.id, author: row.author, title: row.title, desc: row.desc,
+      tags: row.tags || [], counts: row.counts || {}, status: row.status, created_at: row.created_at, data
+    });
   }));
 
   app.post('/api/admin/templates/:id/approve', requireAdmin, wrap(async (req, res) => {

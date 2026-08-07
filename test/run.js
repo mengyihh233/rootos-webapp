@@ -230,6 +230,13 @@ function makeDocx(text) {
   ok('通过后公开列表含该社区模板(source=community)', (await r.json()).some(x => x.title === '我的模板' && x.source === 'community'));
   r = await fetch(base + '/api/templates/community/' + tid);
   ok('community/:id 返回模板数据', r.status === 200 && (await r.json()).rules.length === 1);
+  // 看板统计 + 管理端模板详情（审核预览用）
+  r = await fetch(base + '/api/admin/stats', { headers: { cookie: adminCookie } });
+  const stats = await r.json();
+  ok('看板 stats 含 active7 与 tplStats', r.status === 200 && typeof stats.active7 === 'number' && typeof stats.tplStats === 'object' && stats.tplStats.pending >= 0);
+  r = await fetch(base + '/api/admin/templates/' + tid, { headers: { cookie: adminCookie } });
+  const tplDet = await r.json();
+  ok('管理端模板详情接口返回 data（审核预览）', r.status === 200 && tplDet.data && Array.isArray(tplDet.data.rules));
   // 再上传一个并拒绝，验证拒绝后不出现在公开列表
   await fetch(base + '/api/templates', { method:'POST', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify({ title:'待拒模板', data: tplData }) });
   const adminList2 = await (await fetch(base + '/api/admin/templates', { headers: { cookie: adminCookie } })).json();
