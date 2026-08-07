@@ -510,6 +510,37 @@ async function start() {
     res.json({ ok: true, msg: '密码已更新' });
   }));
 
+  /* ⑧ 绑定已有网页账号（v1.4：微信自动注册账号 → 并入已有网页账号，数据合并）
+   * 场景：用户先用微信登录生成了 wx_ 账号，想把数据并到原来的网页账号（如邮箱注册的），
+   * 之后微信登录直接进网页账号。 */
+  app.post('/api/account/merge-web', requireAuth, wrap(async (req, res) => {
+    const username = String((req.body || {}).username || '').trim();
+    const password = String((req.body || {}).password || '');
+    const target = await db.userByName(username);
+    if (!target || !bcrypt.compareSync(password, target.pw_hash)) return res.status(401).json({ error: '账号或密码错误' });
+    if (target.id === req.session.userId) return res.status(400).json({ error: '当前已是该账号，无需绑定' });
+    const cur = await db.userById(req.session.userId);
+    if (!cur || !cur.wx_openid) return res.status(400).json({ error: '当前账号没有微信绑定，无法合并' });
+    const holder = await db.userFindByOpenid(cur.wx_openid);
+    if (holder && holder.id !== target.id) return res.status(409).json({ error: '该微信已绑定其他账号' });
+    /* 数据合并：目标账号为主，当前微信账号补缺失结构 + 合并 daily/events */
+    const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
+    const curData = parse(await db.profileGet(req.session.userId));
+    const tgtData = parse(await db.profileGet(target.id));
+    ['cats', 'levels', 'rules', 'tags', 'phases', 'reviews', 'retros', 'resources'].forEach(k => {
+      const v = tgtData[k];
+      if (!v || (Array.isArray(v) && !v.length)) tgtData[k] = curData[k];
+    });
+    tgtData.daily = Object.assign({}, curData.daily || {}, tgtData.daily || {});
+    tgtData.events = [...(curData.events || []), ...(tgtData.events || [])];
+    await db.profileSet(target.id, JSON.stringify(tgtData));
+    /* openid 转给目标账号；当前 wx_ 账号解除（下次微信登录直接进目标账号） */
+    await db.userBindOpenid(target.id, cur.wx_openid);
+    await db.userBindOpenid(req.session.userId, null);
+    console.log('✅ 账号合并：', cur.username, '→', target.username);
+    res.json({ ok: true, token: issueWxToken(target.id), username: target.username, msg: '已绑定并合并数据' });
+  }));
+
   /* 当前用户自己的失败模式分析（崩溃最多的定式 + 支链恢复率），人人可见，仅看自己 */
   app.get('/api/me/failure-analysis', requireAuth, wrap(async (req, res) => {
     const raw = await db.profileGet(req.session.userId);
