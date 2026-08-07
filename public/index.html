@@ -877,7 +877,7 @@ function toast(msg){
 }
 const store = {
   get(k,d){ try{ const v=localStorage.getItem('pos_'+k); return v?JSON.parse(v):d; }catch(e){ return d; } },
-  set(k,v){ localStorage.setItem('pos_'+k, JSON.stringify(v)); markSaved(); }
+  set(k,v){ try{ localStorage.setItem('pos_'+k, JSON.stringify(v)); markSaved(); }catch(e){ console.warn('本地存储失败（可能已满）：', k, e); } }
 };
 const EVT = { crash:'💥崩溃', recover:'✅恢复', relapse:'⚠️破戒', sleep:'🥱低能量', debug:'🔧调试', mile:'🏁里程碑', note:'📝随笔' };
 /* 【v9.2】快速事件自定义（存 meta.quickEvents，用户可增删改类型） */
@@ -1243,7 +1243,7 @@ function chainPath(rs,rec){
   const bySeq=(a,b)=>(a.seq||0)-(b.seq||0);
   const node=r=>{
     const broken=!!(rec.broken&&rec.broken[r.id]);
-    let s=(rec.checks[r.id]?'✅':broken?'💥':'⬜')+r.t;
+    let s=(rec.checks[r.id]?'✅':broken?'💥':'⬜')+esc(r.t);
     const kids=rules.filter(k=>k.parent===r.id&&k.on!==false).sort(bySeq);
     if(broken&&kids.length)
       s+=' 〉🔀支链: '+kids.map(k=>node(k)).join(' → ');
@@ -1252,7 +1252,7 @@ function chainPath(rs,rec){
   return rs.filter(r=>!r.parent).sort(bySeq).map(node).join(' → ')||'（空）';
 }
 /* 【v9.1】回溯专用：只呈现当天「实际执行过」的链条——勾选过(✅)或崩溃过(💥)的节点，
-   不罗列未触碰的预设节点；崩溃节点后接其实际走动的支链(🔀)。 */
+   不罗列未触碰的预设节点；崩溃节点后接其实际走动的支链(🔀)。输出已转义，可直接拼 HTML */
 function chainPathActual(catRules, rec){
   const bySeq=(a,b)=>(a.seq||0)-(b.seq||0);
   const chk=id=>!!(rec.checks&&rec.checks[id]);
@@ -1262,16 +1262,16 @@ function chainPathActual(catRules, rec){
   const parts=[];
   mains.filter(engaged).forEach(r=>{
     const broken=brk(r.id), checked=chk(r.id);
-    let s=(checked?'✅':broken?'💥':'')+r.t;
+    let s=(checked?'✅':broken?'💥':'')+esc(r.t);
     if(broken){
       const kids=catRules.filter(k=>k.parent===r.id).sort(bySeq).filter(engaged);
-      if(kids.length) s+=' 〉🔀支链('+kids.map(k=>(chk(k.id)?'✅':'💥')+k.t).join(' → ')+')';
+      if(kids.length) s+=' 〉🔀支链('+kids.map(k=>(chk(k.id)?'✅':'💥')+esc(k.t)).join(' → ')+')';
     }
     parts.push(s);
   });
   /* 独立执行的支链（父未崩溃但直接勾了支链） */
   catRules.filter(r=>r.parent&&engaged(r)&&!brk(r.parent)).forEach(k=>{
-    parts.push('🔀 支链：'+(chk(k.id)?'✅':'💥')+k.t);
+    parts.push('🔀 支链：'+(chk(k.id)?'✅':'💥')+esc(k.t));
   });
   return parts;
 }
@@ -1496,6 +1496,8 @@ function delLv(id){
 function pushEvent(type, text, ruleId, retro){
   events.push({ id:'e'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
     ts:new Date().toLocaleString('sv').slice(0,16), day:today, type, text:text||'', ruleId:ruleId||null, retro:retro||'' });
+  /* 事件流裁剪：保留最近 1500 条，防止整包越来越大、localStorage/上传超限 */
+  if(events.length > 1500) events = events.slice(-1500);
   store.set('events',events);
 }
 function quickEvent(type){
@@ -1637,7 +1639,7 @@ function renderWeek(){
     if(p!=null){ tot+=p; cnt++; }
     const tg=(rec&&rec.tags)?rec.tags.map(tid=>{const t=tagOf(tid);return t?esc(t.name):'';}).filter(Boolean).join(' '):'';
     html+='<tr><td class="mono">'+d.slice(5)+'</td><td class="mono">'+(p==null?'—':p+'%')+'</td><td>'+tg+'</td>'
-      +'<td>'+evs.map(e=>EVT[e.type]||e.type).join(' ')+'</td>'
+      +'<td>'+evs.map(e=>esc(EVT[e.type]||e.type)).join(' ')+'</td>'
       +'<td class="mono">'+(rec&&rec.sleep!=null?rec.sleep+'h':'—')+'</td></tr>';
   });
   html+='</table><p style="margin-top:10px;"><small>本周'+levels[0].name+'平均完成率：</small><b class="mono" style="color:var(--ok);">'+(cnt?Math.round(tot/cnt):0)+'%</b></p>';
@@ -1849,8 +1851,8 @@ function bufToBase64(buf){
 /* ================= 事件流 ================= */
 function evHTML(e,del){
   const r=e.ruleId?ruleOf(e.ruleId):null;
-  return '<div class="ev ev-'+e.type+'"><span class="evtag">'+(EVT[e.type]||e.type)+'</span>'
-    +'<span class="t">'+e.ts+'</span><span style="flex:1;">'+esc(e.text||'')
+  return '<div class="ev ev-'+e.type+'"><span class="evtag">'+esc(EVT[e.type]||e.type)+'</span>'
+    +'<span class="t">'+esc(e.ts)+'</span><span style="flex:1;">'+esc(e.text||'')
     +(r?'<br><small style="color:var(--dim);">关联定式：'+esc(r.t)+'</small>':'')
     +(e.retro?'<span class="retro">↳ 回溯建议：'+esc(e.retro)+'</span>':'')
     +'</span>'
@@ -2142,12 +2144,10 @@ function applySharedBag(d){
   if(Array.isArray(d.rules)) rules=d.rules;
   if(Array.isArray(d.tags)) tags=d.tags;
   if(Array.isArray(d.phases)) phases=d.phases;
-  if(d.reviews) reviews=d.reviews;
-  if(Array.isArray(d.retros)) retros=d.retros;
-  if(Array.isArray(d.resources)) resources=d.resources;
+  /* 注意：不覆盖 reviews/retros/resources（本地复盘/随笔/收藏保留，防止套用丢数据） */
   suppressSave=false;
-  const m={cats,levels,rules,tags,phases,reviews,retros,resources};
-  ['cats','levels','rules','tags','phases','reviews','retros','resources'].forEach(k=>store.set(k, m[k]));
+  const m={cats,levels,rules,tags,phases};
+  ['cats','levels','rules','tags','phases'].forEach(k=>store.set(k, m[k]));
   if(SESSION) pushToServer();
   renderTodayRules(); updateProgress(); renderPhases(); renderRulePage();
 }
@@ -2331,13 +2331,30 @@ async function applyTemplate(file,title,mode,choices){
     const d=await fetchTemplateData(file);
     if(mode==='append') appendBag(d);
     else if(mode==='merge') mergeBag(d,choices);
-    else applyBag(d);   /* append=仅追加阶段资源 / merge=合并(可逐项选) / 其余=覆盖 */
+    else overwriteBagFromTemplate(d);   /* append=仅追加阶段资源 / merge=合并(可逐项选) / 其余=覆盖（不碰打卡/事件） */
     meta.onboarded=true; store.set('meta',meta);   /* 套用模板者非新手，跳过引导 */
     if(SESSION){ try{ await pushToServer(); }catch(e){ console.warn('套用后落盘失败',e); } }
     const label = mode==='append' ? '仅追加(阶段/资源)' : (mode==='merge' ? '合并' : '覆盖');
     alert('🧩 模板已'+label+'套用，正在刷新…'); location.reload();
   }catch(e){ alert('套用失败：'+(e&&e.message||e)); }
 }
+/* 覆盖模式：只替换 规则/门类/层级/标签/阶段/复盘/笔记/资源，保留 daily（打卡）与 events（事件）——
+ * 套用模板绝不丢运行数据 */
+function overwriteBagFromTemplate(d){
+  suppressSave=true;
+  if(Array.isArray(d.cats)) cats=d.cats;
+  if(Array.isArray(d.levels)) levels=d.levels;
+  if(Array.isArray(d.rules)) rules=d.rules;
+  if(Array.isArray(d.tags)) tags=d.tags;
+  if(Array.isArray(d.phases)) phases=d.phases;
+  if(d.reviews) reviews=d.reviews;
+  if(Array.isArray(d.retros)) retros=d.retros;
+  if(Array.isArray(d.resources)) resources=d.resources;
+  suppressSave=false;
+  const m={cats,levels,rules,tags,phases,reviews,retros,resources};
+  ['cats','levels','rules','tags','phases','reviews','retros','resources'].forEach(k=>store.set(k,m[k]));
+}
+
 /* 按 file 取模板数据：内置走静态 /templates/，社区走 /api/templates/community/:id */
 async function fetchTemplateData(file){
   const url = file.indexOf('community:')===0 ? '/api/templates/community/'+file.slice('community:'.length) : '/templates/'+file;
@@ -2349,13 +2366,12 @@ async function fetchTemplateData(file){
 
 /* 合并模式：保留当前用户数据，仅追加/更新模板内容。
  * choices: 可选 {id:false} 表示「该项保留当前版本、不用模板版」，实现逐项冲突解决。
- * daily 为运行时状态不合并（保留当前用户的当日进度）；meta 以当前用户为主、模板补缺失默认。 */
+ * daily/events 为运行时状态不合并（保留当前用户的当日进度）；meta 以当前用户为主、模板补缺失默认。 */
 function mergeBag(d, choices){
   cats=mergeWithChoices(cats, d.cats||SEED_CATS, choices);
   levels=mergeWithChoices(levels, d.levels||SEED_LEVELS, choices);
   rules=mergeWithChoices(rules, d.rules, choices);
   tags=mergeWithChoices(tags, d.tags||SEED_TAGS, choices);
-  events=mergeWithChoices(events, d.events||[], choices);
   phases=mergeWithChoices(phases, d.phases||[], choices);
   retros=mergeWithChoices(retros, d.retros||[], choices);
   resources=mergeWithChoices(resources, d.resources||[], choices);

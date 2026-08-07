@@ -17,6 +17,10 @@ const db = require('./db');
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'rootos-dev-secret-change-me';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+/* 安全：生产环境禁止使用默认 SESSION_SECRET（可被伪造 session cookie 提权） */
+if (process.env.NODE_ENV === 'production' && SESSION_SECRET === 'rootos-dev-secret-change-me') {
+  console.error('🚨 严重安全警告：生产环境使用默认 SESSION_SECRET！请立即在环境变量设置随机 SESSION_SECRET 并重新部署。');
+}
 /* 微信小程序登录（code2session）：AppID 公开，AppSecret 私密，只从环境变量读、绝不进代码 */
 const WX_APPID = process.env.WX_APPID || '';
 const WX_SECRET = process.env.WX_SECRET || '';
@@ -414,10 +418,12 @@ async function start() {
     res.json({ ok: true, email });
   }));
 
-  /* ③ 找回密码：给已绑定邮箱发验证码（公开；不暴露邮箱是否注册） */
+  /* ③ 找回密码：给已绑定邮箱发验证码（公开；不暴露邮箱是否注册；IP 限流防邮件轰炸） */
   app.post('/api/forgot/send-code', wrap(async (req, res) => {
+    const ip = req.ip;
     const email = String(req.body.email || '').trim().toLowerCase();
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: '邮箱格式不正确' });
+    if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
     if (!smtpReady()) return res.status(503).json({ error: '服务端未配置 SMTP，暂不支持找回密码' });
     const holder = await db.userFindByEmail(email);
     if (holder) { /* 仅当存在该邮箱才发码，未注册时静默（防枚举） */
@@ -485,14 +491,19 @@ async function start() {
     res.json({ ok: true, token: issueWxToken(uid), username: uname, bound: true, auto_registered: true });
   }));
 
-  /* ⑥b 小程序绑定 web 账号：openid + 网页账号密码 → 关联并签发 token */
+  /* ⑥b 小程序绑定 web 账号：openid + 网页账号密码 → 关联并签发 token（IP 限流防爆破） */
   app.post('/api/wechat/bind-openid', wrap(async (req, res) => {
+    const ip = req.ip;
     const openid = String(req.body.openid || '').trim();
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
     if (!openid) return res.status(400).json({ error: '缺少 openid' });
     const u = await db.userByName(username);
-    if (!u || !bcrypt.compareSync(password, u.pw_hash)) return res.status(401).json({ error: '账号或密码错误' });
+    if (!u || !bcrypt.compareSync(password, u.pw_hash)) {
+      if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
+      return res.status(401).json({ error: '账号或密码错误' });
+    }
+    authOk(ip);
     const holder = await db.userFindByOpenid(openid);
     if (holder && holder.id !== u.id) return res.status(409).json({ error: '该微信已绑定其他账号' });
     await db.userBindOpenid(u.id, openid);
@@ -606,11 +617,12 @@ async function start() {
     let data = {};
     try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
     if (!Array.isArray(data.rules) || !data.rules.length) return res.status(400).json({ error: '当前没有可分享的规划' });
-    /* 只分享结构字段，不含运行数据（daily/events）与令牌类字段 */
+    /* 只分享结构字段，不含运行数据（daily/events）与隐私内容（reviews 复盘/retros 随笔）；
+     * resources 规划资源作为规划的一部分保留 */
     const share = {
       cats: data.cats || [], levels: data.levels || [], rules: data.rules,
       tags: data.tags || [], phases: data.phases || [],
-      reviews: data.reviews || {}, retros: data.retros || [], resources: data.resources || [],
+      resources: data.resources || [],
       meta: Object.assign({}, data.meta || {}, { _share: true })
     };
     const title = String(req.body.title || '').trim().slice(0, 60)
@@ -760,7 +772,9 @@ async function start() {
 
   /* 已审核社区模板的数据（供套用/下载） */
   app.get('/api/templates/community/:id', wrap(async (req, res) => {
-    const row = await db.templateGet(Number(req.params.id));
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
+    const row = await db.templateGet(id);
     if (!row || row.status !== 'approved') return res.status(404).json({ error: '模板不存在或未审核' });
     let data = {};
     try { data = JSON.parse(row.data); } catch (e) { data = {}; }
@@ -790,6 +804,7 @@ async function start() {
 
   app.post('/api/admin/templates/:id/approve', requireAdmin, wrap(async (req, res) => {
     const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
     const row = await db.templateGet(id);
     await db.templateApprove(id);
     if (row && row.author) {
@@ -801,6 +816,7 @@ async function start() {
 
   app.post('/api/admin/templates/:id/reject', requireAdmin, wrap(async (req, res) => {
     const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
     const row = await db.templateGet(id);
     await db.templateReject(id);
     if (row && row.author) {
@@ -813,6 +829,7 @@ async function start() {
   /* ---- 模板评分（登录用户 1-5 星） ---- */
   app.post('/api/templates/:id/rate', requireAuth, wrap(async (req, res) => {
     const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
     const score = Number(req.body && req.body.score);
     if (!(score >= 1 && score <= 5)) return res.status(400).json({ error: '评分需在 1-5 之间' });
     await db.ratingUpsert(id, req.session.userId, score);
@@ -822,6 +839,7 @@ async function start() {
   /* ---- 模板收藏（切换） ---- */
   app.post('/api/templates/:id/favorite', requireAuth, wrap(async (req, res) => {
     const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
     const favorited = await db.favoriteToggle(id, req.session.userId);
     res.json({ ok: true, favorited });
   }));
