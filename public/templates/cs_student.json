@@ -221,7 +221,7 @@
       "id": "r_hlt1",
       "cat": "c_health",
       "lv": "lv0",
-      "t": "23:30 前上床，7:30 前起床",
+      "t": "固定时间上床，睡足 7-8 小时",
       "on": true,
       "parent": null,
       "seq": 1

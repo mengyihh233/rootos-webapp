@@ -59,16 +59,17 @@ const A = 'alice_' + rnd, B = 'bob_' + rnd;
   ok(meA.status === 200 && meA.data.username === A, '注册后会话已建立');
   ok((await a.req('POST', '/api/register', { username: A, password: 'pw123456' })).status === 409, '重复用户名 → 409');
 
-  console.log('\n[4] 默认模板检查（应无医学/成人内容，保留戒断链）');
+  console.log('\n[4] 默认模板检查（应无医学/成人内容，无「戒断」门类，保留支链）');
   const dA = await a.req('GET', '/api/data');
   const bag = dA.data;
   ok(dA.status === 200, 'GET /api/data → 200');
   ok(Array.isArray(bag.rules) && bag.rules.length >= 20, `默认规则 ${bag.rules.length} 条（>=20）`);
-  ok(bag.cats.some(c => c.id === 'c_quit'), '保留「戒断」门类');
-  ok(bag.rules.some(r => r.cat === 'c_quit' && /冷却/.test(r.t)), '保留「15 分钟冷却」戒断规则');
+  ok(!bag.cats.some(c => c.id === 'c_quit'), '无「戒断」门类');
+  ok(bag.cats.some(c => c.id === 'c_health'), '有「健康」门类（承接睡眠卫生/冲动管理）');
+  ok(bag.rules.some(r => r.cat === 'c_health' && /冷却|15 分钟/.test(r.t)), '保留「15 分钟冷却」冲动管理规则');
   ok(bag.rules.some(r => r.parent === 'r_lif1'), '保留支链结构（parent=r_lif1）');
   const dump = JSON.stringify(bag);
-  ok(!/医学|复诊|嗜睡|porn/i.test(dump), '默认模板无医学/成人内容残留');
+  ok(!/医学|复诊|嗜睡|porn|戒断|神圣座位|熔断/i.test(dump), '默认模板无医学/成人/私人化内容残留');
   ok(bag.phases.length === 4 && /系统冷启动/.test(bag.phases[0].name), '阶段模板为通用版');
   ok(bag.phases[0].start === new Date().toLocaleDateString('sv'), '阶段起始日按注册当天动态生成');
 

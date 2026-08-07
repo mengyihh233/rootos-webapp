@@ -52,11 +52,12 @@ const missing = [...called].filter(f => !defined.has(f) && !kw.has(f));
 if (missing.length) { console.error('❌ HTML 调用了未定义的函数：', missing.join(', ')); bad++; }
 else console.log(`✅ HTML 中 ${called.size} 个事件处理函数全部有定义`);
 
-/* 5) 脚本里 $('#xxx') 引用的元素必须在 HTML 里存在 */
+/* 5) 脚本里 $('#xxx') 引用的元素必须在 HTML 里存在（动态创建的元素在白名单内，不算悬空） */
 const ids = new Set([...html.matchAll(/\bid\s*=\s*"([^"]+)"/g)].map(m => m[1]));
 const refs = new Set([...code.matchAll(/\$\('#([\w-]+)'\)/g)].map(m => m[1]));
 [...code.matchAll(/getElementById\('([\w-]+)'\)/g)].forEach(m => refs.add(m[1]));
-const ghost = [...refs].filter(r => !ids.has(r));
+const dynamic = new Set(['toast', 'resEditingId']); /* 运行时 createElement 注入的 id */
+const ghost = [...refs].filter(r => !ids.has(r) && !dynamic.has(r));
 if (ghost.length) { console.error('❌ 脚本引用了不存在的元素 id：', ghost.join(', ')); bad++; }
 else console.log(`✅ 脚本引用的 ${refs.size} 个元素 id 全部存在`);
 

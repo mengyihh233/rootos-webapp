@@ -269,6 +269,33 @@ function makeDocx(text) {
   r = await fetch(base + '/api/notifications', { headers:{cookie:cookie3} });
   ok('标记已读后 unread=0', (await r.json()).unread===0);
 
+  // ---- 用户系统 v1.2：邮箱自动写入 / 微信绑定 / 改密 / SMTP 未配置降级 ----
+  const mailUser = 'emailtest_' + Date.now() + '@test.com';
+  r = await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: mailUser, password: 'pass123456' }) });
+  const mc = r.headers.get('set-cookie').split(';')[0];
+  ok('邮箱格式用户名注册成功', r.status === 200);
+  r = await fetch(base + '/api/me', { headers:{cookie:mc} });
+  const meJ = await r.json();
+  ok('注册即自动写入 email（未验证）', r.status===200 && meJ.email===mailUser && meJ.email_verified===false, JSON.stringify(meJ).slice(0,140));
+  r = await fetch(base + '/api/wechat/bind', { method:'POST', headers:{...hd,cookie:mc}, body: JSON.stringify({wechat:'wxid_test123'}) });
+  ok('绑定微信号 → 200', r.status === 200);
+  r = await fetch(base + '/api/me', { headers:{cookie:mc} });
+  ok('/api/me 回显微信号', (await r.json()).wechat==='wxid_test123');
+  r = await fetch(base + '/api/password/change', { method:'POST', headers:{...hd,cookie:mc}, body: JSON.stringify({old:'wrong-pass', next:'newpass123'}) });
+  ok('改密：旧密码错误 → 400', r.status === 400);
+  r = await fetch(base + '/api/password/change', { method:'POST', headers:{...hd,cookie:mc}, body: JSON.stringify({old:'pass123456', next:'newpass123'}) });
+  ok('改密：正确 → 200', r.status === 200);
+  r = await fetch(base + '/api/logout', { method:'POST', headers:{cookie:mc} });
+  r = await fetch(base + '/api/login', { method:'POST', headers:hd, body: JSON.stringify({ username: mailUser, password: 'newpass123' }) });
+  ok('改密后用新密码登录成功', r.status === 200);
+  const mc2 = r.headers.get('set-cookie').split(';')[0]; /* 登出后旧 cookie 失效，重取 */
+  r = await fetch(base + '/api/email/bind', { method:'POST', headers:hd, body: JSON.stringify({ email:'x@y.com', code:'123456' }) });
+  ok('未登录绑定邮箱 → 401', r.status === 401);
+  r = await fetch(base + '/api/email/send-code', { method:'POST', headers:{...hd,cookie:mc2}, body: JSON.stringify({ email:'someone@test.com' }) });
+  ok('SMTP 未配置：发送验证码 → 503 降级提示', r.status === 503);
+  r = await fetch(base + '/api/forgot/send-code', { method:'POST', headers:hd, body: JSON.stringify({ email:'someone@test.com' }) });
+  ok('SMTP 未配置：找回密码 → 503 降级提示', r.status === 503);
+
   // CSP 纵深：object-src none + base-uri self（frame-ancestors 未加，以兼容 WorkBuddy 预览跨域 iframe）
   // 注意：nonce 与 'unsafe-inline' 同现会被浏览器忽略 unsafe-inline，导致 style=""/onclick="" 全被拦，
   // 因此 CSP 不得再含 'nonce-（本站大量内联样式/事件，重构前只能保留 unsafe-inline）

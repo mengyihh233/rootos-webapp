@@ -71,7 +71,7 @@ button.mini { padding:6px 12px; min-height:34px; font-size:.8rem; margin-top:0; 
   border-radius:99px; border:1px solid var(--border); color:var(--dim); margin:2px 6px 2px 0; }
 #degradeBanner { display:none; border:1px solid var(--warn); border-left:4px solid var(--warn);
   background:#2b2a1e; color:var(--warn); padding:12px 14px; border-radius:10px; margin-bottom:14px; font-weight:600; }
-/* 【v8 新增】夜间宵禁提醒条（22:00-06:00 自动显示） */
+/* 【v8 新增】深夜提醒条（22:00-06:00 自动显示） */
 #nightBar { display:none; background:#a1260d; color:#fff; padding:10px 14px;
   border-radius:10px; margin-bottom:14px; font-weight:600; text-align:center; font-size:.9rem; }
 
@@ -191,6 +191,29 @@ details.chain-detail { margin-top:8px; }
 details.chain-detail summary { cursor:pointer; font-size:.78rem; color:var(--dim); font-family:var(--mono); }
 details.chain-detail .path { font-size:.82rem; font-family:var(--mono); background:var(--bg2);
   border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; line-height:1.8; }
+
+/* 【v9.2 节点流】今日页：每条定式是点击式节点卡片，完成后自动生成「今日实际链条」 */
+.node-card{ display:flex; align-items:center; gap:8px; padding:10px 12px; margin:6px 0;
+  border:1px solid var(--border); border-radius:10px; background:var(--card);
+  cursor:pointer; user-select:none; transition:border-color .12s; }
+.node-card:hover{ border-color:var(--accent); }
+.node-card .nc-state{ flex-shrink:0; font-size:1.05rem; width:20px; text-align:center; color:var(--dim); }
+.node-card.done{ border-color:var(--ok); }
+.node-card.done .nc-state{ color:var(--ok); }
+.node-card.broken{ border-color:var(--danger); }
+.node-card.broken .nc-state{ color:var(--danger); }
+.node-card.dim{ opacity:.38; filter:grayscale(60%); pointer-events:none; }
+.node-card .nc-text{ flex:1; font-size:.9rem; line-height:1.45; color:var(--txt); }
+.node-card .nc-actions{ display:flex; gap:4px; flex-shrink:0; }
+.node-card .nc-actions button{ margin:0; }
+#todayChain{ margin-bottom:10px; padding:10px 12px; border:1px dashed var(--ok); border-radius:10px;
+  background:rgba(78,201,176,.06); }
+#todayChain .chain-title{ font-size:.78rem; color:var(--ok); font-weight:500; margin-bottom:6px; letter-spacing:.04em; }
+#todayChain .chain-grp{ display:flex; align-items:flex-start; gap:8px; margin:4px 0; flex-wrap:wrap; }
+#todayChain .chain-cat{ flex-shrink:0; font-size:.8rem; font-weight:500; padding-top:2px; }
+#todayChain .chain-path{ font-size:.82rem; font-family:var(--mono); line-height:1.8; color:var(--txt); }
+#todayChain .chain-arr{ color:var(--dim); margin:0 4px; }
+
 @media (max-width:600px){
   h1{font-size:1.15rem;}
   .card{padding:14px;}
@@ -243,9 +266,9 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 <!-- ================= 登录 / 注册 ================= -->
 <div id="auth" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);">
   <div class="card" style="width:340px;max-width:92vw;">
-    <h2 style="margin-top:0;">🧠 底层创造者 OS</h2>
-    <p><small>多用户版 · 注册一个账号，数据存云端，多设备通用</small></p>
-    <input id="auUser" type="text" placeholder="用户名（≥2 字符）" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+    <h2 style="margin-top:0;">🧠 ROOT-OS 个人操作系统</h2>
+    <p><small>把「想变好」变成一套可运行、可迭代的系统。注册即用，数据存云端。</small></p>
+    <input id="auUser" type="text" placeholder="账号（邮箱或用户名，≥2 字符）" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
     <input id="auPass" type="password" placeholder="密码（≥6 位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
     <button class="ok" style="width:100%;" onclick="doLogin()">登录</button>
     <button class="ghost" style="width:100%;margin-top:8px;" onclick="doRegister()">注册新账号</button>
@@ -266,13 +289,13 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 </div>
 
 <div class="wrap">
-<h1>🧠 底层创造者 OS <span style="color:var(--dim);font-size:.7em;">多用户版</span></h1>
+<h1>🧠 ROOT-OS 个人操作系统 <span style="color:var(--dim);font-size:.7em;">多端同步</span></h1>
 <p>
   <span class="pill" id="datePill"></span>
   <span class="pill" id="phasePill"></span>
-  <br><small>本地存储 · 规则树 · 日标记 · 三级复盘 · 定式迭代台 · 嵌套阶段</small>
+  <br><small>规则树 · 节点执行 · 三级复盘 · 阶段规划 · 定式迭代</small>
 </p>
-<div id="nightBar">🌙 宵禁时段：手机该放客厅了 · 饿了只喝温水 · 躺床+手机=不可逃逸区</div>
+<div id="nightBar">🌙 深夜时段：该收尾了 · 放下屏幕 · 给明天留个好状态</div>
 <div id="degradeBanner"></div>
 
 <!-- ================= 新手引导 ================= -->
@@ -300,6 +323,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   <button class="tabbtn" onclick="show('resources',this)">规划·资源</button>
   <button class="tabbtn" onclick="show('templates',this)">🧩模板</button>
   <button class="tabbtn" onclick="show('data',this)">数据</button>
+  <button class="tabbtn" onclick="show('settings',this)">⚙️ 设置</button>
 </div>
 
 <!-- ================= 今日 ================= -->
@@ -327,23 +351,19 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   </div>
 
   <div class="card">
-    <h2>⚔️ 今日规则执行 <small>（自动保存）</small></h2>
+    <h2>⚔️ 今日执行 <small>（点节点=完成✅，点💥=崩溃激活支链；自动保存）</small></h2>
     <div class="subtab" style="margin-bottom:6px;">
       <button id="viewCatBtn" onclick="setTodayView('cat')">按门类</button>
       <button id="viewLvBtn" onclick="setTodayView('lv')">按层级（根→顶）</button>
     </div>
+    <div id="todayChain"></div>
     <div id="todayRules"></div>
   </div>
 
   <div class="card">
-    <h2>⚡ 快速事件 <small>（只记事实，不评判）</small></h2>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-      <button class="mini danger" onclick="quickEvent('crash')">💥 崩溃</button>
-      <button class="mini" style="background:#8a5a1e;" onclick="quickEvent('relapse')">⚠️ 破戒</button>
-      <button class="mini" style="background:#2d4a6b;" onclick="quickEvent('sleep')">🥱 低能量</button>
-      <button class="mini ok" onclick="quickEvent('debug')">🔧 调试</button>
-      <button class="mini" style="background:#6b6320;" onclick="quickEvent('mile')">🏁 里程碑</button>
-    </div>
+    <h2>⚡ 快速事件 <small>（只记事实，不评判）</small>
+      <button class="mini ghost" style="float:right;" onclick="manageQuickEvents()">⚙ 自定义</button></h2>
+    <div id="quickEventBtns" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
     <input type="text" id="quickEvText" placeholder="事件备注（可空）" style="margin-top:8px;">
     <p><small>针对某条定式的崩溃/恢复/迭代，去「回溯」页的定式迭代台。</small></p>
   </div>
@@ -354,7 +374,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <button class="ghost" onclick="startCooldown()">🧊 冲动冷却 · 15分钟</button>
       <button class="ghost" onclick="startFuse()">⏱️ 视频熔断 · 25分钟</button>
     </div>
-    <p><small>冷却不是靠意志力硬扛，是用<b>时延</b>把冲动的峰值熬过去。熬过去后回来打卡「戒断」门类的规则。</small></p>
+    <p><small>冷却不是靠意志力硬扛，是用<b>时延</b>把冲动的峰值熬过去。熬过去后回来打卡「健康」门类的规则。</small></p>
   </div>
 
   <div class="card">
@@ -523,7 +543,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <blockquote>胜于易胜：根部定式必须小到不可能失败。</blockquote>
 
     <h3>2. 不可逃逸区</h3>
-    <p>「躺床 + 深夜 + 手机解锁」区内意志力失效。唯一解是环境改造：22:30 手机放客厅 = 让区不存在。<b>不要在区内战斗。</b></p>
+    <p>「躺床 + 深夜 + 手机解锁」区内意志力失效。唯一解是环境改造：睡前把手机放到够不着的地方 = 让区不存在。<b>不要在区内战斗。</b></p>
 
     <h3>3. 崩塌即调试（定式迭代台就是干这个的）</h3>
     <p>崩溃是系统报错不是道德失败。响应协议：<b>迭代台记录 → 修改定式 → 次日重启</b>。不归零、不连签绑架、累计完成 &gt; 连续天数。</p>
@@ -538,7 +558,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     </ul>
 
     <h3>5. 负反馈环阻断</h3>
-    <p>晚睡刷手机 → 夜宵 → 肠胃不适 → 更难入睡。断点：「22:30 手机放客厅」+「清醒不吃零食」。环上任一环断，整环失效。</p>
+    <p>晚睡刷手机 → 吃夜宵 → 肠胃不适 → 更难入睡。断点：「睡前放下手机」+「清醒不吃零食」。环上任一环断，整环失效。</p>
 
     <h3>6. 环境耦合 & 日标记</h3>
     <p>床=堕落区，图书馆=Buff区。社交日/高扰动日/低能量日用<b>日标记</b>标注，带「降级」属性的标记自动激活降级协议：只做侦查任务，不追责。</p>
@@ -577,7 +597,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     </div>
     <div id="resTags" class="restags"></div>
     <div id="resForm" style="display:none;" class="review-box">
-      <input type="text" id="resTitle" placeholder="标题（如：专升本备考策略）" style="width:100%;margin-bottom:8px;">
+      <input type="text" id="resTitle" placeholder="标题（如：季度目标与策略）" style="width:100%;margin-bottom:8px;">
       <textarea id="resBody" rows="6" placeholder="写在这里，或先「导入文档」把内容填进来…（网址会自动变成可点击链接；自动保存）"></textarea>
       <input type="text" id="resTagsInput" placeholder="标签（逗号分隔，如：雅思,留学,书单）" style="width:100%;margin:8px 0;">
       <div style="margin-top:8px;display:flex;gap:8px;">
@@ -598,15 +618,51 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <h3 style="margin-top:20px;">📉 我的失败模式分析</h3>
     <p><small>只有你自己能看到这份数据——它来自你记录的崩溃 / 支链事件，帮你定位最该改的定式。<b>管理后台不再独占</b>，每个账号都能看自己的。</small></p>
     <div id="myFailure"><small>加载中…</small></div>
-    <h3 style="margin-top:20px;">👤 账户</h3>
-    <p><small>你的数据已加密存储于服务器（按账号隔离），登录即跨设备同步。当前登录：<b id="acctName">—</b></small></p>
-    <button class="ghost" onclick="doLogout()">退出登录</button>
-    <h3 style="margin-top:20px;">完整备份（JSON，含规则树/阶段/标记/复盘）</h3>
-    <p><small>下载一份离线副本，或导入恢复。服务器已自动保存，此步骤用于额外保险/迁移。</small></p>
-    <button onclick="exportJSON()">💾 下载完整备份</button>
-    <button class="ghost" onclick="document.getElementById('importFile').click()">📥 导入备份</button>
-    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
-    <h3 style="margin-top:20px;">危险区</h3>
+  </div>
+</div>
+
+<!-- ================= 设置（v1.2：账号绑定 / 偏好 / 数据管理） ================= -->
+<div id="settings" class="section">
+  <div class="card">
+    <h2>👤 账号与绑定 <small>（登录名即账号，邮箱用于找回密码，微信号用于识别身份）</small></h2>
+    <div id="acctBox"><small style="color:var(--dim);">加载中…</small></div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h2>🎨 偏好</h2>
+    <p><small>界面与交互的默认选项，改了立即生效、自动保存。</small></p>
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div>
+        <b style="font-size:.9rem;">今日页视图</b>
+        <div class="subtab" style="margin-top:4px;">
+          <button id="prefTodayCat" onclick="setTodayView('cat')">按门类</button>
+          <button id="prefTodayLv" onclick="setTodayView('lv')">按层级（根→顶）</button>
+        </div>
+      </div>
+      <div>
+        <b style="font-size:.9rem;">深夜提醒条</b>
+        <div style="margin-top:4px;">
+          <label style="margin:0;"><input type="checkbox" id="prefNightBar" onchange="setNightBarPref(this.checked)"><span>22:00-06:00 显示「该收尾了」提醒</span></label>
+        </div>
+      </div>
+      <div>
+        <b style="font-size:.9rem;">新手引导</b>
+        <div style="margin-top:4px;">
+          <button class="ghost mini" onclick="startOnboarding()">❓ 重看新手引导</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h2>📦 数据管理</h2>
+    <p><small>数据已自动存服务器（按账号隔离、跨设备同步）。以下用于额外保险 / 迁移 / 换设备。</small></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button onclick="exportJSON()">💾 下载完整备份</button>
+      <button class="ghost" onclick="document.getElementById('importFile').click()">📥 导入备份</button>
+      <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
+    </div>
+    <p style="margin-top:12px;"><small class="danger">危险区：</small></p>
     <button class="danger" onclick="if(confirm('清空本机显示数据？服务器数据不受影响。')){localStorage.clear();location.reload();}">🗑️ 清空本机缓存</button>
   </div>
 </div>
@@ -751,6 +807,24 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   </div>
 </div>
 
+<!-- 【v9.2】快速事件自定义弹窗 -->
+<div class="modal-mask" id="qeModal">
+  <div class="modal" style="max-width:440px;text-align:left;">
+    <h3>⚙ 自定义快速事件</h3>
+    <p style="color:var(--dim);font-size:.82rem;margin:4px 0 10px;">按钮=想记的一种事实类型。改标题、换颜色、删掉都行（至少保留 1 个）。</p>
+    <div id="qeList" style="display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;margin-bottom:10px;"></div>
+    <div class="row" style="margin-top:8px;">
+      <input type="text" id="qeNewLabel" placeholder="新事件名，如：📚 读完一本书" style="flex:1;">
+      <input type="color" id="qeNewColor" value="#2d4a6b" style="width:46px;height:40px;padding:2px;">
+      <button class="mini ok" onclick="qeAdd()">＋ 添加</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;">
+      <button class="ghost" style="flex:1;" onclick="closeModal('qeModal')">完成</button>
+      <button class="mini" onclick="qeReset()" style="flex:1;">恢复默认</button>
+    </div>
+  </div>
+</div>
+
 <script src="/logic.js"></script>
 <script>
 /* ============================================================
@@ -792,14 +866,52 @@ const store = {
   set(k,v){ localStorage.setItem('pos_'+k, JSON.stringify(v)); markSaved(); }
 };
 const EVT = { crash:'💥崩溃', recover:'✅恢复', relapse:'⚠️破戒', sleep:'🥱低能量', debug:'🔧调试', mile:'🏁里程碑', note:'📝随笔' };
+/* 【v9.2】快速事件自定义（存 meta.quickEvents，用户可增删改类型） */
+const QE_DEFAULT = [
+  { type:'crash',  label:'💥 崩溃',   color:'#a32d2d' },
+  { type:'relapse',label:'⚠️ 破戒',   color:'#8a5a1e' },
+  { type:'sleep',  label:'🥱 低能量', color:'#2d4a6b' },
+  { type:'debug',  label:'🔧 调试',   color:'#1d5c43' },
+  { type:'mile',   label:'🏁 里程碑', color:'#6b6320' }
+];
+function qeList(){ const q=meta.quickEvents; if(Array.isArray(q)&&q.length) return q; return QE_DEFAULT; }
+function renderQuickEvents(){
+  const el=$('#quickEventBtns'); if(!el) return;
+  el.innerHTML=qeList().map(q=>
+    '<button class="mini" style="background:'+(q.color||'#333')+';" onclick="quickEvent(\''+escJs(q.type)+'\')">'+esc(q.label||q.type)+'</button>'
+  ).join('');
+}
+function manageQuickEvents(){
+  $('#qeList').innerHTML=qeList().map((q,i)=>
+    '<div class="row" style="flex-wrap:nowrap;">'
+    +'<span style="flex:1;font-size:.85rem;">'+esc(q.label||q.type)+'</span>'
+    +'<button class="mini ghost" onclick="qeEdit('+i+')">改</button>'
+    +'<button class="mini danger" onclick="qeDel('+i+')">删</button>'
+    +'</div>').join('')||'<small style="color:var(--dim);">至少保留 1 个事件</small>';
+  $('#qeModal').classList.add('show');
+}
+function qeEdit(i){ const q=qeList()[i]; if(!q) return;
+  const v=prompt('新名称（含图标）：', q.label); if(v==null||!v.trim()) return;
+  q.label=v.trim(); meta.quickEvents=qeList(); store.set('meta',meta);
+  renderQuickEvents(); manageQuickEvents();
+}
+function qeDel(i){ const q=qeList(); if(q.length<=1) return toast('至少保留 1 个事件');
+  q.splice(i,1); meta.quickEvents=q; store.set('meta',meta); renderQuickEvents(); manageQuickEvents();
+}
+function qeAdd(){ const v=$('#qeNewLabel').value.trim(); if(!v) return alert('先填事件名');
+  const q=qeList(); q.push({ type:'custom'+Date.now(), label:v, color:$('#qeNewColor').value||'#2d4a6b' });
+  meta.quickEvents=q; store.set('meta',meta); $('#qeNewLabel').value='';
+  renderQuickEvents(); manageQuickEvents();
+}
+function qeReset(){ delete meta.quickEvents; store.set('meta',meta); renderQuickEvents(); manageQuickEvents(); toast('已恢复默认事件'); }
 
 /* ---------- 预置数据（通用启动模板 · 新账号从零开始，随时可在「规则树」页改写） ---------- */
 const SEED_CATS = [
-  {id:'c_study', name:'学习', color:'#4fc1ff'},
-  {id:'c_focus', name:'专注', color:'#4ec9b0'},
-  {id:'c_play',  name:'娱乐', color:'#dcdcaa'},
-  {id:'c_quit',  name:'戒断', color:'#f44747'},
-  {id:'c_life',  name:'生活', color:'#c586c0'},
+  {id:'c_study',  name:'学习', color:'#4fc1ff'},
+  {id:'c_focus',  name:'专注', color:'#4ec9b0'},
+  {id:'c_play',   name:'娱乐', color:'#dcdcaa'},
+  {id:'c_health', name:'健康', color:'#f44747'},
+  {id:'c_life',   name:'生活', color:'#c586c0'},
 ];
 const SEED_LEVELS = [
   {id:'lv0', name:'根部'},
@@ -816,32 +928,32 @@ const SEED_RULES = [
   {id:'r_stu5', cat:'c_study', lv:'lv2', t:'当日产出留痕（提交 / 笔记 / 截图）', on:true, parent:null, seq:1},
   {id:'r_stu6', cat:'c_study', lv:'lv2', t:'每周 10min 三问复盘', on:true, parent:null, seq:2},
   /* 专注 */
-  {id:'r_foc1', cat:'c_focus', lv:'lv0', t:'想干活先坐「神圣座位」（固定工位）', on:true, parent:null, seq:1},
+  {id:'r_foc1', cat:'c_focus', lv:'lv0', t:'开工前先到固定工位坐下（仪式感启动）', on:true, parent:null, seq:1},
   {id:'r_foc2', cat:'c_focus', lv:'lv0', t:'两分钟规则：只承诺做 2 分钟', on:true, parent:null, seq:2, micro:'先只做 2 分钟，时间到再决定续不续'},
   {id:'r_foc3', cat:'c_focus', lv:'lv1', t:'45min 深专注块 ×2', on:true, parent:null, seq:1},
   {id:'r_foc4', cat:'c_focus', lv:'lv2', t:'到外部场所（图书馆/自习室/咖啡馆）≥2h', on:true, parent:null, seq:1},
   /* 娱乐 */
-  {id:'r_pla1', cat:'c_play', lv:'lv0', t:'视频看完一节就关网页', on:true, parent:null, seq:1},
-  {id:'r_pla2', cat:'c_play', lv:'lv1', t:'娱乐只开熔断模式（先点 25min 计时）', on:true, parent:null, seq:1},
-  {id:'r_pla3', cat:'c_play', lv:'lv2', t:'零无意识刷屏日', on:true, parent:null, seq:1},
-  /* 戒断（坏习惯戒断链，保留） */
-  {id:'r_qui1', cat:'c_quit', lv:'lv0', t:'22:30 手机放到卧室外充电', on:true, parent:null, seq:1},
-  {id:'r_qui2', cat:'c_quit', lv:'lv1', t:'冲动触发 → 立刻 15 分钟冷却', on:true, parent:null, seq:1},
-  {id:'r_qui3', cat:'c_quit', lv:'lv2', t:'连续 7 天无破戒（链式记录）', on:true, parent:null, seq:1},
+  {id:'r_pla1', cat:'c_play', lv:'lv0', t:'娱乐片段结束即停，不续播', on:true, parent:null, seq:1},
+  {id:'r_pla2', cat:'c_play', lv:'lv1', t:'开始娱乐前先设定时器（到点即停）', on:true, parent:null, seq:1},
+  {id:'r_pla3', cat:'c_play', lv:'lv2', t:'零无意识刷屏日（拿手机前先想：要看什么）', on:true, parent:null, seq:1},
+  /* 健康（睡眠卫生 + 冲动管理） */
+  {id:'r_hlt1', cat:'c_health', lv:'lv0', t:'睡前 1 小时放下手机（闹钟放远处）', on:true, parent:null, seq:1},
+  {id:'r_hlt2', cat:'c_health', lv:'lv1', t:'冲动来袭 → 先做 15 分钟别的事', on:true, parent:null, seq:1},
+  {id:'r_hlt3', cat:'c_health', lv:'lv2', t:'连续 7 天守住关键底线（链式记录）', on:true, parent:null, seq:1},
+  {id:'r_hlt4', cat:'c_health', lv:'lv1', t:'小睡 ≤20min 且不晚于 15 点', on:true, parent:null, seq:2},
+  {id:'r_hlt5', cat:'c_health', lv:'lv2', t:'全天保持清醒节奏（白天不补觉）', on:true, parent:null, seq:2},
   /* 生活 · 晨间主链（递进式大根部） */
   {id:'r_lif1',  cat:'c_life', lv:'lv0', t:'起床脚落地，不沾床', on:true, parent:null, seq:1},
-  {id:'r_lif2a', cat:'c_life', lv:'lv0', t:'刷牙洗脸（冷水开机）', on:true, parent:null, seq:2},
-  {id:'r_lif2',  cat:'c_life', lv:'lv0', t:'开灯开窗帘（光照开机）', on:true, parent:null, seq:3},
+  {id:'r_lif2a', cat:'c_life', lv:'lv0', t:'刷牙洗脸', on:true, parent:null, seq:2},
+  {id:'r_lif2',  cat:'c_life', lv:'lv0', t:'开窗见光，唤醒身体', on:true, parent:null, seq:3},
   {id:'r_lif2b', cat:'c_life', lv:'lv0', t:'吃一份带蛋白质的早餐', on:true, parent:null, seq:4},
   {id:'r_lif7',  cat:'c_life', lv:'lv0', t:'走出家门 → 去到学习/工作场所', on:true, parent:null, seq:5},
   {id:'r_lif3',  cat:'c_life', lv:'lv0', t:'清醒时段不吃零食/不喝含糖饮料', on:true, parent:null, seq:6},
   /* 早起失败支链（挂在 r_lif1 下，主链崩溃时自动激活） */
   {id:'r_lif1b1', cat:'c_life', lv:'lv0', t:'补觉 ≤20min（沙发，不躺回床）', on:true, parent:'r_lif1', seq:1},
-  {id:'r_lif1b2', cat:'c_life', lv:'lv0', t:'洗漱+光照后直接出门', on:true, parent:'r_lif1', seq:2},
-  /* 生活中层/顶层 */
-  {id:'r_lif4', cat:'c_life', lv:'lv1', t:'小睡 ≤20min 且不晚于 15 点', on:true, parent:null, seq:1},
-  {id:'r_lif5', cat:'c_life', lv:'lv1', t:'23:30 前上床', on:true, parent:null, seq:2},
-  {id:'r_lif6', cat:'c_life', lv:'lv2', t:'全天清醒无补觉', on:true, parent:null, seq:1},
+  {id:'r_lif1b2', cat:'c_life', lv:'lv0', t:'洗漱后直接开始当日第一件事', on:true, parent:'r_lif1', seq:2},
+  /* 生活中层 */
+  {id:'r_lif5', cat:'c_life', lv:'lv1', t:'固定时间上床（睡足 7-8 小时）', on:true, parent:null, seq:1},
 ];
 const SEED_TAGS = [
   {id:'t_social',name:'社交日',     color:'#e8912d', degrade:true},
@@ -853,11 +965,11 @@ const SEED_TAGS = [
 function _dayOff(n){ const d=new Date(); d.setDate(d.getDate()+n); return d.toLocaleDateString('sv'); }
 const SEED_PHASES = [
   {id:'p1', parent:null, name:'第一阶段 · 系统冷启动', start:_dayOff(0), end:_dayOff(30), imp:3, done:false, journal:'',
-   goal:'把晨间主链连续跑通 21 天 + 锁定 1 条主线任务 + 建立每日留痕习惯'},
+   goal:'把早起主链连续跑通 21 天 + 锁定 1 条主线任务 + 建立每日留痕习惯'},
   {id:'p1a', parent:'p1', name:'7 天启动清单', start:_dayOff(0), end:_dayOff(6), imp:3, done:false, journal:'',
-   goal:'Day1 砍到只留 3 条根部规则 / Day2 布置神圣座位 / Day3 跑通一次 45min 专注块 / Day5 建立产出留痕的地方 / Day7 做第一次周复盘'},
+   goal:'Day1 砍到只留 3 条根部规则 / Day2 布置固定工位 / Day3 跑通一次 45min 专注块 / Day5 建立产出留痕的地方 / Day7 做第一次周复盘'},
   {id:'p2', parent:null, name:'第二阶段 · 主链加固', start:_dayOff(31), end:_dayOff(120), imp:3, done:false, journal:'',
-   goal:'根部完成率 ≥80% + 主线任务推进过半 + 戒断门类连续 7 天无破戒'},
+   goal:'根部完成率 ≥80% + 主线任务推进过半 + 关键底线连续 7 天守住'},
   {id:'p3', parent:null, name:'第三阶段 · 顶层输出', start:_dayOff(121), end:_dayOff(240), imp:2, done:false, journal:'',
    goal:'把学到的东西做成一个能拿出手的作品，完成「输入 → 输出」闭环'},
 ];
@@ -907,6 +1019,7 @@ function show(id,btn){
   if(id==='data') renderMyFailure();
   if(id==='resources') renderResources();
   if(id==='templates') renderTemplates();
+  if(id==='settings') renderSettings();
 }
 /* ================= 我的失败模式分析（人人可见，仅看自己） ================= */
 async function renderMyFailure(){
@@ -991,9 +1104,8 @@ function delTagDef(id){
   store.set('tags',tags); saveDaily(); renderTagDefs(); renderTodayTags();
 }
 
-/* ================= 今日规则清单 ================= */
+/* ================= 今日规则清单（v9.2 节点流：点节点=完成，💥=崩溃激活支链） ================= */
 function setTodayView(v){ meta.todayView=v; store.set('meta',meta); renderTodayRules(); }
-/* 【v9 重写】今日规则清单：主链按 seq 递进；崩溃节点显示支链；默认极简（打勾+💥），链路细节折叠 */
 function renderTodayRules(){
   const v = meta.todayView||'cat';
   $('#viewCatBtn').classList.toggle('active', v==='cat');
@@ -1003,26 +1115,32 @@ function renderTodayRules(){
   const lvName = id => (lvOf(id)||{}).name||'?';
   const lvIdx = id => levels.findIndex(l=>l.id===id);
   const bySeq = (a,b)=>(a.seq||0)-(b.seq||0);
-  /* 【新增】降级协议自动触发：当日含降级标签时，最深层级(lv2)节点灰显并禁用，只留侦查任务(lv0/1) */
+  /* 降级协议自动触发：当日含降级标签时，最深层级(lv2)节点灰显并禁用，只留侦查任务(lv0/1) */
   const degradeActive = (rec.tags||[]).some(tid=>{ const t=tagOf(tid); return t&&t.degrade; });
   const deepestLv = levels.length ? levels[levels.length-1].id : null;
 
-  /* 单个节点：崩溃态禁用勾选并标红；有支链且父崩溃/支链已执行时展开支链 */
+  /* 单个节点卡片：点击=完成/取消；崩溃态禁用点击；有支链且父崩溃/支链已执行时展开支链 */
   const item = (r,branch)=>{
     const broken = !!(rec.broken&&rec.broken[r.id]);
+    const checked = !!(rec.checks&&rec.checks[r.id]);
     const kids = on.filter(k=>k.parent===r.id).sort(bySeq);
     const showKids = kids.length && (broken || kids.some(k=>rec.checks[k.id]));
     const dim = degradeActive && deepestLv && r.lv===deepestLv;
-    let h='<div class="chain-row'+(dim?' dim':'')+'">'
-      +'<label><input type="checkbox" '+(rec.checks[r.id]?'checked':'')+((broken||dim)?' disabled':'')
-      +' onchange="checkRule(\''+r.id+'\',this.checked)">'
+    const cls = (broken?' broken':checked?' done':'')+(dim?' dim':'');
+    const stateIcon = broken?'💥':checked?'✅':'○';
+    let h='<div class="node-card'+cls+'" onclick="toggleRule(\''+r.id+'\')">'
+      +'<span class="nc-state">'+stateIcon+'</span>'
       +'<span class="lv-badge lv'+Math.min(lvIdx(r.lv),3)+'">'+lvName(r.lv)+'</span>'
-      +'<span'+(broken?' style="color:var(--danger);"':'')+'>'
-      +(branch?'🔀 ':'')+esc(r.t)+(broken?' <small>[已崩溃]</small>':'')+(dim?' <small style="color:var(--warn);">[降级·暂隐]</small>':'')+'</span></label>'
+      +'<span class="nc-text">'+(branch?'🔀 ':'')+esc(r.t)
+      +(broken?' <small style="color:var(--danger);">[已崩溃]</small>':'')
+      +(dim?' <small style="color:var(--warn);">[降级·暂隐]</small>':'')
+      +'</span>'
+      +'<span class="nc-actions" onclick="event.stopPropagation();">'
       +(broken
-        ? '<button class="mini ghost" onclick="unbreakRule(\''+r.id+'\')">↩</button>'
+        ? '<button class="mini ghost" title="恢复（取消崩溃标记）" onclick="unbreakRule(\''+r.id+'\')">↩</button>'
         : '<button class="mini ghost" title="此节点今天崩溃，激活支链" onclick="breakRule(\''+r.id+'\')">💥</button>')
-      +'<button class="mini ghost" title="清除今日该定式的勾选/崩溃，重新设置" onclick="resetRuleToday(\''+r.id+'\')">⟲</button>'
+      +'<button class="mini ghost" title="清除今日该定式状态，重新设置" onclick="resetRuleToday(\''+r.id+'\')">⟲</button>'
+      +'</span>'
       +'</div>';
     if(showKids) h+='<div class="branch-box">'+kids.map(k=>item(k,true)).join('')+'</div>';
     return h;
@@ -1045,6 +1163,41 @@ function renderTodayRules(){
     levels.forEach((l,i)=>{ html += group('<span class="lv-badge lv'+Math.min(i,3)+'">'+esc(l.name)+'</span>', null, on.filter(r=>r.lv===l.id)); });
   }
   $('#todayRules').innerHTML = html||'<small>没有启用的规则，去「规则树」页添加。</small>';
+  renderTodayChain();
+}
+
+/* 【v9.2 节点流】点击节点卡片：完成 ↔ 取消；未完成且带 micro 时先弹 5 分钟侦测 */
+function toggleRule(id){
+  const r=ruleOf(id); if(!r) return;
+  const rec=dayRec();
+  if(rec.broken&&rec.broken[id]){ toast('此节点已标记崩溃，先 ↩ 恢复或 ⟲ 重设'); return; }
+  if(rec.checks&&rec.checks[id]){ rec.checks[id]=false; saveDaily(); updateProgress(); renderTodayRules(); return; }
+  if(r.micro){ /* 最小可完成：先侦测，不直接标记 */
+    pendingMicro={id, t:r.t};
+    $('#microTitle').textContent='启动侦测：'+r.t;
+    $('#microText').textContent=r.micro;
+    $('#microModal').classList.add('show');
+    return;
+  }
+  rec.checks[id]=true; saveDaily(); updateProgress(); renderTodayRules();
+}
+
+/* 【v9.2 节点流】今日实际链条：当天「完成/崩溃」过的主链与支链实时串联，未触碰的不出现 */
+function renderTodayChain(){
+  const el=$('#todayChain'); if(!el) return;
+  const rec=dayRec();
+  const on=rules.filter(r=>r.on!==false);
+  const parts=[];
+  cats.forEach(c=>{
+    const p=chainPathActual(on.filter(r=>r.cat===c.id),rec);
+    if(p.length){
+      parts.push('<div class="chain-grp"><span class="chain-cat" style="color:'+esc(c.color)+';">'+esc(c.name)+'</span>'
+        +'<span class="chain-path">'+p.map(x=>esc(x)).join('<span class="chain-arr">→</span>')+'</span></div>');
+    }
+  });
+  el.innerHTML = parts.length
+    ? '<div class="chain-title">今日实际链条</div>'+parts.join('')
+    : '';
 }
 
 /* 【v9】主链节点崩溃：记崩溃事件 + 激活支链；主链仍视为崩溃（不计完成，待复盘） */
@@ -1109,20 +1262,11 @@ function chainPathActual(catRules, rec){
   return parts;
 }
 let pendingMicro=null;
+/* 兼容壳：旧式「勾选」调用转成节点流点击（值 true=完成，false=取消） */
 function checkRule(id,val){
-  /* 【新增】最小可完成：勾选带 micro 的规则时，先弹「5分钟侦测」决策，不直接标记完成 */
-  if(val){
-    const r=ruleOf(id);
-    if(r && r.micro){
-      pendingMicro={id, t:r.t};
-      $('#microTitle').textContent='启动侦测：'+r.t;
-      $('#microText').textContent=r.micro;
-      $('#microModal').classList.add('show');
-      return;
-    }
-  }
-  dayRec().checks[id]=val; saveDaily(); updateProgress();
-  renderTodayRules();  /* 同步支链展开/降级灰显状态，避免勾选后 UI 与数据不一致 */
+  const rec=dayRec();
+  if(val===false){ delete rec.checks[id]; saveDaily(); updateProgress(); renderTodayRules(); return; }
+  toggleRule(id);
 }
 function microPass(){ const id=pendingMicro&&pendingMicro.id; closeModal('microModal'); pendingMicro=null;
   if(id){ dayRec().checks[id]=true; saveDaily(); updateProgress(); } renderTodayRules(); toast('✅ 侦测通过，已标记完成'); }
@@ -1342,9 +1486,10 @@ function pushEvent(type, text, ruleId, retro){
 }
 function quickEvent(type){
   const text=$('#quickEvText').value.trim();
+  const q=qeList().find(x=>x.type===type);
   pushEvent(type, text);
   $('#quickEvText').value='';
-  alert(EVT[type]+' 已记录。只记事实，不归零。');
+  toast((q?q.label:(EVT[type]||type))+' 已记录。只记事实，不归零。');
 }
 /* 【v8】事件弹窗（关联定式 + 回溯建议） */
 let editingEventId = null;
@@ -1690,7 +1835,7 @@ function bufToBase64(buf){
 /* ================= 事件流 ================= */
 function evHTML(e,del){
   const r=e.ruleId?ruleOf(e.ruleId):null;
-  return '<div class="ev ev-'+e.type+'"><span class="evtag">'+EVT[e.type]+'</span>'
+  return '<div class="ev ev-'+e.type+'"><span class="evtag">'+(EVT[e.type]||e.type)+'</span>'
     +'<span class="t">'+e.ts+'</span><span style="flex:1;">'+esc(e.text||'')
     +(r?'<br><small style="color:var(--dim);">关联定式：'+esc(r.t)+'</small>':'')
     +(e.retro?'<span class="retro">↳ 回溯建议：'+esc(e.retro)+'</span>':'')
@@ -1700,6 +1845,22 @@ function evHTML(e,del){
     +'</div>';
 }
 function renderTimeline(f,btn){
+  /* 动态补齐过滤器：事件流里出现的自定义类型（快速事件自定义）自动补成过滤按钮 */
+  const fbar=document.getElementById('evFilters');
+  if(fbar){
+    const types=new Set();
+    fbar.querySelectorAll('button').forEach(b=>{
+      const m=(b.getAttribute('onclick')||'').match(/'([^']+)'/); if(m) types.add(m[1]);
+    });
+    events.forEach(e=>{
+      if(e.type && !types.has(e.type) && e.type!=='all'){
+        const b=document.createElement('button');
+        b.textContent=EVT[e.type]||e.type;
+        b.onclick=()=>renderTimeline(e.type,b);
+        fbar.appendChild(b); types.add(e.type);
+      }
+    });
+  }
   if(btn){ document.querySelectorAll('#evFilters button').forEach(x=>x.classList.remove('active')); btn.classList.add('active'); }
   let list=events.map((e,i)=>({...e,_i:i})).reverse();
   if(f&&f!=='all') list=list.filter(e=>e.type===f);
@@ -1814,22 +1975,22 @@ function updatePhasePill(){
 /* ================= 新手引导 ================= */
 let obStep = 0;
 const OB = [
-  { icon:'🛠️', title:'欢迎来到底层创造者 OS', tab:null,
-    body:'你是自己人生的 <b>运维工程师</b>。崩溃不是道德失败，而是 <b>系统报错</b>——记录它、改规则、次日重启即可。<br><br>这个工具帮你把"想变好"变成一套可运行、可迭代的系统。下面用 1 分钟带你走一遍。' },
-  { icon:'🌱', title:'① 今日：从根部保命定式做起', tab:'today',
-    body:'每天进来的第一件事，是勾选今天的 <b>根部定式</b>（傻瓜级、脑子浆糊也能做的小动作）。<br><br>记住 <b>1 动作法则</b>：与其想"今天要学 3 小时"，不如"现在只打开书第 1 页"。微小到不可能失败，才算好定式。' },
+  { icon:'🛠️', title:'欢迎来到 ROOT-OS', tab:null,
+    body:'你是自己人生的 <b>运维工程师</b>：崩溃不是道德失败，而是 <b>系统报错</b>——记录它、改规则、次日重启。<br><br>这个工具帮你把"想变好"变成一套可运行、可迭代的系统。下面用 1 分钟带你走一遍。' },
+  { icon:'🌱', title:'① 今日：点节点，跑通主链', tab:'today',
+    body:'今日页每条定式是一张<b>节点卡片</b>：点一下=完成 ✅，点 <b>💥</b>=今日崩溃（自动激活它的 🔀 支链/B计划）。<br><br>页面顶部会实时生成<b>今日实际链条</b>——你今天完成了什么，链条就长什么样，没做的不会出现。' },
   { icon:'🌳', title:'② 规则树：改规则 = 发版本', tab:'rules',
-    body:'规则分三层：<b>根部</b>（保命，崩塌日只保它）/ <b>中层</b>（状态正常的推进）/ <b>顶层</b>（巅峰冲刺）。<br><br>带 <b>micro</b> 属性的规则，做到一半崩了可以"换任务"而不是硬扛。哪条定式不合理？改它——就像给系统发一个新版本。' },
+    body:'规则分三层：<b>根部</b>（保命，状态差也只保它）/ <b>中层</b>（正常推进）/ <b>顶层</b>（巅峰冲刺）。<br><br>带 <b>micro</b> 的规则先"5 分钟侦测"再决定做不做。哪条不合理？改它——就像给系统发新版本。' },
   { icon:'🏔️', title:'③ 阶段：你的人生路线图', tab:'phase',
-    body:'大阶段里套小阶段（比如"大二 → 专升本冲刺 → 四科拆解"）。系统会自动汇总每个阶段的完成率、崩溃数、睡眠。<br><br><b>每个支点都能折叠</b>——收起细节看全局，展开看路径。这是你升学 / 留学路线的全景图。' },
-  { icon:'🔁', title:'④ 回溯：每日执行 → 回溯 → 改规则', tab:'review',
-    body:'这就是 <b>RSIP 递归稳态迭代协议</b>：每天执行真实动作 → 晚上回溯"哪条链执行了、哪条崩了" → 去迭代台改定式 → 明天重启。<br><br>崩溃了别归零，去"全部复盘 / 定式迭代台"记一笔，闭环就转起来了。' },
+    body:'大阶段里套小阶段（如"大二 → 某场考试冲刺 → 四科拆解"），系统自动汇总每个阶段的完成率与崩溃数。<br><br><b>每个阶段可折叠</b>：收起看全局，展开看路径。这是你长期目标的 1:1 全景图。' },
+  { icon:'🔁', title:'④ 回溯：执行 → 复盘 → 改规则', tab:'review',
+    body:'这就是 <b>RSIP 递归稳态迭代协议</b>：每天执行真实动作 → 晚上回溯"哪条链执行了、哪条崩了" → 去迭代台改定式 → 明天重启。<br><br>崩溃了别归零，去迭代台记一笔，闭环就转起来了。' },
   { icon:'📉', title:'⑤ 数据：看清自己的失败模式', tab:'data',
-    body:'在「数据」页，你能看到 <b>自己崩溃最多的定式</b> 和"崩溃后支链恢复率"。<br><br>这不是为了自我批判，而是为了 <b>精准修最该修的那条规则</b>——把复盘变成可执行的下一步。' },
-  { icon:'📚', title:'⑥ 规划·资源：收藏你的方法论', tab:'resources',
-    body:'把规划文档、方法论、书单、网址收进「规划·资源」。支持 <b>导入 Word / txt</b>，正文网址自动变可点击链接，还能 <b>搜索 + 按标签筛选</b>。<br><br>这是你的第二大脑。' },
+    body:'「数据」页会算给你看：<b>自己崩溃最多的定式</b> 和"崩溃后支链恢复率"。<br><br>不是为了自我批判，而是为了 <b>精准修最该修的那条规则</b>——把复盘变成可执行的下一步。' },
+  { icon:'📚', title:'⑥ 规划·资源：你的第二大脑', tab:'resources',
+    body:'把规划文档、方法论、书单、网址收进「规划·资源」。支持 <b>导入 Word / txt</b>，网址自动可点击，还能 <b>搜索 + 标签筛选</b>。' },
   { icon:'🚀', title:'开始你的第一个闭环', tab:'today',
-    body:'不用一次全搞懂。今天只做一件事：勾选一个根部定式，完成它。<br><br>明天回溯、改一条规则——闭环就转起来了。<br><br><b>随时点右上角「❓ 引导」可重看本教程。</b>现在，去勾你的第一个小动作吧 💪' },
+    body:'不用一次全搞懂。今天只做一件事：<b>点一个根部定式，完成它</b>。<br><br>明天回溯、改一条规则——闭环就转起来了。<br><br><b>随时点右上角「❓ 引导」可重看。</b>现在，去点亮你的第一个节点吧 💪' },
 ];
 function startOnboarding(){ obStep=0; renderOnboarding(); $('#obMask').classList.add('show'); document.addEventListener('keydown', obKeyHandler); }
 function obKeyHandler(e){ if(e.key==='Escape' && $('#obMask').classList.contains('show')) obSkip(); }
@@ -2220,10 +2381,10 @@ async function downloadTemplate(file,title){
   }catch(e){ alert('下载失败'); }
 }
 
-/* ================= 夜间宵禁提醒 ================= */
+/* ================= 深夜提醒条（22:00-06:00；设置页可关闭） ================= */
 function checkNight(){
   const h=new Date().getHours();
-  $('#nightBar').style.display=(h>=22||h<6)?'block':'none';
+  $('#nightBar').style.display=(meta.nightBar===false)?'none':((h>=22||h<6)?'block':'none');
 }
 
 function syncEventIds(){ events.forEach(e=>{ if(!e.id) e.id='e'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }); }
@@ -2334,6 +2495,74 @@ async function doLogin(){
   const j=await apiPost('/api/login',{username:u,password:p});
   if(j.ok){ await afterLogin(); } else { showAuth(j.error||'登录失败'); }
 }
+/* ================= 设置页（v1.2：账号绑定 / 偏好） ================= */
+async function renderSettings(){
+  const box=document.getElementById('acctBox'); if(!box) return;
+  /* 偏好状态同步 */
+  const v=meta.todayView||'cat';
+  const bc=document.getElementById('prefTodayCat'), bl=document.getElementById('prefTodayLv');
+  if(bc) bc.classList.toggle('active', v==='cat');
+  if(bl) bl.classList.toggle('active', v==='lv');
+  const nb=document.getElementById('prefNightBar');
+  if(nb) nb.checked = meta.nightBar!==false;
+  let j={};
+  try{ j=await (await fetch('/api/me')).json(); }catch(e){}
+  const email=j.email||'', verified=!!j.email_verified, wechat=j.wechat||'';
+  box.innerHTML='<div style="display:flex;flex-direction:column;gap:16px;">'
+    +'<div><b style="font-size:.9rem;">登录账号</b><div style="margin-top:4px;">'+esc(j.username||'')+'</div></div>'
+    +'<div><b style="font-size:.9rem;">邮箱 <small style="color:var(--dim);font-weight:normal;">（验证后可找回密码）</small></b>'
+    +'<div style="margin-top:6px;">'+(email
+      ? '<span style="color:var(--ok);">'+esc(email)+'</span> <small style="color:'+(verified?'var(--ok)':'var(--warn)')+';">'+(verified?'已验证':'未验证')+'</small>'
+      : '<small style="color:var(--dim);">未绑定</small>')+'</div>'
+    +'<div class="row" style="margin-top:8px;"><input type="email" id="setEmail" placeholder="输入邮箱" style="flex:1;min-width:140px;">'
+    +'<button class="ghost mini" onclick="sendBindCode()">发验证码</button></div>'
+    +'<div class="row" style="margin-top:6px;"><input type="text" id="setEmailCode" placeholder="6 位验证码" style="flex:1;min-width:90px;max-width:140px;">'
+    +'<button class="ok mini" onclick="bindEmail()">绑定邮箱</button></div>'
+    +'<small id="setEmailMsg" style="color:var(--dim);"></small></div>'
+    +'<div><b style="font-size:.9rem;">微信号 <small style="color:var(--dim);font-weight:normal;">（身份标识；小程序接入后自动关联 openid）</small></b>'
+    +'<div style="margin-top:6px;">'+(wechat?'已绑定：<span style="color:var(--ok);">'+esc(wechat)+'</span>':'<small style="color:var(--dim);">未绑定</small>')+'</div>'
+    +'<div class="row" style="margin-top:8px;"><input type="text" id="setWechat" placeholder="微信号" style="flex:1;min-width:140px;">'
+    +'<button class="ok mini" onclick="bindWechat()">绑定</button></div></div>'
+    +'<div><b style="font-size:.9rem;">修改密码</b>'
+    +'<div class="row" style="margin-top:6px;"><input type="password" id="setOldPw" placeholder="当前密码" style="flex:1;min-width:100px;">'
+    +'<input type="password" id="setNewPw" placeholder="新密码（≥6 位）" style="flex:1;min-width:100px;">'
+    +'<button class="ok mini" onclick="changePassword()">修改</button></div></div>'
+    +'<div><button class="ghost" onclick="doLogout()">退出登录</button></div>'
+    +'</div>';
+}
+async function sendBindCode(){
+  const email=(document.getElementById('setEmail').value||'').trim();
+  const msg=document.getElementById('setEmailMsg'); if(!msg) return;
+  msg.style.color='var(--dim)'; msg.textContent='发送中…';
+  const j=await apiPost('/api/email/send-code',{email});
+  msg.style.color=j.error?'var(--danger)':'var(--ok)';
+  msg.textContent=j.error||j.msg||'';
+}
+async function bindEmail(){
+  const email=(document.getElementById('setEmail').value||'').trim();
+  const code=(document.getElementById('setEmailCode').value||'').trim();
+  const msg=document.getElementById('setEmailMsg'); if(!msg) return;
+  const j=await apiPost('/api/email/bind',{email,code});
+  if(j.ok){ msg.style.color='var(--ok)'; msg.textContent='绑定成功 ✓'; renderSettings(); }
+  else { msg.style.color='var(--danger)'; msg.textContent=j.error||'绑定失败'; }
+}
+async function bindWechat(){
+  const wechat=(document.getElementById('setWechat').value||'').trim();
+  const j=await apiPost('/api/wechat/bind',{wechat});
+  if(j.ok){ toast('微信绑定成功'); renderSettings(); } else toast(j.error||'绑定失败');
+}
+async function changePassword(){
+  const old=document.getElementById('setOldPw').value, next=document.getElementById('setNewPw').value;
+  const j=await apiPost('/api/password/change',{old,next});
+  if(j.ok){ toast(j.msg||'密码已更新'); document.getElementById('setOldPw').value=''; document.getElementById('setNewPw').value=''; }
+  else toast(j.error||'修改失败');
+}
+function setNightBarPref(on){
+  meta.nightBar=!!on; store.set('meta',meta);
+  checkNight();
+  toast(on?'深夜提醒已开启':'深夜提醒已关闭');
+}
+
 async function doLogout(){
   clearTimeout(serverTimer);
   try{ await pushToServer(); }catch(e){}      /* 退出前把未落盘的改动刷上去 */
@@ -2355,6 +2584,7 @@ function bootApp(){
   $('#dayNote').value=dayRec().note||'';
   $('#sleepHr').value=dayRec().sleep??'';
   renderTodayTags(); renderTodayRules(); updateProgress(); updatePhasePill();
+  renderQuickEvents();
   checkNight(); setInterval(checkNight,60000);
   $('#todayTask').addEventListener('input',()=>{ dayRec().task=$('#todayTask').value; saveDaily(); });
   $('#dayNote').addEventListener('input',()=>{ dayRec().note=$('#dayNote').value; saveDaily(); });
@@ -2368,7 +2598,6 @@ function bootApp(){
     if(!j.username) return;
     const ub=document.getElementById('userBox');
     if(ub) ub.innerHTML = esc(j.username)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
-    const an=document.getElementById('acctName'); if(an) an.textContent=j.username;
   }).catch(()=>{});
   /* 新手引导：仅首次（meta.onboarded 未置位）自动弹出 */
   if(!meta || !meta.onboarded){ setTimeout(startOnboarding, 350); }

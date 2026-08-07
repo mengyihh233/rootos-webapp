@@ -17,9 +17,64 @@ const db = require('./db');
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'rootos-dev-secret-change-me';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+/* 邮箱验证码 SMTP（QQ/163/126 等开启 SMTP 服务后填入授权码）：
+ * 未配置时绑定/找回密码接口返回 503 并提示，功能自动降级为「仅绑定字符串」。 */
+const SMTP = {
+  host: process.env.SMTP_HOST || '',
+  port: parseInt(process.env.SMTP_PORT || '465', 10),
+  user: process.env.SMTP_USER || '',
+  pass: process.env.SMTP_PASS || '',
+  from: process.env.SMTP_FROM || process.env.SMTP_USER || ''
+};
+function smtpReady() { return !!(SMTP.host && SMTP.user && SMTP.pass); }
+
+/* 邮箱验证码暂存（进程内存）：key=email，值={code, uid(绑定场景) , exp}
+ * 单实例够用；与 session 同生命周期（重启后需重新发码），多实例部署可换 Redis。 */
+const emailCodes = new Map();
+function issueCode(email) {
+  const code = String(crypto.randomInt(100000, 1000000));
+  emailCodes.set(email, { code, exp: Date.now() + 10 * 60 * 1000 });
+  /* 防内存泄漏：超 1000 条时清理过期项 */
+  if (emailCodes.size > 1000) {
+    const now = Date.now();
+    for (const [k, v] of emailCodes) { if (now > v.exp) emailCodes.delete(k); }
+  }
+  return code;
+}
+function checkCode(email, code) {
+  const v = emailCodes.get(email);
+  if (!v) return false;
+  if (Date.now() > v.exp) { emailCodes.delete(email); return false; }
+  if (String(code || '').trim() !== v.code) return false;
+  emailCodes.delete(email); /* 一次性使用 */
+  return true;
+}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/* 发验证码邮件；返回 {ok, err?}。SMTP 未配置时 err='SMTP_NOT_CONFIGURED' */
+async function sendCodeMail(email, code, purpose) {
+  if (!smtpReady()) return { err: 'SMTP_NOT_CONFIGURED' };
+  try {
+    const nodemailer = require('nodemailer');
+    const t = nodemailer.createTransport({
+      host: SMTP.host, port: SMTP.port, secure: SMTP.port === 465,
+      auth: { user: SMTP.user, pass: SMTP.pass }
+    });
+    await t.sendMail({
+      from: SMTP.from, to: email,
+      subject: purpose === 'reset' ? '【ROOT-OS】重置密码验证码' : '【ROOT-OS】邮箱绑定验证码',
+      text: `你的验证码是：${code}\n10 分钟内有效。如非本人操作，请忽略本邮件。`
+    });
+    return { ok: true };
+  } catch (e) {
+    console.error('❌ 邮件发送失败：', e.message);
+    return { err: 'SEND_FAILED' };
+  }
+}
 
 /* ---------- 新用户默认数据包 ----------
- * 通用启动模板（已剔除医学 / 成人内容模块，完整保留坏习惯戒断链）。
+ * 通用启动模板（已剔除私人化内容：无「戒断」门类、无具体时间/地点黑话；
+ * 保留 💥崩溃机制与 🔀支链降级概念，承接 RSIP/CTDP 设计哲学）。
  * 内容与前端 public/index.html 的 SEED_* 保持一致，
  * 这样无论数据来自服务器还是本地兜底，新用户看到的都是同一套模板。 */
 function dayOff(n) {
@@ -31,11 +86,11 @@ function dayOff(n) {
 function defaultBag() {
   return {
     cats: [
-      { id: 'c_study', name: '学习', color: '#4fc1ff' },
-      { id: 'c_focus', name: '专注', color: '#4ec9b0' },
-      { id: 'c_play',  name: '娱乐', color: '#dcdcaa' },
-      { id: 'c_quit',  name: '戒断', color: '#f44747' },
-      { id: 'c_life',  name: '生活', color: '#c586c0' }
+      { id: 'c_study',  name: '学习', color: '#4fc1ff' },
+      { id: 'c_focus',  name: '专注', color: '#4ec9b0' },
+      { id: 'c_play',   name: '娱乐', color: '#dcdcaa' },
+      { id: 'c_health', name: '健康', color: '#f44747' },
+      { id: 'c_life',   name: '生活', color: '#c586c0' }
     ],
     levels: [
       { id: 'lv0', name: '根部' },
@@ -47,37 +102,37 @@ function defaultBag() {
       /* 学习 */
       { id: 'r_stu1', cat: 'c_study', lv: 'lv0', t: '主线课程/主线任务推进 1 节', on: true, parent: null, seq: 1 },
       { id: 'r_stu2', cat: 'c_study', lv: 'lv0', t: '背单词 / 记术语 30min', on: true, parent: null, seq: 2 },
-      { id: 'r_stu3', cat: 'c_study', lv: 'lv1', t: '动手练习：写代码 / 做题 / 实操 30min', on: true, parent: null, seq: 1 },
+      { id: 'r_stu3', cat: 'c_study', lv: 'lv1', t: '动手练习：写代码 / 做题 / 实操 30min', on: true, parent: null, seq: 1, micro: '先只写 5 行代码 / 做 1 题，侦测手感再决定继续' },
       { id: 'r_stu4', cat: 'c_study', lv: 'lv1', t: '啃一块硬骨头（当前最难的知识点）', on: true, parent: null, seq: 2 },
       { id: 'r_stu5', cat: 'c_study', lv: 'lv2', t: '当日产出留痕（提交 / 笔记 / 截图）', on: true, parent: null, seq: 1 },
       { id: 'r_stu6', cat: 'c_study', lv: 'lv2', t: '每周 10min 三问复盘', on: true, parent: null, seq: 2 },
       /* 专注 */
-      { id: 'r_foc1', cat: 'c_focus', lv: 'lv0', t: '想干活先坐「神圣座位」（固定工位）', on: true, parent: null, seq: 1 },
-      { id: 'r_foc2', cat: 'c_focus', lv: 'lv0', t: '两分钟规则：只承诺做 2 分钟', on: true, parent: null, seq: 2 },
+      { id: 'r_foc1', cat: 'c_focus', lv: 'lv0', t: '开工前先到固定工位坐下（仪式感启动）', on: true, parent: null, seq: 1 },
+      { id: 'r_foc2', cat: 'c_focus', lv: 'lv0', t: '两分钟规则：只承诺做 2 分钟', on: true, parent: null, seq: 2, micro: '先只做 2 分钟，时间到再决定续不续' },
       { id: 'r_foc3', cat: 'c_focus', lv: 'lv1', t: '45min 深专注块 ×2', on: true, parent: null, seq: 1 },
       { id: 'r_foc4', cat: 'c_focus', lv: 'lv2', t: '到外部场所（图书馆/自习室/咖啡馆）≥2h', on: true, parent: null, seq: 1 },
       /* 娱乐 */
-      { id: 'r_pla1', cat: 'c_play', lv: 'lv0', t: '视频看完一节就关网页', on: true, parent: null, seq: 1 },
-      { id: 'r_pla2', cat: 'c_play', lv: 'lv1', t: '娱乐只开熔断模式（先点 25min 计时）', on: true, parent: null, seq: 1 },
-      { id: 'r_pla3', cat: 'c_play', lv: 'lv2', t: '零无意识刷屏日', on: true, parent: null, seq: 1 },
-      /* 戒断（坏习惯戒断链） */
-      { id: 'r_qui1', cat: 'c_quit', lv: 'lv0', t: '22:30 手机放到卧室外充电', on: true, parent: null, seq: 1 },
-      { id: 'r_qui2', cat: 'c_quit', lv: 'lv1', t: '冲动触发 → 立刻 15 分钟冷却', on: true, parent: null, seq: 1 },
-      { id: 'r_qui3', cat: 'c_quit', lv: 'lv2', t: '连续 7 天无破戒（链式记录）', on: true, parent: null, seq: 1 },
+      { id: 'r_pla1', cat: 'c_play', lv: 'lv0', t: '娱乐片段结束即停，不续播', on: true, parent: null, seq: 1 },
+      { id: 'r_pla2', cat: 'c_play', lv: 'lv1', t: '开始娱乐前先设定时器（到点即停）', on: true, parent: null, seq: 1 },
+      { id: 'r_pla3', cat: 'c_play', lv: 'lv2', t: '零无意识刷屏日（拿手机前先想：要看什么）', on: true, parent: null, seq: 1 },
+      /* 健康（睡眠卫生 + 冲动管理，承接原戒断链） */
+      { id: 'r_hlt1', cat: 'c_health', lv: 'lv0', t: '睡前 1 小时放下手机（闹钟放远处）', on: true, parent: null, seq: 1 },
+      { id: 'r_hlt2', cat: 'c_health', lv: 'lv1', t: '冲动来袭 → 先做 15 分钟别的事', on: true, parent: null, seq: 1 },
+      { id: 'r_hlt3', cat: 'c_health', lv: 'lv2', t: '连续 7 天守住关键底线（链式记录）', on: true, parent: null, seq: 1 },
+      { id: 'r_hlt4', cat: 'c_health', lv: 'lv1', t: '小睡 ≤20min 且不晚于 15 点', on: true, parent: null, seq: 2 },
+      { id: 'r_hlt5', cat: 'c_health', lv: 'lv2', t: '全天保持清醒节奏（白天不补觉）', on: true, parent: null, seq: 2 },
       /* 生活 · 晨间主链 */
       { id: 'r_lif1',  cat: 'c_life', lv: 'lv0', t: '起床脚落地，不沾床', on: true, parent: null, seq: 1 },
-      { id: 'r_lif2a', cat: 'c_life', lv: 'lv0', t: '刷牙洗脸（冷水开机）', on: true, parent: null, seq: 2 },
-      { id: 'r_lif2',  cat: 'c_life', lv: 'lv0', t: '开灯开窗帘（光照开机）', on: true, parent: null, seq: 3 },
+      { id: 'r_lif2a', cat: 'c_life', lv: 'lv0', t: '刷牙洗脸', on: true, parent: null, seq: 2 },
+      { id: 'r_lif2',  cat: 'c_life', lv: 'lv0', t: '开窗见光，唤醒身体', on: true, parent: null, seq: 3 },
       { id: 'r_lif2b', cat: 'c_life', lv: 'lv0', t: '吃一份带蛋白质的早餐', on: true, parent: null, seq: 4 },
       { id: 'r_lif7',  cat: 'c_life', lv: 'lv0', t: '走出家门 → 去到学习/工作场所', on: true, parent: null, seq: 5 },
       { id: 'r_lif3',  cat: 'c_life', lv: 'lv0', t: '清醒时段不吃零食/不喝含糖饮料', on: true, parent: null, seq: 6 },
       /* 早起失败支链（挂在 r_lif1 下） */
       { id: 'r_lif1b1', cat: 'c_life', lv: 'lv0', t: '补觉 ≤20min（沙发，不躺回床）', on: true, parent: 'r_lif1', seq: 1 },
-      { id: 'r_lif1b2', cat: 'c_life', lv: 'lv0', t: '洗漱+光照后直接出门', on: true, parent: 'r_lif1', seq: 2 },
-      /* 生活中层/顶层 */
-      { id: 'r_lif4', cat: 'c_life', lv: 'lv1', t: '小睡 ≤20min 且不晚于 15 点', on: true, parent: null, seq: 1 },
-      { id: 'r_lif5', cat: 'c_life', lv: 'lv1', t: '23:30 前上床', on: true, parent: null, seq: 2 },
-      { id: 'r_lif6', cat: 'c_life', lv: 'lv2', t: '全天清醒无补觉', on: true, parent: null, seq: 1 }
+      { id: 'r_lif1b2', cat: 'c_life', lv: 'lv0', t: '洗漱后直接开始当日第一件事', on: true, parent: 'r_lif1', seq: 2 },
+      /* 生活中层 */
+      { id: 'r_lif5', cat: 'c_life', lv: 'lv1', t: '固定时间上床（睡足 7-8 小时）', on: true, parent: null, seq: 1 }
     ],
     tags: [
       { id: 't_social', name: '社交日',     color: '#e8912d', degrade: true },
@@ -89,11 +144,11 @@ function defaultBag() {
     events: [],
     phases: [
       { id: 'p1', parent: null, name: '第一阶段 · 系统冷启动', start: dayOff(0), end: dayOff(30), imp: 3, done: false, journal: '',
-        goal: '把晨间主链连续跑通 21 天 + 锁定 1 条主线任务 + 建立每日留痕习惯' },
+        goal: '把早起主链连续跑通 21 天 + 锁定 1 条主线任务 + 建立每日留痕习惯' },
       { id: 'p1a', parent: 'p1', name: '7 天启动清单', start: dayOff(0), end: dayOff(6), imp: 3, done: false, journal: '',
-        goal: 'Day1 砍到只留 3 条根部规则 / Day2 布置神圣座位 / Day3 跑通一次 45min 专注块 / Day5 建立产出留痕的地方 / Day7 做第一次周复盘' },
+        goal: 'Day1 砍到只留 3 条根部规则 / Day2 布置固定工位 / Day3 跑通一次 45min 专注块 / Day5 建立产出留痕的地方 / Day7 做第一次周复盘' },
       { id: 'p2', parent: null, name: '第二阶段 · 主链加固', start: dayOff(31), end: dayOff(120), imp: 3, done: false, journal: '',
-        goal: '根部完成率 ≥80% + 主线任务推进过半 + 戒断门类连续 7 天无破戒' },
+        goal: '根部完成率 ≥80% + 主线任务推进过半 + 关键底线连续 7 天守住' },
       { id: 'p3', parent: null, name: '第三阶段 · 顶层输出', start: dayOff(121), end: dayOff(240), imp: 2, done: false, journal: '',
         goal: '把学到的东西做成一个能拿出手的作品，完成「输入 → 输出」闭环' }
     ],
@@ -235,6 +290,9 @@ async function start() {
     if (exists) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(409).json({ error: '用户名已被占用' }); }
     const pw_hash = bcrypt.hashSync(password, 10);
     const uid = await db.createUser(username, pw_hash);
+    /* 注册名若为邮箱格式（老用户习惯把邮箱当用户名），自动写入 email 字段（未验证），
+     * 这样不绑定也能用该邮箱走「找回密码」流程 */
+    if (EMAIL_RE.test(username)) await db.userBindEmail(uid, username.toLowerCase());
     await db.profileSet(uid, JSON.stringify(defaultBag()));
     req.session.userId = uid;
     req.session.username = username;
@@ -264,11 +322,95 @@ async function start() {
     req.session.destroy(() => res.json({ ok: true }));
   });
 
-  /* 当前用户 */
-  app.get('/api/me', (req, res) => {
+  /* 当前用户（含邮箱/微信绑定状态，供设置页渲染） */
+  app.get('/api/me', wrap(async (req, res) => {
     if (!req.session.userId) return res.status(401).json({ error: '未登录' });
-    res.json({ username: req.session.username });
-  });
+    const u = await db.userById(req.session.userId);
+    res.json({
+      username: u ? u.username : req.session.username,
+      email: u ? (u.email || '') : '',
+      email_verified: u ? !!u.email_verified : false,
+      wechat: u ? (u.wechat || '') : ''
+    });
+  }));
+
+  /* ---- 用户系统 v1.2：邮箱绑定 / 找回密码 / 微信绑定 / 改密 ---- */
+
+  /* ① 发送邮箱绑定验证码（登录态） */
+  app.post('/api/email/send-code', requireAuth, wrap(async (req, res) => {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ error: '邮箱格式不正确' });
+    const holder = await db.userFindByEmail(email);
+    if (holder && holder.id !== req.session.userId) return res.status(409).json({ error: '该邮箱已被其他账号绑定' });
+    if (!smtpReady()) return res.status(503).json({ error: '服务端未配置 SMTP，无法发送验证码（可联系管理员配置 SMTP_HOST/USER/PASS）' });
+    const code = issueCode(email);
+    const r = await sendCodeMail(email, code, 'bind');
+    if (r.err) return res.status(500).json({ error: '验证码发送失败，请稍后再试' });
+    res.json({ ok: true, msg: '验证码已发送到 ' + email + '，10 分钟内有效' });
+  }));
+
+  /* ② 校验验证码并绑定邮箱 */
+  app.post('/api/email/bind', requireAuth, wrap(async (req, res) => {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const code = String(req.body.code || '').trim();
+    if (!checkCode(email, code)) return res.status(400).json({ error: '验证码错误或已过期' });
+    const holder = await db.userFindByEmail(email);
+    if (holder && holder.id !== req.session.userId) return res.status(409).json({ error: '该邮箱已被其他账号绑定' });
+    await db.userBindEmail(req.session.userId, email);
+    await db.userVerifyEmail(req.session.userId);
+    res.json({ ok: true, email });
+  }));
+
+  /* ③ 找回密码：给已绑定邮箱发验证码（公开；不暴露邮箱是否注册） */
+  app.post('/api/forgot/send-code', wrap(async (req, res) => {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ error: '邮箱格式不正确' });
+    if (!smtpReady()) return res.status(503).json({ error: '服务端未配置 SMTP，暂不支持找回密码' });
+    const holder = await db.userFindByEmail(email);
+    if (holder) { /* 仅当存在该邮箱才发码，未注册时静默（防枚举） */
+      const code = issueCode(email);
+      await sendCodeMail(email, code, 'reset');
+    }
+    res.json({ ok: true, msg: '若该邮箱已注册，验证码将发送至邮箱，10 分钟内有效' });
+  }));
+
+  /* ④ 重置密码（邮箱 + 验证码） */
+  app.post('/api/forgot/reset', wrap(async (req, res) => {
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const code = String(req.body.code || '').trim();
+    const password = String(req.body.password || '');
+    if (!checkCode(email, code)) return res.status(400).json({ error: '验证码错误或已过期' });
+    if (password.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
+    const holder = await db.userFindByEmail(email);
+    if (!holder) return res.status(404).json({ error: '该邮箱未绑定任何账号' });
+    await db.userSetPassword(holder.id, bcrypt.hashSync(password, 10));
+    res.json({ ok: true, msg: '密码已重置，请用新密码登录' });
+  }));
+
+  /* ⑤ 绑定微信号（字符串形式；小程序 openid 绑定走另一接口，见下） */
+  app.post('/api/wechat/bind', requireAuth, wrap(async (req, res) => {
+    const wechat = String(req.body.wechat || '').trim();
+    if (!wechat) return res.status(400).json({ error: '微信号不能为空' });
+    if (wechat.length > 64) return res.status(400).json({ error: '微信号过长' });
+    await db.userSetWechat(req.session.userId, wechat);
+    res.json({ ok: true, wechat });
+  }));
+
+  /* ⑥ 小程序微信登录：code2session 换 openid 后绑定/登录（预留，小程序阶段启用） */
+  app.post('/api/wechat/login', wrap(async (req, res) => {
+    return res.status(501).json({ error: '微信小程序登录待配置 WX_APPID/WX_SECRET 后启用' });
+  }));
+
+  /* ⑦ 修改密码（需旧密码） */
+  app.post('/api/password/change', requireAuth, wrap(async (req, res) => {
+    const oldPw = String(req.body.old || '');
+    const nextPw = String(req.body.next || '');
+    const u = await db.userById(req.session.userId);
+    if (!u || !bcrypt.compareSync(oldPw, u.pw_hash)) return res.status(400).json({ error: '当前密码不正确' });
+    if (nextPw.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
+    await db.userSetPassword(u.id, bcrypt.hashSync(nextPw, 10));
+    res.json({ ok: true, msg: '密码已更新' });
+  }));
 
   /* 当前用户自己的失败模式分析（崩溃最多的定式 + 支链恢复率），人人可见，仅看自己 */
   app.get('/api/me/failure-analysis', requireAuth, wrap(async (req, res) => {

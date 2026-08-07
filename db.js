@@ -19,10 +19,14 @@ let connected = false; // 是否已成功初始化（供 server 判断 DB 就绪
 const SCHEMA_SQLITE = {
   users: `
     CREATE TABLE IF NOT EXISTS users (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      username   TEXT UNIQUE NOT NULL,
-      pw_hash    TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      username       TEXT UNIQUE NOT NULL,
+      pw_hash        TEXT NOT NULL,
+      email          TEXT,
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      wechat         TEXT,
+      wx_openid      TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
   profiles: `
     CREATE TABLE IF NOT EXISTS profiles (
@@ -71,10 +75,14 @@ const SCHEMA_SQLITE = {
 const SCHEMA_PG = {
   users: `
     CREATE TABLE IF NOT EXISTS users (
-      id         SERIAL PRIMARY KEY,
-      username   TEXT UNIQUE NOT NULL,
-      pw_hash    TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT NOW()
+      id             SERIAL PRIMARY KEY,
+      username       TEXT UNIQUE NOT NULL,
+      pw_hash        TEXT NOT NULL,
+      email          TEXT,
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      wechat         TEXT,
+      wx_openid      TEXT,
+      created_at     TEXT NOT NULL DEFAULT NOW()
     )`,
   profiles: `
     CREATE TABLE IF NOT EXISTS profiles (
@@ -154,6 +162,11 @@ async function init() {
       await pool.query(SCHEMA_PG.notifications);
       await pool.query(SCHEMA_PG.ratings);
       await pool.query(SCHEMA_PG.favorites);
+      /* 既有库迁移：为旧 users 表补新列（幂等，已存在则跳过） */
+      for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT']) {
+        const name = col.split(' ')[0];
+        await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${name} ${col.slice(name.length).trim()}`);
+      }
     };
     let ok = false;
     let lastErr = null;
@@ -193,6 +206,12 @@ async function init() {
     sqlite.exec(SCHEMA_SQLITE.notifications);
     sqlite.exec(SCHEMA_SQLITE.ratings);
     sqlite.exec(SCHEMA_SQLITE.favorites);
+    /* 既有库迁移：SQLite 无 ADD COLUMN IF NOT EXISTS，用 PRAGMA 检测缺列后逐个补 */
+    const cols = sqlite.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+    if (!cols.includes('email')) sqlite.exec(`ALTER TABLE users ADD COLUMN email TEXT`);
+    if (!cols.includes('email_verified')) sqlite.exec(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
+    if (!cols.includes('wechat')) sqlite.exec(`ALTER TABLE users ADD COLUMN wechat TEXT`);
+    if (!cols.includes('wx_openid')) sqlite.exec(`ALTER TABLE users ADD COLUMN wx_openid TEXT`);
     connected = true;
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
   }
@@ -408,4 +427,69 @@ async function favoriteIs(templateId, userId) {
   return !!sqlite.prepare(`SELECT 1 FROM favorites WHERE template_id=? AND user_id=?`).get(templateId, userId);
 }
 
-module.exports = { init, isConnected, userByName, createUser, profileGet, profileUpdatedAt, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, USE_PG };
+/* ---------- 用户系统：邮箱 / 微信绑定（v1.2） ---------- */
+async function userById(uid) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT * FROM users WHERE id = $1', [uid]);
+    return r.rows[0];
+  }
+  return sqlite.prepare('SELECT * FROM users WHERE id = ?').get(uid);
+}
+
+async function userFindByEmail(email) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    return r.rows[0];
+  }
+  return sqlite.prepare('SELECT * FROM users WHERE email = ?').get(email);
+}
+
+async function userFindByOpenid(openid) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT * FROM users WHERE wx_openid = $1', [openid]);
+    return r.rows[0];
+  }
+  return sqlite.prepare('SELECT * FROM users WHERE wx_openid = ?').get(openid);
+}
+
+async function userBindEmail(uid, email) {
+  if (USE_PG) {
+    await pool.query('UPDATE users SET email = $1, email_verified = 0 WHERE id = $2', [email, uid]);
+    return;
+  }
+  sqlite.prepare('UPDATE users SET email = ?, email_verified = 0 WHERE id = ?').run(email, uid);
+}
+
+async function userVerifyEmail(uid) {
+  if (USE_PG) {
+    await pool.query('UPDATE users SET email_verified = 1 WHERE id = $1', [uid]);
+    return;
+  }
+  sqlite.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').run(uid);
+}
+
+async function userSetWechat(uid, wechat) {
+  if (USE_PG) {
+    await pool.query('UPDATE users SET wechat = $1 WHERE id = $2', [wechat, uid]);
+    return;
+  }
+  sqlite.prepare('UPDATE users SET wechat = ? WHERE id = ?').run(wechat, uid);
+}
+
+async function userBindOpenid(uid, openid) {
+  if (USE_PG) {
+    await pool.query('UPDATE users SET wx_openid = $1 WHERE id = $2', [openid, uid]);
+    return;
+  }
+  sqlite.prepare('UPDATE users SET wx_openid = ? WHERE id = ?').run(openid, uid);
+}
+
+async function userSetPassword(uid, pw_hash) {
+  if (USE_PG) {
+    await pool.query('UPDATE users SET pw_hash = $1 WHERE id = $2', [pw_hash, uid]);
+    return;
+  }
+  sqlite.prepare('UPDATE users SET pw_hash = ? WHERE id = ?').run(pw_hash, uid);
+}
+
+module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, profileGet, profileUpdatedAt, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, USE_PG };
