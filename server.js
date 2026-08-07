@@ -101,6 +101,45 @@ function defaultBag() {
   };
 }
 
+/* ---------- 失败模式分析（用户 / 管理员共用） ----------
+ * 输入单个用户的数据包（对象或 JSON 串），输出：
+ *   totalCrashes  总崩溃次数
+ *   totalRecovered 崩溃后走了支链（恢复）的次数
+ *   branchRate    支链恢复率
+ *   topCrashed    崩溃最多的定式排行（含各自恢复率）
+ * 判定「走了支链」：该崩溃事件发生在某天，且当天 daily[day].checks 里勾选了
+ * 它的任意子节点（parent === 崩溃定式 id）。 */
+function computeFailureAnalysis(d0) {
+  let data = {};
+  try { data = typeof d0 === 'string' ? JSON.parse(d0 || '{}') : (d0 || {}); } catch (e) { data = {}; }
+  const crashByRule = {};
+  let totalCrashes = 0, totalRecovered = 0;
+  const ruleMap = {}; (data.rules || []).forEach(x => { ruleMap[x.id] = x.t || x.id; });
+  const daily = data.daily || {};
+  const crashEvents = (data.events || []).filter(e => e.type === 'crash' && e.ruleId);
+  for (const e of crashEvents) {
+    const rid = e.ruleId;
+    const txt = ruleMap[rid] || rid;
+    if (!crashByRule[txt]) crashByRule[txt] = { count: 0, recovered: 0 };
+    crashByRule[txt].count++; totalCrashes++;
+    const day = e.day || (e.ts ? String(e.ts).slice(0, 10) : null);
+    const childIds = (data.rules || []).filter(x => x.parent === rid).map(x => x.id);
+    const rec = day ? daily[day] : null;
+    const tookBranch = rec && rec.checks && childIds.some(cid => rec.checks[cid]);
+    if (tookBranch) { crashByRule[txt].recovered++; totalRecovered++; }
+  }
+  const topCrashed = Object.keys(crashByRule)
+    .map(t => ({ rule: t, count: crashByRule[t].count, recovered: crashByRule[t].recovered,
+      rate: crashByRule[t].count ? Math.round(crashByRule[t].recovered / crashByRule[t].count * 100) : 0 }))
+    .sort((a, b) => b.count - a.count).slice(0, 12);
+  return {
+    totalCrashes,
+    totalRecovered,
+    branchRate: totalCrashes ? Math.round(totalRecovered / totalCrashes * 100) : 0,
+    topCrashed
+  };
+}
+
 /* ---------- Express ---------- */
 async function start() {
   await db.init();
@@ -175,6 +214,14 @@ async function start() {
     res.json({ username: req.session.username });
   });
 
+  /* 当前用户自己的失败模式分析（崩溃最多的定式 + 支链恢复率），人人可见，仅看自己 */
+  app.get('/api/me/failure-analysis', requireAuth, wrap(async (req, res) => {
+    const raw = await db.profileGet(req.session.userId);
+    let data = {};
+    try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
+    res.json(computeFailureAnalysis(data));
+  }));
+
   /* 读取数据 */
   app.get('/api/data', requireAuth, wrap(async (req, res) => {
     const raw = await db.profileGet(req.session.userId);
@@ -231,30 +278,21 @@ async function start() {
         tags: data.tags ? data.tags.length : 0
       });
     }
-    /* 失败模式分析：崩溃最多的定式 + 崩溃后支链恢复率 */
-    const crashByRule = {};
-    let totalCrashes = 0, totalRecovered = 0;
+    /* 失败模式分析（全站汇总）：逐用户计算后合并，
+     * 算法与 /api/me/failure-analysis 共用 computeFailureAnalysis，避免逻辑分叉 */
+    const merged = { totalCrashes: 0, totalRecovered: 0, byRule: {} };
     for (const r of rows) {
-      let d0 = {};
-      try { d0 = typeof r.data === 'string' ? JSON.parse(r.data || '{}') : (r.data || {}); } catch (e) { d0 = {}; }
-      const ruleMap = {}; (d0.rules || []).forEach(x => { ruleMap[x.id] = x.t || x.id; });
-      const daily = d0.daily || {};
-      const crashEvents = (d0.events || []).filter(e => e.type === 'crash' && e.ruleId);
-      for (const e of crashEvents) {
-        const rid = e.ruleId;
-        const txt = ruleMap[rid] || rid;
-        if (!crashByRule[txt]) crashByRule[txt] = { count: 0, recovered: 0 };
-        crashByRule[txt].count++; totalCrashes++;
-        const day = e.day || (e.ts ? String(e.ts).slice(0, 10) : null);
-        const childIds = (d0.rules || []).filter(x => x.parent === rid).map(x => x.id);
-        const rec = day ? daily[day] : null;
-        const tookBranch = rec && rec.checks && childIds.some(cid => rec.checks[cid]);
-        if (tookBranch) { crashByRule[txt].recovered++; totalRecovered++; }
+      const fa = computeFailureAnalysis(r.data);
+      merged.totalCrashes += fa.totalCrashes;
+      merged.totalRecovered += fa.totalRecovered;
+      for (const t of fa.topCrashed) {
+        if (!merged.byRule[t.rule]) merged.byRule[t.rule] = { rule: t.rule, count: 0, recovered: 0 };
+        merged.byRule[t.rule].count += t.count;
+        merged.byRule[t.rule].recovered += t.recovered;
       }
     }
-    const topCrashed = Object.keys(crashByRule)
-      .map(t => ({ rule: t, count: crashByRule[t].count, recovered: crashByRule[t].recovered,
-        rate: crashByRule[t].count ? Math.round(crashByRule[t].recovered / crashByRule[t].count * 100) : 0 }))
+    const topCrashed = Object.values(merged.byRule)
+      .map(t => ({ ...t, rate: t.count ? Math.round(t.recovered / t.count * 100) : 0 }))
       .sort((a, b) => b.count - a.count).slice(0, 12);
 
     const now = Date.now();
@@ -266,9 +304,9 @@ async function start() {
       registrationsByDay: Object.keys(regDays).sort().map(d => ({ date: d, count: regDays[d] })),
       users,
       failureAnalysis: {
-        totalCrashes,
-        totalRecovered,
-        branchRate: totalCrashes ? Math.round(totalRecovered / totalCrashes * 100) : 0,
+        totalCrashes: merged.totalCrashes,
+        totalRecovered: merged.totalRecovered,
+        branchRate: merged.totalCrashes ? Math.round(merged.totalRecovered / merged.totalCrashes * 100) : 0,
         topCrashed
       },
       generatedAt: new Date().toISOString()

@@ -467,6 +467,9 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <h2>📦 数据与迭代</h2>
     <h3>周报（喂给 AI 迭代用）</h3>
     <button class="ok" onclick="exportWeekly()">📤 导出本周文本报告</button>
+    <h3 style="margin-top:20px;">📉 我的失败模式分析</h3>
+    <p><small>只有你自己能看到这份数据——它来自你记录的崩溃 / 支链事件，帮你定位最该改的定式。<b>管理后台不再独占</b>，每个账号都能看自己的。</small></p>
+    <div id="myFailure"><small>加载中…</small></div>
     <h3 style="margin-top:20px;">👤 账户</h3>
     <p><small>你的数据已加密存储于服务器（按账号隔离），登录即跨设备同步。当前登录：<b id="acctName">—</b></small></p>
     <button class="ghost" onclick="doLogout()">退出登录</button>
@@ -701,6 +704,40 @@ function show(id,btn){
   if(id==='review'){ renderIterSel(); renderDayView(); }
   if(id==='phase') renderPhases();
   if(id==='rules') renderRulePage();
+  if(id==='data') renderMyFailure();
+}
+/* ================= 我的失败模式分析（人人可见，仅看自己） ================= */
+async function renderMyFailure(){
+  const box = document.getElementById('myFailure'); if(!box) return;
+  try{
+    const r = await fetch('/api/me/failure-analysis');
+    if(!r.ok){ box.innerHTML = '<small>暂无数据（未登录或服务端未启用）</small>'; return; }
+    const fa = await r.json();
+    const rows = (fa.topCrashed||[]).map(x => `
+      <tr>
+        <td>${esc(x.rule)}</td>
+        <td style="text-align:right;">${x.count}</td>
+        <td style="text-align:right;">${x.recovered}</td>
+        <td style="text-align:right;">${x.rate}%</td>
+      </tr>`).join('') || '<tr><td colspan="4" style="color:var(--dim)">暂无崩溃记录，继续保持 💪</td></tr>';
+    box.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+        <div class="card" style="flex:1;min-width:120px;text-align:center;">
+          <div style="font-size:1.6rem;font-weight:700;">${fa.totalCrashes}</div>
+          <div style="color:var(--dim);font-size:.8rem;">总崩溃次数</div>
+        </div>
+        <div class="card" style="flex:1;min-width:120px;text-align:center;">
+          <div style="font-size:1.6rem;font-weight:700;">${fa.branchRate}%</div>
+          <div style="color:var(--dim);font-size:.8rem;">崩溃后支链恢复率</div>
+        </div>
+      </div>
+      <table class="wk">
+        <thead><tr><th>定式</th><th style="text-align:right;">崩溃次数</th><th style="text-align:right;">支链恢复</th><th style="text-align:right;">恢复率</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }catch(e){
+    box.innerHTML = '<small>加载失败</small>';
+  }
 }
 function reviewTab(id,btn){
   document.querySelectorAll('#rvTabs button').forEach(x=>x.classList.remove('active'));
