@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>底层创造者 OS v9.1</title>
+<style>
+/* ============================================================
+   v8.0 —— 规则树 + 日标记 + 嵌套阶段 + 三级复盘 + 定式迭代台
+   主题：VSCode / Cursor 深色风
+   ============================================================ */
+:root {
+  --bg:#1e1e1e; --bg2:#181818; --card:#252526; --border:#3c3c3c;
+  --accent:#4fc1ff; --accent2:#007acc; --ok:#4ec9b0; --warn:#dcdcaa;
+  --danger:#f44747; --txt:#d4d4d4; --dim:#808080;
+  --mono:"Cascadia Code",Consolas,"JetBrains Mono",monospace;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding:44px 16px 60px; background:var(--bg); color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; line-height:1.6; }
+.wrap { max-width:960px; margin:auto; }
+h1 { font-size:1.3rem; margin:18px 0 4px; font-family:var(--mono); color:var(--accent); }
+h2 { font-size:1.05rem; color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:8px; margin-top:0; }
+h3 { font-size:.95rem; color:var(--accent); }
+small { color:var(--dim); }
+.card { background:var(--card); border:1px solid var(--border); padding:18px;
+  border-radius:14px; margin-bottom:16px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
+label { display:flex; align-items:center; gap:10px; margin:8px 0; cursor:pointer; padding:6px 8px; border-radius:8px; }
+label:hover { background:#2d2d30; }
+input[type=checkbox] { width:20px; height:20px; accent-color:var(--accent2); flex-shrink:0; cursor:pointer; margin-top:0; }
+input[type=checkbox]:checked+span { text-decoration:line-through; opacity:.45; }
+input,textarea,select { width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);
+  margin-top:4px; background:var(--bg2); color:var(--txt); font-size:1rem; }
+input:focus,textarea:focus,select:focus { outline:1px solid var(--accent2); }
+textarea { resize:vertical; }
+button { background:var(--accent2); color:#fff; border:none; padding:12px 20px; border-radius:10px;
+  cursor:pointer; margin-top:10px; font-weight:600; font-size:.95rem; min-height:44px; transition:filter .15s; }
+button:hover { filter:brightness(1.15); }
+button.ghost { background:#3c3c3c; } button.danger { background:#a1260d; } button.ok { background:#1e7a5a; }
+button.mini { padding:6px 12px; min-height:34px; font-size:.8rem; margin-top:0; }
+
+#topbar { position:fixed; top:0; left:0; right:0; z-index:50; background:var(--bg2);
+  border-bottom:1px solid var(--border); padding:6px 16px; font-family:var(--mono); font-size:.8rem; }
+#topbar .inner { max-width:960px; margin:auto; display:flex; align-items:center; gap:12px; }
+#progressTrack { flex:1; height:8px; background:#333; border-radius:99px; overflow:hidden; }
+#progressFill { height:100%; width:0%; border-radius:99px;
+  background:linear-gradient(90deg,var(--accent2),var(--ok)); transition:width .4s; }
+#progressPct { color:var(--ok); min-width:44px; text-align:right; }
+#savedTag { color:var(--dim); font-size:.85em; min-width:90px; text-align:right; }
+
+.tab { display:flex; gap:6px; overflow-x:auto; margin:14px 0; }
+.tab button { flex:1; background:#2d2d30; color:var(--txt); white-space:nowrap; border:1px solid var(--border); padding:10px 12px; }
+.tab button.active { background:var(--accent2); color:#fff; border-color:var(--accent2); }
+.section { display:none; } .section.active { display:block; animation:fade .2s; }
+@keyframes fade { from{opacity:0;transform:translateY(4px);} to{opacity:1;} }
+.subtab { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; }
+.subtab button { flex:1; padding:8px; min-height:38px; background:#2d2d30; border:1px solid var(--border); color:var(--txt); }
+.subtab button.active { border-color:var(--accent); color:var(--accent); }
+
+.pill { display:inline-block; font-size:.72rem; font-family:var(--mono); padding:2px 10px;
+  border-radius:99px; border:1px solid var(--border); color:var(--dim); margin:2px 6px 2px 0; }
+#degradeBanner { display:none; border:1px solid var(--warn); border-left:4px solid var(--warn);
+  background:#2b2a1e; color:var(--warn); padding:12px 14px; border-radius:10px; margin-bottom:14px; font-weight:600; }
+/* 【v8 新增】夜间宵禁提醒条（22:00-06:00 自动显示） */
+#nightBar { display:none; background:#a1260d; color:#fff; padding:10px 14px;
+  border-radius:10px; margin-bottom:14px; font-weight:600; text-align:center; font-size:.9rem; }
+
+.chip { display:inline-flex; align-items:center; gap:6px; font-size:.78rem; padding:4px 12px;
+  border-radius:99px; border:1px solid; cursor:pointer; margin:3px 4px 3px 0; user-select:none; }
+.chip .x { font-weight:bold; opacity:.7; }
+.lv-badge { font-size:.65rem; font-family:var(--mono); padding:1px 7px; border-radius:4px;
+  background:#333; color:var(--dim); flex-shrink:0; }
+.lv0 { color:var(--ok); } .lv1 { color:var(--warn); } .lv2 { color:var(--accent); } .lv3 { color:#c586c0; }
+
+.tree { font-size:.92rem; }
+.tnode { margin:2px 0; }
+.trow { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; }
+.trow:hover { background:#2d2d30; }
+.trow.sel { background:#0e639c44; outline:1px solid var(--accent2); }
+.trow .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+.trow .tname { flex:1; }
+.trow .cnt { font-size:.7rem; color:var(--dim); font-family:var(--mono); }
+.tkids { margin-left:14px; padding-left:12px; border-left:1px solid var(--border); }
+.grp-title { font-family:var(--mono); font-size:.78rem; color:var(--dim); margin:14px 0 2px; letter-spacing:1px; }
+
+#nodePanel, #tagPanel { display:none; background:var(--bg2); border:1px solid var(--accent2);
+  border-radius:12px; padding:14px; margin-top:12px; }
+#nodePanel.show, #tagPanel.show { display:block; }
+
+.ev { display:flex; gap:10px; align-items:flex-start; background:var(--bg2); border:1px solid var(--border);
+  border-left-width:4px; padding:8px 12px; border-radius:8px; margin-top:8px; font-size:.88rem; }
+.ev .t { font-family:var(--mono); color:var(--dim); font-size:.78rem; white-space:nowrap; padding-top:2px; }
+.ev .x { margin-left:auto; color:var(--dim); cursor:pointer; background:none; border:none; padding:0 4px; min-height:0; font-size:1rem; }
+.ev-crash{border-left-color:var(--danger);} .ev-relapse{border-left-color:#e8912d;} .ev-sleep{border-left-color:#569cd6;}
+.ev-debug{border-left-color:var(--ok);} .ev-mile{border-left-color:var(--warn);} .ev-note{border-left-color:var(--dim);}
+.ev-recover{border-left-color:#2ea043;}
+.ev .retro { display:block; width:100%; margin-top:4px; color:var(--accent); font-size:.8rem; }
+.evtag { font-size:.7rem; padding:1px 8px; border-radius:99px; background:#333; white-space:nowrap; }
+
+.cal { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-top:10px; }
+.cal .dow { text-align:center; font-size:.7rem; color:var(--dim); font-family:var(--mono); }
+.cal .day { aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  border-radius:8px; font-size:.78rem; cursor:pointer; border:1px solid var(--border); background:var(--bg2); }
+.cal .day:hover { border-color:var(--accent); }
+.cal .day .pct { font-size:.62rem; font-family:var(--mono); color:var(--dim); }
+.cal .day.today { outline:2px solid var(--accent); }
+.cal .day.empty { background:transparent; border:none; cursor:default; }
+
+/* 【v8 新增】周柱状图 */
+.chart { display:flex; align-items:flex-end; gap:4px; height:110px; padding:8px 8px 0;
+  background:var(--bg2); border-radius:8px; margin:10px 0 0; }
+.chart-bar { flex:1; background:linear-gradient(to top,var(--accent2),var(--ok));
+  border-radius:4px 4px 0 0; min-height:2px; position:relative; transition:height .4s; cursor:pointer; }
+.chart-container { overflow-x:auto; padding-bottom:20px; }
+.chart-labels { display:flex; gap:4px; padding:0 8px; }
+.chart-labels span { flex:1; text-align:center; font-size:.65rem; color:var(--dim); font-family:var(--mono); }
+
+table.wk { width:100%; border-collapse:collapse; font-size:.85rem; }
+table.wk td,table.wk th { border-bottom:1px solid var(--border); padding:8px 6px; text-align:left; }
+table.wk th { color:var(--dim); font-weight:normal; font-size:.75rem; }
+.mono { font-family:var(--mono); }
+
+.phase { border:1px solid var(--border); border-radius:12px; padding:14px; margin-bottom:12px; background:var(--bg2); }
+.phase.now { border-color:var(--accent2); }
+.phase .stars { color:var(--warn); font-size:.8rem; letter-spacing:2px; }
+.stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(105px,1fr)); gap:8px; margin:10px 0; }
+.stat { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:10px; text-align:center; }
+.stat .v { font-family:var(--mono); font-size:1.25rem; color:var(--accent); }
+.stat .k { font-size:.72rem; color:var(--dim); }
+.phedit { display:none; margin-top:10px; border-top:1px dashed var(--border); padding-top:10px; }
+.phedit.show { display:block; }
+
+/* 【v8 新增】复盘框 */
+.review-box { border:1px dashed var(--border); border-radius:10px; padding:12px; margin-top:14px; }
+.review-box h3 { margin-top:0; }
+.past-review { background:var(--bg2); border:1px solid var(--border); border-radius:8px;
+  padding:8px 12px; margin-top:8px; font-size:.85rem; white-space:pre-wrap; }
+.past-review .k { font-family:var(--mono); color:var(--accent); font-size:.75rem; }
+
+.doc h3 { margin-top:22px; border-left:3px solid var(--accent2); padding-left:10px; }
+.doc p,.doc li { font-size:.92rem; }
+.doc blockquote { border-left:3px solid var(--warn); margin:10px 0; padding:6px 14px;
+  background:#2b2a1e; color:var(--warn); border-radius:0 8px 8px 0; }
+.doc code { font-family:var(--mono); background:#333; padding:1px 6px; border-radius:4px; font-size:.85em; }
+.doc .loop { font-family:var(--mono); font-size:.8rem; background:var(--bg2); border:1px solid var(--border);
+  border-radius:10px; padding:12px; overflow-x:auto; white-space:pre; }
+
+.modal-mask { display:none; position:fixed; inset:0; z-index:100; background:rgba(0,0,0,.7);
+  backdrop-filter:blur(3px); align-items:center; justify-content:center; padding:20px; }
+.modal-mask.show { display:flex; }
+.modal { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px;
+  max-width:420px; width:100%; text-align:center; box-shadow:0 12px 40px rgba(0,0,0,.6); max-height:88vh; overflow-y:auto; }
+.countdown { font-family:var(--mono); font-size:3rem; color:var(--accent); margin:12px 0; }
+.modal textarea, .modal input, .modal select { text-align:left; }
+.modal textarea { font-family:var(--mono); font-size:.8rem; }
+.modal .form-row { margin:10px 0; text-align:left; }
+.modal .form-row label { margin:0; padding:0; }
+.modal .form-row label:hover { background:transparent; }
+
+.row { display:flex; gap:8px; align-items:center; }
+.row > * { margin-top:0; }
+
+/* 【v9 新增】链路与支链 */
+.chain-row { display:flex; align-items:center; gap:6px; }
+.chain-row label { flex:1; margin:0; }
+.chain-row button { flex-shrink:0; }
+.branch-box { margin-left:26px; padding-left:12px; border-left:2px dashed var(--warn); margin-top:2px; }
+details.chain-detail { margin-top:8px; }
+details.chain-detail summary { cursor:pointer; font-size:.78rem; color:var(--dim); font-family:var(--mono); }
+details.chain-detail .path { font-size:.82rem; font-family:var(--mono); background:var(--bg2);
+  border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; line-height:1.8; }
+@media (max-width:600px){ h1{font-size:1.1rem;} .card{padding:14px;} .cal .day .pct{display:none;} }
+</style>
+</head>
+<body>
+<!-- ================= 登录 / 注册 ================= -->
+<div id="auth" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);">
+  <div class="card" style="width:340px;max-width:92vw;">
+    <h2 style="margin-top:0;">🧠 底层创造者 OS</h2>
+    <p><small>多用户版 · 注册一个账号，数据存云端，多设备通用</small></p>
+    <input id="auUser" type="text" placeholder="用户名（≥2 字符）" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+    <input id="auPass" type="password" placeholder="密码（≥6 位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+    <button class="ok" style="width:100%;" onclick="doLogin()">登录</button>
+    <button class="ghost" style="width:100%;margin-top:8px;" onclick="doRegister()">注册新账号</button>
+    <p id="authMsg" style="color:var(--danger);min-height:1.2em;"></p>
+  </div>
+</div>
+
+<div id="topbar">
+  <div class="inner">
+    <span>⚙ ROOT-OS</span>
+    <div id="progressTrack"><div id="progressFill"></div></div>
+    <span id="progressPct">0%</span>
+    <span id="savedTag"></span>
+  <span id="userBox" style="margin-left:auto;"></span>
+  </div>
+</div>
+
+<div class="wrap">
+<h1>🧠 底层创造者 OS <span style="color:var(--dim);font-size:.7em;">多用户版</span></h1>
+<p>
+  <span class="pill" id="datePill"></span>
+  <span class="pill" id="phasePill"></span>
+  <br><small>本地存储 · 规则树 · 日标记 · 三级复盘 · 定式迭代台 · 嵌套阶段</small>
+</p>
+<div id="nightBar">🌙 宵禁时段：手机该放客厅了 · 饿了只喝温水 · 躺床+手机=不可逃逸区</div>
+<div id="degradeBanner"></div>
+
+<div class="tab">
+  <button class="tabbtn active" onclick="show('today',this)">今日</button>
+  <button class="tabbtn" onclick="show('rules',this)">规则树</button>
+  <button class="tabbtn" onclick="show('review',this)">回溯</button>
+  <button class="tabbtn" onclick="show('phase',this)">阶段</button>
+  <button class="tabbtn" onclick="show('method',this)">总体思想</button>
+  <button class="tabbtn" onclick="show('data',this)">数据</button>
+</div>
+
+<!-- ================= 今日 ================= -->
+<div id="today" class="section active">
+  <div class="card">
+    <h2>🏷️ 今日标记 <small>（点 chip 移除；点下方按钮打上）</small></h2>
+    <div id="todayTags"></div>
+    <div id="tagPicker" style="margin-top:8px;"></div>
+    <button class="mini ghost" onclick="toggleTagPanel()">⚙ 管理标记定义</button>
+    <div id="tagPanel">
+      <div id="tagDefs"></div>
+      <div class="row" style="margin-top:10px;">
+        <input type="text" id="newTagName" placeholder="新标记名" style="flex:1;">
+        <input type="color" id="newTagColor" value="#e8912d" style="width:46px;height:40px;padding:2px;">
+        <label style="margin:0;white-space:nowrap;"><input type="checkbox" id="newTagDegrade"><span>降级日</span></label>
+        <button class="mini ok" onclick="addTagDef()">建</button>
+      </div>
+      <p><small>「降级日」= 打上后自动激活降级协议横幅（如：来访日/高扰动）。</small></p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>📅 今日焦点 <small>（可选，留空也行）</small></h2>
+    <textarea id="todayTask" rows="2" placeholder="可写 1 件最小产出，也可写多件，或留空"></textarea>
+  </div>
+
+  <div class="card">
+    <h2>⚔️ 今日规则执行 <small>（自动保存）</small></h2>
+    <div class="subtab" style="margin-bottom:6px;">
+      <button id="viewCatBtn" onclick="setTodayView('cat')">按门类</button>
+      <button id="viewLvBtn" onclick="setTodayView('lv')">按层级（根→顶）</button>
+    </div>
+    <div id="todayRules"></div>
+  </div>
+
+  <div class="card">
+    <h2>⚡ 快速事件 <small>（只记事实，不评判）</small></h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="mini danger" onclick="quickEvent('crash')">💥 崩溃</button>
+      <button class="mini" style="background:#8a5a1e;" onclick="quickEvent('relapse')">⚠️ 破戒</button>
+      <button class="mini" style="background:#2d4a6b;" onclick="quickEvent('sleep')">🥱 低能量</button>
+      <button class="mini ok" onclick="quickEvent('debug')">🔧 调试</button>
+      <button class="mini" style="background:#6b6320;" onclick="quickEvent('mile')">🏁 里程碑</button>
+    </div>
+    <input type="text" id="quickEvText" placeholder="事件备注（可空）" style="margin-top:8px;">
+    <p><small>针对某条定式的崩溃/恢复/迭代，去「回溯」页的定式迭代台。</small></p>
+  </div>
+
+  <div class="card">
+    <h2>🛡️ 应急协议 <small>（坏习惯冲动来袭时点这里）</small></h2>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="ghost" onclick="startCooldown()">🧊 冲动冷却 · 15分钟</button>
+      <button class="ghost" onclick="startFuse()">⏱️ 视频熔断 · 25分钟</button>
+    </div>
+    <p><small>冷却不是靠意志力硬扛，是用<b>时延</b>把冲动的峰值熬过去。熬过去后回来打卡「戒断」门类的规则。</small></p>
+  </div>
+
+  <div class="card">
+    <h2>📝 今日备注</h2>
+    <textarea id="dayNote" rows="2" placeholder="卡在哪？哪条规则要改？（自动保存）"></textarea>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+      <label for="sleepHr" style="white-space:nowrap;"><small>😴 今日睡眠(h)</small></label>
+      <input type="number" id="sleepHr" step="0.5" min="0" max="24" placeholder="如 7.5" style="max-width:120px;">
+      <small style="color:var(--muted);">用于周/月报的能量基线</small>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 规则树 ================= -->
+<div id="rules" class="section">
+  <div class="card">
+    <h2>🌳 规则树 <small>（门类 → 层级 → 规则；点节点编辑）</small></h2>
+    <div class="subtab">
+      <button id="rmTreeBtn" class="active" onclick="setRuleView('tree')">🌳 树状图</button>
+      <button id="rmCatBtn" onclick="setRuleView('cat')">按门类</button>
+      <button id="rmLvBtn" onclick="setRuleView('lv')">按层级集中</button>
+    </div>
+    <div id="rmTree">
+      <div class="tree" id="ruleTree"></div>
+      <div id="nodePanel">
+        <h3 id="npTitle" style="margin-top:0;"></h3>
+        <div id="npBody"></div>
+      </div>
+    </div>
+    <div id="rmList" style="display:none;"></div>
+
+    <h3 style="margin-top:20px;">⚙️ 门类 & 层级设置</h3>
+    <p><small>层级全局共用（默认：根部/中层/顶层），顺序即优先级，第 1 级计入顶部进度条。</small></p>
+    <div class="row">
+      <input type="text" id="newCatName" placeholder="新门类名（如：身体）" style="flex:1;">
+      <input type="color" id="newCatColor" value="#4fc1ff" style="width:46px;height:40px;padding:2px;">
+      <button class="mini ok" onclick="addCat()">加门类</button>
+    </div>
+    <div class="row" style="margin-top:8px;">
+      <input type="text" id="newLvName" placeholder="新层级名（如：究极）" style="flex:1;">
+      <button class="mini ok" onclick="addLv()">加层级</button>
+    </div>
+    <div id="catLvList" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+<!-- ================= 回溯（v8 重做） ================= -->
+<div id="review" class="section">
+
+  <!-- 【v8 新增】定式迭代台：崩溃/恢复/修改 直接联动规则树 -->
+  <div class="card">
+    <h2>🔧 定式迭代台 <small>（崩塌即调试：选一条定式，执行动作）</small></h2>
+    <select id="iterRuleSel"></select>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+      <button class="mini danger" onclick="iterCrash()">💥 崩溃了 → 记录并去修改</button>
+      <button class="mini ok" onclick="iterRecover()">✅ 恢复执行</button>
+      <button class="mini" onclick="iterEdit()">🔧 修改/增删分支（跳规则树）</button>
+    </div>
+    <input type="text" id="iterNote" placeholder="调试备注（可空）：触发链是什么？怎么改？" style="margin-top:8px;">
+    <p><small>崩溃不归零：记录事实 → 修改定式 → 次日重启。迭代台的动作都会进事件流。</small></p>
+  </div>
+
+  <div class="card">
+    <h2>🔁 回溯 & 复盘</h2>
+    <div class="subtab" id="rvTabs">
+      <button class="active" onclick="reviewTab('day',this)">日</button>
+      <button onclick="reviewTab('week',this)">周</button>
+      <button onclick="reviewTab('month',this)">月</button>
+      <button onclick="reviewTab('timeline',this)">事件流</button>
+    </div>
+
+    <!-- 日视图 + 日复盘 -->
+    <div id="rv-day">
+      <input type="date" id="rvDate" onchange="renderDayView()">
+      <div id="dayView" style="margin-top:12px;"></div>
+      <div class="review-box">
+        <h3>📝 日复盘 <small id="rvDayKey"></small></h3>
+        <textarea id="rvDayReview" rows="3" placeholder="今天的事实与观察：哪条定式崩了？触发链是什么？（自动保存）"></textarea>
+      </div>
+      <div id="pastDayReviews" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- 周视图 + 周复盘 -->
+    <div id="rv-week" style="display:none;">
+      <div class="chart-container">
+        <div class="chart" id="weekChart"></div>
+        <div class="chart-labels" id="weekChartLabels"></div>
+      </div>
+      <div id="weekView"></div>
+      <div class="review-box">
+        <h3>🔄 周复盘 <small id="rvWeekKey"></small></h3>
+        <textarea id="rvWeekReview" rows="4" placeholder="三问复盘：&#10;1. 本周完成了几个节点？&#10;2. 卡在哪？&#10;3. 下周只改 1 件事？（自动保存）"></textarea>
+      </div>
+      <div id="pastWeekReviews" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- 月视图 + 月复盘 -->
+    <div id="rv-month" style="display:none;">
+      <input type="month" id="rvMonth" onchange="renderMonth()">
+      <div id="monthView"></div>
+      <p><small>颜色越亮 = 第 1 级（根部）完成度越高。点天进入日视图。</small></p>
+      <div class="review-box">
+        <h3>🏆 月复盘 <small id="rvMonthKey"></small></h3>
+        <textarea id="rvMonthReview" rows="4" placeholder="本月最大突破：&#10;本月最大陷阱：&#10;下月聚焦：（自动保存）"></textarea>
+      </div>
+      <div id="pastMonthReviews" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- 事件流 -->
+    <div id="rv-timeline" style="display:none;">
+      <button class="mini ok" onclick="openEventModal()">＋ 记录事件（可关联定式+回溯建议）</button>
+      <div class="subtab" id="evFilters" style="margin-top:10px;">
+        <button class="active" onclick="renderTimeline('all',this)">全部</button>
+        <button onclick="renderTimeline('crash',this)">崩溃</button>
+        <button onclick="renderTimeline('recover',this)">恢复</button>
+        <button onclick="renderTimeline('relapse',this)">破戒</button>
+        <button onclick="renderTimeline('sleep',this)">低能量</button>
+        <button onclick="renderTimeline('debug',this)">调试</button>
+        <button onclick="renderTimeline('mile',this)">里程碑</button>
+      </div>
+      <div id="timelineView"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 阶段 ================= -->
+<div id="phase" class="section">
+  <div class="card">
+    <h2>🏔️ 阶段档案 <small>（大阶段套小阶段，系统数据自动汇总）</small></h2>
+    <div id="phaseList"></div>
+    <h3 style="margin-top:18px;">➕ 新建顶层大阶段</h3>
+    <input type="text" id="phName" placeholder="阶段名">
+    <div class="row">
+      <input type="date" id="phStart"><input type="date" id="phEnd">
+      <select id="phImp" style="width:130px;"><option value="3">★★★ 关键</option><option value="2">★★ 重要</option><option value="1">★ 一般</option></select>
+    </div>
+    <textarea id="phGoal" rows="2" placeholder="阶段目标 / 验收标准"></textarea>
+    <button class="ok" onclick="addPhase(null)">建立</button>
+  </div>
+</div>
+
+<!-- ================= 总体思想 ================= -->
+<div id="method" class="section">
+  <div class="card doc">
+    <h2>📖 总体思想（系统宪法）</h2>
+    <p><small>把控制论的负反馈闭环套在自己身上。本页定义"为什么"，其他页定义"怎么做"。</small></p>
+
+    <h3>1. 规则树：根部 / 中层 / 顶层</h3>
+    <p><b>根部</b>= 傻瓜级保命定式（脑子浆糊也能做）；<b>中层</b>= 状态正常时的推进动作；<b>顶层</b>= 巅峰冲刺目标。崩塌日只保根部，满血日够顶层。</p>
+    <blockquote>胜于易胜：根部定式必须小到不可能失败。</blockquote>
+
+    <h3>2. 不可逃逸区</h3>
+    <p>「躺床 + 深夜 + 手机解锁」区内意志力失效。唯一解是环境改造：22:30 手机放客厅 = 让区不存在。<b>不要在区内战斗。</b></p>
+
+    <h3>3. 崩塌即调试（定式迭代台就是干这个的）</h3>
+    <p>崩溃是系统报错不是道德失败。响应协议：<b>迭代台记录 → 修改定式 → 次日重启</b>。不归零、不连签绑架、累计完成 &gt; 连续天数。</p>
+    <div class="loop">崩溃 → 迭代台记录(关联定式) → 修改/降级该定式 → 恢复执行
+     ↑____________ 迭代闭环 ____________↓</div>
+
+    <h3>4. CTDP 三原理</h3>
+    <ul>
+      <li><b>神圣座位</b>：用"记录不可玷污"制造沉没成本，坐上去只做正事。</li>
+      <li><b>下必为例</b>：破例的代价 = 永久放弃整条规则，所以定式要设得保守。</li>
+      <li><b>线性时延</b>：冲动来时预约 15 分钟后（冷却计时器），骗过短视的大脑。</li>
+    </ul>
+
+    <h3>5. 负反馈环阻断</h3>
+    <p>晚睡刷手机 → 夜宵 → 肠胃不适 → 更难入睡。断点：「22:30 手机放客厅」+「清醒不吃零食」。环上任一环断，整环失效。</p>
+
+    <h3>6. 环境耦合 & 日标记</h3>
+    <p>床=堕落区，图书馆=Buff区。社交日/高扰动日/低能量日用<b>日标记</b>标注，带「降级」属性的标记自动激活降级协议：只做侦查任务，不追责。</p>
+
+    <h3>7. 可选工具箱（非义务）</h3>
+    <ul>
+      <li><code>1动作法则</code>：状态极差日只推进 1 个最小产出，保命用。</li>
+      <li><code>15分钟冷却</code> / <code>25分钟视频熔断</code>：应急协议按钮。</li>
+      <li><code>两分钟规则</code>：不想学时只承诺做 2 分钟，启动后大概率继续。</li>
+    </ul>
+
+    <h3>8. 支链：允许走 B 计划，且不扣分</h3>
+    <p>规则可以挂<b>支链</b>（B 计划）。主链节点崩了，支链自动激活顶上；<b>未激活的支链不计入进度分母</b>，所以走 B 计划不会掉完成率。</p>
+    <blockquote>消灭"反正今天已经废了"——这句话才是真正的杀手。</blockquote>
+
+    <h3>9. 迭代协议</h3>
+    <div class="loop">日：打勾 + 打标记 + 记事件（30秒内）+ 日复盘一句话
+周：柱状图 + 周复盘三问 → 迭代台改规则 → 导出周报喂 AI
+月：热力日历趋势 + 月复盘 → 失效规则降级或删除
+阶段：系统统计 + 主观日志 → 下一阶段开新分支</div>
+    <p><small>你是自己人生的运维工程师。改规则 = 发版本。</small></p>
+  </div>
+</div>
+
+<!-- ================= 数据 ================= -->
+<div id="data" class="section">
+  <div class="card">
+    <h2>📦 数据与迭代</h2>
+    <h3>周报（喂给 AI 迭代用）</h3>
+    <button class="ok" onclick="exportWeekly()">📤 导出本周文本报告</button>
+    <h3 style="margin-top:20px;">👤 账户</h3>
+    <p><small>你的数据已加密存储于服务器（按账号隔离），登录即跨设备同步。当前登录：<b id="acctName">—</b></small></p>
+    <button class="ghost" onclick="doLogout()">退出登录</button>
+    <h3 style="margin-top:20px;">完整备份（JSON，含规则树/阶段/标记/复盘）</h3>
+    <p><small>下载一份离线副本，或导入恢复。服务器已自动保存，此步骤用于额外保险/迁移。</small></p>
+    <button onclick="exportJSON()">💾 下载完整备份</button>
+    <button class="ghost" onclick="document.getElementById('importFile').click()">📥 导入备份</button>
+    <input type="file" id="importFile" accept=".json" style="display:none" onchange="importJSON(event)">
+    <h3 style="margin-top:20px;">危险区</h3>
+    <button class="danger" onclick="if(confirm('清空本机显示数据？服务器数据不受影响。')){localStorage.clear();location.reload();}">🗑️ 清空本机缓存</button>
+  </div>
+</div>
+
+</div>
+
+<!-- 计时器弹窗 -->
+<div class="modal-mask" id="timerModal">
+  <div class="modal">
+    <h3 id="timerTitle">冷却中</h3>
+    <div class="countdown" id="timerText">15:00</div>
+    <p id="timerHint" style="color:var(--dim);"></p>
+    <button class="ghost" onclick="cancelTimer()">取消</button>
+  </div>
+</div>
+
+<!-- 周报弹窗 -->
+<div class="modal-mask" id="reportModal">
+  <div class="modal" style="max-width:560px;text-align:left;">
+    <h3>📤 本周报告（可复制）</h3>
+    <textarea id="reportText" rows="16" readonly></textarea>
+    <div style="text-align:center;">
+      <button class="ok" onclick="copyReport()">📋 复制全文</button>
+      <button class="ghost" onclick="closeModal('reportModal')">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 【v8 新增】事件记录弹窗（关联定式 + 回溯建议） -->
+<div class="modal-mask" id="eventModal">
+  <div class="modal">
+    <h3 id="eventModalTitle">记录事件</h3>
+    <div class="form-row">
+      <label>类型</label>
+      <select id="m_evType">
+        <option value="crash">💥 崩溃</option>
+        <option value="recover">✅ 恢复</option>
+        <option value="relapse">⚠️ 破戒</option>
+        <option value="sleep">🥱 低能量</option>
+        <option value="debug">🔧 调试/迭代</option>
+        <option value="mile">🏁 里程碑</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>事实描述</label>
+      <textarea id="m_evDesc" rows="2" placeholder="发生了什么？只写事实"></textarea>
+    </div>
+    <div class="form-row">
+      <label>关联定式（可选）</label>
+      <select id="m_evRule"><option value="">-- 不关联 --</option></select>
+    </div>
+    <div class="form-row">
+      <label>回溯建议（可选）</label>
+      <textarea id="m_evRetro" rows="2" placeholder="如果在 X 节点做了 Y，会不会不一样？"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="ok" onclick="saveEventModal()" style="flex:1;">💾 保存</button>
+      <button class="ghost" onclick="closeModal('eventModal')" style="flex:1;">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   数据层 v8.0
+   pos_cats / pos_levels / pos_rules   规则树
+   pos_tags                            日标记定义
+   pos_daily                           按日记录
+   pos_events                          事件流（可关联 ruleId + retro 回溯建议）
+   pos_phases                          嵌套阶段
+   pos_reviews                         {day:{date:txt}, week:{weekKey:txt}, month:{ym:txt}}
+   pos_meta                            设置
+   ============================================================ */
+const $ = s => document.querySelector(s);
+const today = new Date().toLocaleDateString('sv');
+
+/* 【v8 修复】savedTimer 必须先于任何 store.set 声明（v7 的 TDZ bug 根因） */
+let savedTimer = null;
+function markSaved(){
+  try{
+    const el = $('#savedTag'); if(!el) return;
+    el.textContent = '✓ '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+' 已存';
+    clearTimeout(savedTimer); savedTimer = setTimeout(()=>el.textContent='',2500);
+  }catch(e){}
+  /* 多用户版：改动后防抖推送到服务器（已登录时） */
+  try{ if(SESSION) scheduleServerSave(); }catch(e){}
+}
+const store = {
+  get(k,d){ try{ const v=localStorage.getItem('pos_'+k); return v?JSON.parse(v):d; }catch(e){ return d; } },
+  set(k,v){ localStorage.setItem('pos_'+k, JSON.stringify(v)); markSaved(); }
+};
+const EVT = { crash:'💥崩溃', recover:'✅恢复', relapse:'⚠️破戒', sleep:'🥱低能量', debug:'🔧调试', mile:'🏁里程碑', note:'📝随笔' };
+
+/* ---------- 预置数据（通用启动模板 · 新账号从零开始，随时可在「规则树」页改写） ---------- */
+const SEED_CATS = [
+  {id:'c_study', name:'学习', color:'#4fc1ff'},
+  {id:'c_focus', name:'专注', color:'#4ec9b0'},
+  {id:'c_play',  name:'娱乐', color:'#dcdcaa'},
+  {id:'c_quit',  name:'戒断', color:'#f44747'},
+  {id:'c_life',  name:'生活', color:'#c586c0'},
+];
+const SEED_LEVELS = [
+  {id:'lv0', name:'根部'},
+  {id:'lv1', name:'中层'},
+  {id:'lv2', name:'顶层'},
+];
+/* 规则含 parent/seq：parent=null 为主链节点，parent=某规则id 为该节点的支链节点；seq=同级链内顺序 */
+const SEED_RULES = [
+  /* 学习 */
+  {id:'r_stu1', cat:'c_study', lv:'lv0', t:'主线课程/主线任务推进 1 节', on:true, parent:null, seq:1},
+  {id:'r_stu2', cat:'c_study', lv:'lv0', t:'背单词 / 记术语 30min', on:true, parent:null, seq:2},
+  {id:'r_stu3', cat:'c_study', lv:'lv1', t:'动手练习：写代码 / 做题 / 实操 30min', on:true, parent:null, seq:1},
+  {id:'r_stu4', cat:'c_study', lv:'lv1', t:'啃一块硬骨头（当前最难的知识点）', on:true, parent:null, seq:2},
+  {id:'r_stu5', cat:'c_study', lv:'lv2', t:'当日产出留痕（提交 / 笔记 / 截图）', on:true, parent:null, seq:1},
+  {id:'r_stu6', cat:'c_study', lv:'lv2', t:'每周 10min 三问复盘', on:true, parent:null, seq:2},
+  /* 专注 */
+  {id:'r_foc1', cat:'c_focus', lv:'lv0', t:'想干活先坐「神圣座位」（固定工位）', on:true, parent:null, seq:1},
+  {id:'r_foc2', cat:'c_focus', lv:'lv0', t:'两分钟规则：只承诺做 2 分钟', on:true, parent:null, seq:2},
+  {id:'r_foc3', cat:'c_focus', lv:'lv1', t:'45min 深专注块 ×2', on:true, parent:null, seq:1},
+  {id:'r_foc4', cat:'c_focus', lv:'lv2', t:'到外部场所（图书馆/自习室/咖啡馆）≥2h', on:true, parent:null, seq:1},
+  /* 娱乐 */
+  {id:'r_pla1', cat:'c_play', lv:'lv0', t:'视频看完一节就关网页', on:true, parent:null, seq:1},
+  {id:'r_pla2', cat:'c_play', lv:'lv1', t:'娱乐只开熔断模式（先点 25min 计时）', on:true, parent:null, seq:1},
+  {id:'r_pla3', cat:'c_play', lv:'lv2', t:'零无意识刷屏日', on:true, parent:null, seq:1},
+  /* 戒断（坏习惯戒断链，保留） */
+  {id:'r_qui1', cat:'c_quit', lv:'lv0', t:'22:30 手机放到卧室外充电', on:true, parent:null, seq:1},
+  {id:'r_qui2', cat:'c_quit', lv:'lv1', t:'冲动触发 → 立刻 15 分钟冷却', on:true, parent:null, seq:1},
+  {id:'r_qui3', cat:'c_quit', lv:'lv2', t:'连续 7 天无破戒（链式记录）', on:true, parent:null, seq:1},
+  /* 生活 · 晨间主链（递进式大根部） */
+  {id:'r_lif1',  cat:'c_life', lv:'lv0', t:'起床脚落地，不沾床', on:true, parent:null, seq:1},
+  {id:'r_lif2a', cat:'c_life', lv:'lv0', t:'刷牙洗脸（冷水开机）', on:true, parent:null, seq:2},
+  {id:'r_lif2',  cat:'c_life', lv:'lv0', t:'开灯开窗帘（光照开机）', on:true, parent:null, seq:3},
+  {id:'r_lif2b', cat:'c_life', lv:'lv0', t:'吃一份带蛋白质的早餐', on:true, parent:null, seq:4},
+  {id:'r_lif7',  cat:'c_life', lv:'lv0', t:'走出家门 → 去到学习/工作场所', on:true, parent:null, seq:5},
+  {id:'r_lif3',  cat:'c_life', lv:'lv0', t:'清醒时段不吃零食/不喝含糖饮料', on:true, parent:null, seq:6},
+  /* 早起失败支链（挂在 r_lif1 下，主链崩溃时自动激活） */
+  {id:'r_lif1b1', cat:'c_life', lv:'lv0', t:'补觉 ≤20min（沙发，不躺回床）', on:true, parent:'r_lif1', seq:1},
+  {id:'r_lif1b2', cat:'c_life', lv:'lv0', t:'洗漱+光照后直接出门', on:true, parent:'r_lif1', seq:2},
+  /* 生活中层/顶层 */
+  {id:'r_lif4', cat:'c_life', lv:'lv1', t:'小睡 ≤20min 且不晚于 15 点', on:true, parent:null, seq:1},
+  {id:'r_lif5', cat:'c_life', lv:'lv1', t:'23:30 前上床', on:true, parent:null, seq:2},
+  {id:'r_lif6', cat:'c_life', lv:'lv2', t:'全天清醒无补觉', on:true, parent:null, seq:1},
+];
+const SEED_TAGS = [
+  {id:'t_social',name:'社交日',     color:'#e8912d', degrade:true},
+  {id:'t_lib',   name:'外出学习日', color:'#4ec9b0', degrade:false},
+  {id:'t_chaos', name:'高扰动',     color:'#f44747', degrade:true},
+  {id:'t_sleepy',name:'低能量日',   color:'#569cd6', degrade:true},
+];
+/* 阶段起止日按注册当天动态生成，避免写死日期 */
+function _dayOff(n){ const d=new Date(); d.setDate(d.getDate()+n); return d.toLocaleDateString('sv'); }
+const SEED_PHASES = [
+  {id:'p1', parent:null, name:'第一阶段 · 系统冷启动', start:_dayOff(0), end:_dayOff(30), imp:3, done:false, journal:'',
+   goal:'把晨间主链连续跑通 21 天 + 锁定 1 条主线任务 + 建立每日留痕习惯'},
+  {id:'p1a', parent:'p1', name:'7 天启动清单', start:_dayOff(0), end:_dayOff(6), imp:3, done:false, journal:'',
+   goal:'Day1 砍到只留 3 条根部规则 / Day2 布置神圣座位 / Day3 跑通一次 45min 专注块 / Day5 建立产出留痕的地方 / Day7 做第一次周复盘'},
+  {id:'p2', parent:null, name:'第二阶段 · 主链加固', start:_dayOff(31), end:_dayOff(120), imp:3, done:false, journal:'',
+   goal:'根部完成率 ≥80% + 主线任务推进过半 + 戒断门类连续 7 天无破戒'},
+  {id:'p3', parent:null, name:'第三阶段 · 顶层输出', start:_dayOff(121), end:_dayOff(240), imp:2, done:false, journal:'',
+   goal:'把学到的东西做成一个能拿出手的作品，完成「输入 → 输出」闭环'},
+];
+
+/* ---------- 加载 ----------
+ * 多用户版：localStorage 只是「当前登录用户的本地镜像」，真源在服务器。
+ * 这里用 SEED 兜底，保证即使离线/接口失败页面也能渲染而不是白屏。 */
+let cats    = store.get('cats',   SEED_CATS);
+let levels  = store.get('levels', SEED_LEVELS);
+let rules   = store.get('rules',  SEED_RULES.map(r=>({...r})));
+let tags    = store.get('tags',   SEED_TAGS.map(t=>({...t})));
+let daily   = store.get('daily', {});
+let events  = store.get('events', []);
+let phases  = store.get('phases', SEED_PHASES.map(p=>({...p})));
+let reviews = store.get('reviews', {day:{}, week:{}, month:{}});
+let meta    = store.get('meta', {});
+if(!reviews.day) reviews = {day:{}, week:{}, month:{}};
+rules.forEach(r=>{ if(r.parent===undefined) r.parent=null; });
+
+const lv0id = () => levels[0].id;
+const catOf = id => cats.find(c=>c.id===id);
+const lvOf  = id => levels.find(l=>l.id===id);
+const tagOf = id => tags.find(t=>t.id===id);
+const ruleOf = id => rules.find(r=>r.id===id);
+
+/* ---------- 今日记录 ---------- */
+function dayRec(d){
+  d = d||today;
+  if(!daily[d]) daily[d] = {checks:{}, tags:[], sleep:null, note:'', task:''};
+  if(!daily[d].tags) daily[d].tags = [];
+  if(!daily[d].broken) daily[d].broken = {}; /* 【v9】当日崩溃节点 {ruleId:true} */
+  return daily[d];
+}
+function saveDaily(){ store.set('daily', daily); }
+
+/* ---------- 页面切换 ---------- */
+function show(id,btn){
+  document.querySelectorAll('.tabbtn').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.section').forEach(d=>d.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  if(id==='review'){ renderIterSel(); renderDayView(); }
+  if(id==='phase') renderPhases();
+  if(id==='rules') renderRulePage();
+}
+function reviewTab(id,btn){
+  document.querySelectorAll('#rvTabs button').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  ['day','week','month','timeline'].forEach(k=>$('#rv-'+k).style.display=k===id?'block':'none');
+  if(id==='day') renderDayView();
+  if(id==='week') renderWeek();
+  if(id==='month'){ if(!$('#rvMonth').value) $('#rvMonth').value=today.slice(0,7); renderMonth(); }
+  if(id==='timeline') renderTimeline('all', document.querySelector('#evFilters button'));
+}
+
+/* ================= 日标记 ================= */
+function renderTodayTags(){
+  const rec = dayRec();
+  $('#todayTags').innerHTML = rec.tags.length
+    ? rec.tags.map(tid=>{ const t=tagOf(tid); if(!t) return '';
+        return '<span class="chip" style="color:'+t.color+';border-color:'+t.color+';" onclick="untag(\''+tid+'\')" title="点击移除">'+esc(t.name)+' <span class="x">×</span></span>'; }).join('')
+    : '<small>今天还没有标记。</small>';
+  $('#tagPicker').innerHTML = tags.filter(t=>!rec.tags.includes(t.id))
+    .map(t=>'<button class="mini ghost" style="border:1px solid '+t.color+';color:'+t.color+';" onclick="addTag(\''+t.id+'\')">+ '+esc(t.name)+'</button>').join(' ');
+  const dg = rec.tags.map(tagOf).filter(t=>t&&t.degrade);
+  const banner = $('#degradeBanner');
+  if(dg.length){ banner.style.display='block';
+    banner.textContent='⚠️ 降级协议已激活（'+dg.map(t=>t.name).join('、')+'）：只做侦查任务，不追责'; }
+  else banner.style.display='none';
+}
+function addTag(tid){ dayRec().tags.push(tid); saveDaily(); renderTodayTags(); }
+function untag(tid){ const r=dayRec(); r.tags=r.tags.filter(x=>x!==tid); saveDaily(); renderTodayTags(); }
+function toggleTagPanel(){ $('#tagPanel').classList.toggle('show'); renderTagDefs(); }
+function renderTagDefs(){
+  $('#tagDefs').innerHTML = tags.map(t=>
+    '<div class="row" style="margin:4px 0;"><span class="chip" style="color:'+t.color+';border-color:'+t.color+';">'+esc(t.name)+'</span>'
+    +'<small>'+(t.degrade?'降级日':'')+'</small>'
+    +'<button class="mini ghost" onclick="toggleTagDegrade(\''+t.id+'\')">'+(t.degrade?'取消降级':'设为降级')+'</button>'
+    +'<button class="mini danger" onclick="delTagDef(\''+t.id+'\')">删</button></div>').join('');
+}
+function addTagDef(){
+  const n=$('#newTagName').value.trim(); if(!n) return alert('标记名不能为空');
+  tags.push({id:'t'+Date.now(), name:n, color:$('#newTagColor').value, degrade:$('#newTagDegrade').checked});
+  store.set('tags',tags); $('#newTagName').value=''; $('#newTagDegrade').checked=false;
+  renderTagDefs(); renderTodayTags();
+}
+function toggleTagDegrade(id){ const t=tagOf(id); if(t){ t.degrade=!t.degrade; store.set('tags',tags); renderTagDefs(); renderTodayTags(); } }
+function delTagDef(id){
+  if(!confirm('删除该标记定义？历史日期上的此标记也会消失。')) return;
+  tags=tags.filter(t=>t.id!==id);
+  Object.keys(daily).forEach(d=>{ if(daily[d].tags) daily[d].tags=daily[d].tags.filter(x=>x!==id); });
+  store.set('tags',tags); saveDaily(); renderTagDefs(); renderTodayTags();
+}
+
+/* ================= 今日规则清单 ================= */
+function setTodayView(v){ meta.todayView=v; store.set('meta',meta); renderTodayRules(); }
+/* 【v9 重写】今日规则清单：主链按 seq 递进；崩溃节点显示支链；默认极简（打勾+💥），链路细节折叠 */
+function renderTodayRules(){
+  const v = meta.todayView||'cat';
+  $('#viewCatBtn').classList.toggle('active', v==='cat');
+  $('#viewLvBtn').classList.toggle('active', v==='lv');
+  const rec = dayRec();
+  const on = rules.filter(r=>r.on!==false);
+  const lvName = id => (lvOf(id)||{}).name||'?';
+  const lvIdx = id => levels.findIndex(l=>l.id===id);
+  const bySeq = (a,b)=>(a.seq||0)-(b.seq||0);
+
+  /* 单个节点：崩溃态禁用勾选并标红；有支链且父崩溃/支链已执行时展开支链 */
+  const item = (r,branch)=>{
+    const broken = !!(rec.broken&&rec.broken[r.id]);
+    const kids = on.filter(k=>k.parent===r.id).sort(bySeq);
+    const showKids = kids.length && (broken || kids.some(k=>rec.checks[k.id]));
+    let h='<div class="chain-row">'
+      +'<label><input type="checkbox" '+(rec.checks[r.id]?'checked':'')+(broken?' disabled':'')
+      +' onchange="checkRule(\''+r.id+'\',this.checked)">'
+      +'<span class="lv-badge lv'+Math.min(lvIdx(r.lv),3)+'">'+lvName(r.lv)+'</span>'
+      +'<span'+(broken?' style="color:var(--danger);"':'')+'>'
+      +(branch?'🔀 ':'')+esc(r.t)+(broken?' <small>[已崩溃]</small>':'')+'</span></label>'
+      +(broken
+        ? '<button class="mini ghost" onclick="unbreakRule(\''+r.id+'\')">↩</button>'
+        : '<button class="mini ghost" title="此节点今天崩溃，激活支链" onclick="breakRule(\''+r.id+'\')">💥</button>')
+      +'</div>';
+    if(showKids) h+='<div class="branch-box">'+kids.map(k=>item(k,true)).join('')+'</div>';
+    return h;
+  };
+
+  /* 组渲染：组内只列主链节点（parent=null），按层级再按 seq 排序 */
+  const group = (title,color,rs)=>{
+    if(!rs.length) return '';
+    const mains = rs.filter(r=>!r.parent).sort((a,b)=>lvIdx(a.lv)-lvIdx(b.lv)||bySeq(a,b));
+    if(!mains.length) return '';
+    return '<div class="grp-title" style="color:'+(color||'var(--dim)')+';">'+title+'</div>'
+      + mains.map(r=>item(r,false)).join('')
+      + '<details class="chain-detail"><summary>链路详情</summary><div class="path">'+chainPath(rs,rec)+'</div></details>';
+  };
+
+  let html='';
+  if(v==='cat'){
+    cats.forEach(c=>{ html += group(esc(c.name), c.color, on.filter(r=>r.cat===c.id)); });
+  } else {
+    levels.forEach((l,i)=>{ html += group('<span class="lv-badge lv'+Math.min(i,3)+'">'+esc(l.name)+'</span>', null, on.filter(r=>r.lv===l.id)); });
+  }
+  $('#todayRules').innerHTML = html||'<small>没有启用的规则，去「规则树」页添加。</small>';
+}
+
+/* 【v9】主链节点崩溃：记崩溃事件 + 激活支链；主链仍视为崩溃（不计完成，待复盘） */
+function breakRule(id){
+  const r=ruleOf(id); if(!r) return;
+  const kids=rules.filter(k=>k.parent===id&&k.on!==false).sort((a,b)=>(a.seq||0)-(b.seq||0));
+  if(!confirm('💥 标记「'+r.t+'」今日崩溃？\n\n主链此节点记为崩溃（仍需复盘）'
+    +(kids.length?'\n🔀 将激活支链：'+kids.map(k=>k.t).join(' → '):'\n（此节点暂无支链，可去规则树给它加一条）'))) return;
+  const rec=dayRec();
+  rec.broken[id]=true;
+  delete rec.checks[id];
+  saveDaily();
+  pushEvent('crash','定式崩溃：'+r.t, id, '');
+  renderTodayRules(); updateProgress();
+}
+function unbreakRule(id){
+  const rec=dayRec(); delete rec.broken[id]; saveDaily();
+  renderTodayRules(); updateProgress();
+}
+
+/* 【v9】链路路径文本：✅完成 💥崩溃 ⬜未执行；崩溃节点后接 🔀支链 */
+function chainPath(rs,rec){
+  const bySeq=(a,b)=>(a.seq||0)-(b.seq||0);
+  const node=r=>{
+    const broken=!!(rec.broken&&rec.broken[r.id]);
+    let s=(rec.checks[r.id]?'✅':broken?'💥':'⬜')+r.t;
+    const kids=rules.filter(k=>k.parent===r.id&&k.on!==false).sort(bySeq);
+    if(broken&&kids.length)
+      s+=' 〉🔀支链: '+kids.map(k=>node(k)).join(' → ');
+    return s;
+  };
+  return rs.filter(r=>!r.parent).sort(bySeq).map(node).join(' → ')||'（空）';
+}
+function checkRule(id,val){ dayRec().checks[id]=val; saveDaily(); updateProgress(); }
+/* 【v9】当日"有效根部"集合：主链根部 + 已激活支链（父崩溃或支链已被勾选），未激活支链不计入分母 */
+function activeRoots(rec){
+  return rules.filter(r=>r.lv===lv0id()&&r.on!==false)
+    .filter(r=>!r.parent || (rec.broken&&rec.broken[r.parent]) || (rec.checks&&rec.checks[r.id]));
+}
+function updateProgress(){
+  const rec=dayRec();
+  const roots=activeRoots(rec);
+  const done=roots.filter(r=>rec.checks[r.id]).length;
+  const pct=roots.length?Math.round(done/roots.length*100):0;
+  $('#progressFill').style.width=pct+'%';
+  $('#progressPct').textContent=pct+'%';
+}
+
+/* ================= 规则树页 ================= */
+let selNode = null;
+function setRuleView(v){ meta.ruleView=v; store.set('meta',meta); renderRulePage(); }
+function renderRulePage(){
+  const v = meta.ruleView||'tree';
+  $('#rmTreeBtn').classList.toggle('active',v==='tree');
+  $('#rmCatBtn').classList.toggle('active',v==='cat');
+  $('#rmLvBtn').classList.toggle('active',v==='lv');
+  $('#rmTree').style.display = v==='tree'?'block':'none';
+  $('#rmList').style.display = v==='tree'?'none':'block';
+  if(v==='tree') renderTree(); else renderRuleList(v);
+  renderCatLvList();
+}
+function renderTree(){
+  let html='';
+  cats.forEach(c=>{
+    const crs=rules.filter(r=>r.cat===c.id);
+    html+='<div class="tnode"><div class="trow" data-nid="cat:'+c.id+'" onclick="selectNode(this,\'cat\',\''+c.id+'\',null,null)">'
+      +'<span class="dot" style="background:'+c.color+';"></span><span class="tname"><b>'+esc(c.name)+'</b></span>'
+      +'<span class="cnt">'+crs.filter(r=>r.on!==false).length+' 规则</span></div><div class="tkids">';
+    levels.forEach((l,i)=>{
+      const lrs=crs.filter(r=>r.lv===l.id);
+      html+='<div class="tnode"><div class="trow" data-nid="lv:'+c.id+':'+l.id+'" onclick="selectNode(this,\'lv\',\''+c.id+'\',\''+l.id+'\',null)">'
+        +'<span class="lv-badge lv'+Math.min(i,3)+'">'+esc(l.name)+'</span>'
+        +'<span class="cnt">'+lrs.length+'</span></div><div class="tkids">';
+      /* 【v9】主链节点按 seq 排列，支链节点嵌套显示在父节点下（🔀） */
+      lrs.filter(r=>!r.parent).sort((a,b)=>(a.seq||0)-(b.seq||0)).forEach(r=>{
+        html+=ruleNodeHTML(r,c,l);
+      });
+      html+='</div></div>';
+    });
+    html+='</div></div>';
+  });
+  $('#ruleTree').innerHTML=html;
+}
+/* 【v9】规则节点（含支链子节点递归渲染） */
+function ruleNodeHTML(r,c,l){
+  const kids=rules.filter(k=>k.parent===r.id).sort((a,b)=>(a.seq||0)-(b.seq||0));
+  return '<div class="tnode"><div class="trow" data-nid="rule:'+r.id+'" onclick="selectNode(this,\'rule\',\''+c.id+'\',\''+l.id+'\',\''+r.id+'\')">'
+    +(r.parent?'<span style="color:var(--warn);">🔀</span>':'')
+    +(kids.length?'<span style="color:var(--dim);font-size:.7rem;">▸'+kids.length+'</span>':'')
+    +'<span class="tname" style="'+(r.on===false?'opacity:.4;text-decoration:line-through;':'')+'">'+esc(r.t)+'</span></div>'
+    +(kids.length?'<div class="tkids">'+kids.map(k=>ruleNodeHTML(k,c,l)).join('')+'</div>':'')
+    +'</div>';
+}
+/* el 由 inline 调用传入，不再依赖全局 event（兼容性修复） */
+function selectNode(el,kind,cat,lv,id){
+  selNode={kind,cat,lv,id};
+  document.querySelectorAll('.trow.sel').forEach(x=>x.classList.remove('sel'));
+  if(el) el.classList.add('sel');
+  const p=$('#nodePanel'); p.classList.add('show');
+  if(kind==='cat'){
+    const c=catOf(cat);
+    $('#npTitle').textContent='门类：'+c.name;
+    $('#npBody').innerHTML='<div class="row"><input type="text" id="npText" value="'+esc(c.name)+'" style="flex:1;">'
+      +'<input type="color" id="npColor" value="'+c.color+'" style="width:46px;height:40px;padding:2px;"></div>'
+      +'<div style="margin-top:8px;"><button class="mini ok" onclick="npRenameCat()">保存</button> '
+      +'<button class="mini danger" onclick="npDelCat()">删除门类</button></div>';
+  } else if(kind==='lv'){
+    const c=catOf(cat), l=lvOf(lv);
+    $('#npTitle').textContent=c.name+' / '+l.name;
+    $('#npBody').innerHTML='<div class="row"><input type="text" id="npText" placeholder="新规则内容" style="flex:1;">'
+      +'<button class="mini ok" onclick="npAddRule()">＋ 在此添加规则</button></div>'
+      +'<p><small>层级名全局共用，改名在下方「门类 & 层级设置」。</small></p>';
+  } else {
+    const r=ruleOf(id);
+    $('#npTitle').textContent='规则';
+    $('#npBody').innerHTML='<input type="text" id="npText" value="'+esc(r.t)+'">'
+      +'<div class="row" style="margin-top:8px;"><select id="npCat">'+cats.map(c=>'<option value="'+c.id+'"'+(c.id===r.cat?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select>'
+      +'<select id="npLv">'+levels.map(l=>'<option value="'+l.id+'"'+(l.id===r.lv?' selected':'')+'>'+esc(l.name)+'</option>').join('')+'</select></div>'
+      +'<div style="margin-top:8px;"><button class="mini ok" onclick="npSaveRule()">保存修改</button> '
+      +'<button class="mini ghost" onclick="npToggleRule()">'+(r.on!==false?'停用':'启用')+'</button> '
+      +'<button class="mini ghost" onclick="npMove(-1)">↑ 链内上移</button> '
+      +'<button class="mini ghost" onclick="npMove(1)">↓ 下移</button> '
+      +'<button class="mini danger" onclick="npDelRule()">删除</button></div>'
+      /* 【v9】给该节点加支链 */
+      +'<div class="row" style="margin-top:10px;"><input type="text" id="npBranchText" placeholder="支链节点：此节点崩溃时的备选路径" style="flex:1;">'
+      +'<button class="mini ok" onclick="npAddBranch()">＋支链</button></div>';
+  }
+  p.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+/* 供外部（迭代台）程序化调用：跳到规则树并选中某规则 */
+function gotoRuleNode(id){
+  const r=ruleOf(id); if(!r) return;
+  meta.ruleView='tree'; store.set('meta',meta);
+  show('rules', document.querySelectorAll('.tabbtn')[1]);
+  renderRulePage();
+  selectNode(document.querySelector('[data-nid="rule:'+id+'"]'),'rule',r.cat,r.lv,id);
+}
+function npRenameCat(){ const c=catOf(selNode.cat); c.name=$('#npText').value.trim()||c.name; c.color=$('#npColor').value;
+  store.set('cats',cats); renderRulePage(); renderTodayRules(); $('#nodePanel').classList.remove('show'); }
+function npDelCat(){
+  if(!confirm('删除门类「'+catOf(selNode.cat).name+'」？其下规则一并删除。')) return;
+  rules=rules.filter(r=>r.cat!==selNode.cat); cats=cats.filter(c=>c.id!==selNode.cat);
+  store.set('cats',cats); store.set('rules',rules); renderRulePage(); renderTodayRules(); $('#nodePanel').classList.remove('show');
+}
+function npAddRule(){
+  const t=$('#npText').value.trim(); if(!t) return alert('规则内容不能为空');
+  const sibs=rules.filter(k=>k.cat===selNode.cat&&k.lv===selNode.lv&&!k.parent);
+  rules.push({id:'u'+Date.now(), cat:selNode.cat, lv:selNode.lv, t, on:true, parent:null, seq:sibs.length+1});
+  store.set('rules',rules); renderTree(); renderTodayRules(); $('#npText').value='';
+}
+function npSaveRule(){ const r=ruleOf(selNode.id);
+  r.t=$('#npText').value.trim()||r.t; r.cat=$('#npCat').value; r.lv=$('#npLv').value;
+  store.set('rules',rules); renderRulePage(); renderTodayRules(); $('#nodePanel').classList.remove('show'); }
+function npToggleRule(){ const r=ruleOf(selNode.id); r.on=r.on===false?true:false;
+  store.set('rules',rules); renderTree(); renderTodayRules(); $('#nodePanel').classList.remove('show'); }
+function npDelRule(){
+  const kidsN=rules.filter(k=>k.parent===selNode.id).length;
+  if(!confirm('删除这条规则'+(kidsN?'（含 '+kidsN+' 个支链节点）':'')+'？历史勾选数据保留但不再显示。')) return;
+  const kill=x=>{ rules.filter(k=>k.parent===x).forEach(k=>kill(k.id)); rules=rules.filter(k=>k.id!==x); };
+  kill(selNode.id);
+  store.set('rules',rules); renderTree(); renderTodayRules(); $('#nodePanel').classList.remove('show');
+}
+/* 【v9】节点面板：加支链 / 链内排序 */
+function npAddBranch(){
+  const t=$('#npBranchText').value.trim(); if(!t) return alert('支链内容不能为空');
+  const parent=ruleOf(selNode.id);
+  const siblings=rules.filter(k=>k.parent===parent.id);
+  rules.push({id:'u'+Date.now(), cat:parent.cat, lv:parent.lv, t, on:true, parent:parent.id, seq:siblings.length+1});
+  store.set('rules',rules); renderTree(); renderTodayRules();
+  alert('🔀 支链已挂到「'+parent.t+'」下。\n该节点崩溃时，支链会在今日页出现。');
+  $('#nodePanel').classList.remove('show');
+}
+function npMove(dir){
+  const r=ruleOf(selNode.id);
+  const sibs=rules.filter(k=>k.cat===r.cat&&k.lv===r.lv&&(k.parent||null)===(r.parent||null)).sort((a,b)=>(a.seq||0)-(b.seq||0));
+  const i=sibs.findIndex(k=>k.id===r.id), j=i+dir;
+  if(j<0||j>=sibs.length) return;
+  const tmp=sibs[i].seq; sibs[i].seq=sibs[j].seq; sibs[j].seq=tmp;
+  store.set('rules',rules); renderTree(); renderTodayRules();
+  selectNode(document.querySelector('[data-nid="rule:'+r.id+'"]'),'rule',r.cat,r.lv,r.id);
+}
+function renderRuleList(v){
+  const item=r=>'<div class="trow"><input type="checkbox" '+(r.on!==false?'checked':'')+' onchange="toggleRuleOn(\''+r.id+'\',this.checked)">'
+    +(r.parent?'<span style="color:var(--warn);">🔀</span>':'')
+    +'<span class="tname">'+esc(r.t)+'</span>'
+    +'<button class="mini ghost" onclick="gotoRuleNode(\''+r.id+'\')">改</button>'
+    +'<button class="mini danger" onclick="delRuleDirect(\''+r.id+'\')">删</button></div>';
+  let html='';
+  if(v==='cat'){
+    cats.forEach(c=>{ const rs=rules.filter(r=>r.cat===c.id); if(!rs.length) return;
+      html+='<div class="grp-title" style="color:'+c.color+';">'+esc(c.name)+'</div>'+rs.map(item).join(''); });
+  } else {
+    levels.forEach((l,i)=>{ const rs=rules.filter(r=>r.lv===l.id); if(!rs.length) return;
+      html+='<div class="grp-title"><span class="lv-badge lv'+Math.min(i,3)+'">'+esc(l.name)+'</span></div>'+rs.map(item).join(''); });
+  }
+  $('#rmList').innerHTML=html;
+}
+function toggleRuleOn(id,on){ const r=ruleOf(id); if(r){ r.on=on; store.set('rules',rules); renderTodayRules(); } }
+function delRuleDirect(id){ if(confirm('删除这条规则？')){ rules=rules.filter(x=>x.id!==id); store.set('rules',rules); renderRulePage(); renderTodayRules(); } }
+
+/* ---------- 门类 & 层级设置 ---------- */
+function renderCatLvList(){
+  let html='<div class="grp-title">层级（顺序即优先级，↑↓ 调整）</div>';
+  levels.forEach((l,i)=>{
+    html+='<div class="row" style="margin:4px 0;"><span class="lv-badge lv'+Math.min(i,3)+'">'+esc(l.name)+'</span>'
+      +'<span style="flex:1;"></span>'
+      +'<button class="mini ghost" onclick="renameLv(\''+l.id+'\')">改名</button>'
+      +'<button class="mini ghost" onclick="moveLv('+i+',-1)">↑</button>'
+      +'<button class="mini ghost" onclick="moveLv('+i+',1)">↓</button>'
+      +(levels.length>1?'<button class="mini danger" onclick="delLv(\''+l.id+'\')">删</button>':'')+'</div>';
+  });
+  $('#catLvList').innerHTML=html;
+}
+function addCat(){ const n=$('#newCatName').value.trim(); if(!n) return alert('门类名不能为空');
+  cats.push({id:'c'+Date.now(), name:n, color:$('#newCatColor').value});
+  store.set('cats',cats); $('#newCatName').value=''; renderRulePage(); renderTodayRules(); }
+function addLv(){ const n=$('#newLvName').value.trim(); if(!n) return alert('层级名不能为空');
+  levels.push({id:'lv'+Date.now(), name:n}); store.set('levels',levels); $('#newLvName').value=''; renderRulePage(); }
+function renameLv(id){ const l=lvOf(id); const n=prompt('层级改名（全局生效）：',l.name);
+  if(n&&n.trim()){ l.name=n.trim(); store.set('levels',levels); renderRulePage(); renderTodayRules(); } }
+function moveLv(i,d){ const j=i+d; if(j<0||j>=levels.length) return;
+  [levels[i],levels[j]]=[levels[j],levels[i]]; store.set('levels',levels); renderRulePage(); renderTodayRules(); }
+function delLv(id){
+  const n=rules.filter(r=>r.lv===id).length;
+  if(!confirm('删除层级「'+lvOf(id).name+'」？其下 '+n+' 条规则会移到第 1 级。')) return;
+  rules.forEach(r=>{ if(r.lv===id) r.lv=levels.find(l=>l.id!==id).id; });
+  levels=levels.filter(l=>l.id!==id);
+  store.set('levels',levels); store.set('rules',rules); renderRulePage(); renderTodayRules();
+}
+
+/* ================= 快速事件 ================= */
+function pushEvent(type, text, ruleId, retro){
+  events.push({ ts:new Date().toLocaleString('sv').slice(0,16), day:today, type, text:text||'', ruleId:ruleId||null, retro:retro||'' });
+  store.set('events',events);
+}
+function quickEvent(type){
+  const text=$('#quickEvText').value.trim();
+  pushEvent(type, text);
+  $('#quickEvText').value='';
+  alert(EVT[type]+' 已记录。只记事实，不归零。');
+}
+/* 【v8】事件弹窗（关联定式 + 回溯建议） */
+function openEventModal(){
+  $('#m_evRule').innerHTML='<option value="">-- 不关联 --</option>'
+    +rules.map(r=>'<option value="'+r.id+'">'+esc(r.t)+'</option>').join('');
+  $('#m_evDesc').value=''; $('#m_evRetro').value='';
+  $('#eventModal').classList.add('show');
+}
+function saveEventModal(){
+  const desc=$('#m_evDesc').value.trim();
+  if(!desc) return alert('请填写事实描述');
+  pushEvent($('#m_evType').value, desc, $('#m_evRule').value, $('#m_evRetro').value.trim());
+  closeModal('eventModal');
+  renderTimeline('all', document.querySelector('#evFilters button'));
+}
+
+/* ================= 【v8】定式迭代台 ================= */
+function renderIterSel(){
+  $('#iterRuleSel').innerHTML = cats.map(c=>
+    '<optgroup label="'+esc(c.name)+'">'
+    + rules.filter(r=>r.cat===c.id).map(r=>'<option value="'+r.id+'">'
+      +(r.on===false?'[已停用] ':'')+esc((lvOf(r.lv)||{}).name+' · '+r.t)+'</option>').join('')
+    +'</optgroup>').join('');
+}
+function iterSelRule(){ const r=ruleOf($('#iterRuleSel').value); if(!r) alert('先选一条定式'); return r; }
+function iterCrash(){
+  const r=iterSelRule(); if(!r) return;
+  const note=$('#iterNote').value.trim();
+  pushEvent('crash', '定式崩溃：'+r.t+(note?'｜'+note:''), r.id, note);
+  $('#iterNote').value='';
+  if(confirm('💥 已记录「'+r.t+'」崩溃。\n\n崩塌即调试——现在去修改这条定式？\n（改简单、降级、或拆分支都可以）')){
+    gotoRuleNode(r.id);
+  }
+}
+function iterRecover(){
+  const r=iterSelRule(); if(!r) return;
+  const note=$('#iterNote').value.trim();
+  if(r.on===false){ r.on=true; store.set('rules',rules); }
+  pushEvent('recover', '恢复执行：'+r.t+(note?'｜'+note:''), r.id, '');
+  $('#iterNote').value='';
+  renderTodayRules(); renderIterSel();
+  alert('✅ 已记录恢复：'+r.t+(r.on?'':'（并重新启用）')+'\n不追责，不归零，继续运行。');
+}
+function iterEdit(){
+  const r=iterSelRule(); if(!r) return;
+  gotoRuleNode(r.id);
+}
+
+/* ================= 回溯：日 ================= */
+function renderDayView(){
+  if(!$('#rvDate').value) $('#rvDate').value=today;
+  const d=$('#rvDate').value, rec=daily[d];
+  let html='';
+  if(rec){
+    const roots=activeRoots(rec);
+    const done=roots.filter(r=>rec.checks&&rec.checks[r.id]).length;
+    html+='<div class="stat-grid">'
+      +'<div class="stat"><div class="v">'+done+'/'+roots.length+'</div><div class="k">'+levels[0].name+'完成</div></div>'
+      +'<div class="stat"><div class="v">'+(rec.sleep??'—')+'</div><div class="k">睡眠(h)</div></div></div>';
+    if(rec.tags&&rec.tags.length)
+      html+='<p>'+rec.tags.map(tid=>{const t=tagOf(tid); return t?'<span class="chip" style="color:'+t.color+';border-color:'+t.color+';cursor:default;">'+esc(t.name)+'</span>':'';}).join('')+'</p>';
+    cats.forEach(c=>{
+      const rs=rules.filter(r=>r.cat===c.id); if(!rs.length) return;
+      html+='<div class="grp-title" style="color:'+c.color+';">'+esc(c.name)+'</div>';
+      /* 【v9】日视图用链路路径呈现：主链/支链执行情况一目了然 */
+      html+='<div class="path" style="font-size:.82rem;font-family:var(--mono);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;line-height:1.8;">'
+        +chainPath(rs,rec)+'</div>';
+    });
+    if(rec.task) html+='<p><small>当日焦点：</small>'+esc(rec.task)+'</p>';
+    if(rec.note) html+='<p><small>备注：</small>'+esc(rec.note)+'</p>';
+  } else html='<p><small>这一天没有记录。</small></p>';
+  const evs=events.filter(e=>(e.day||e.ts.slice(0,10))===d);
+  if(evs.length){ html+='<div class="grp-title">当日事件</div>'; evs.forEach(e=>html+=evHTML(e,false)); }
+  $('#dayView').innerHTML=html;
+  /* 日复盘 */
+  $('#rvDayKey').textContent='（'+d+'）';
+  $('#rvDayReview').value = reviews.day[d]||'';
+  renderPastReviews('day');
+}
+
+/* ================= 回溯：周（+柱状图 +周复盘） ================= */
+function weekKeyOf(ds){
+  const d=new Date(ds); const dow=(d.getDay()+6)%7; d.setDate(d.getDate()-dow);
+  return d.toLocaleDateString('sv'); /* 本周一的日期作为周 key */
+}
+function renderWeek(){
+  const days=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); days.push(d.toLocaleDateString('sv')); }
+  const pctOf = d=>{ const rec=daily[d]; if(!rec) return null;
+    const roots=activeRoots(rec); if(!roots.length) return null;
+    return Math.round(roots.filter(r=>rec.checks&&rec.checks[r.id]).length/roots.length*100); };
+  /* 柱状图 */
+  $('#weekChart').innerHTML = days.map(d=>{ const p=pctOf(d);
+    return '<div class="chart-bar" style="height:'+(p==null?2:Math.max(p,2))+'%;opacity:'+(p==null?0.25:1)+';" title="'+d+' '+(p==null?'无记录':p+'%')+'" onclick="gotoDay(\''+d+'\')"></div>'; }).join('');
+  $('#weekChartLabels').innerHTML = days.map(d=>'<span>'+d.slice(5)+'</span>').join('');
+  /* 表格 */
+  let tot=0,cnt=0;
+  let html='<table class="wk"><tr><th>日期</th><th>'+levels[0].name+'</th><th>标记</th><th>事件</th><th>睡眠</th></tr>';
+  days.forEach(d=>{
+    const rec=daily[d];
+    const evs=events.filter(e=>(e.day||e.ts.slice(0,10))===d);
+    const p=pctOf(d);
+    if(p!=null){ tot+=p; cnt++; }
+    const tg=(rec&&rec.tags)?rec.tags.map(tid=>{const t=tagOf(tid);return t?esc(t.name):'';}).filter(Boolean).join(' '):'';
+    html+='<tr><td class="mono">'+d.slice(5)+'</td><td class="mono">'+(p==null?'—':p+'%')+'</td><td>'+tg+'</td>'
+      +'<td>'+evs.map(e=>EVT[e.type]||e.type).join(' ')+'</td>'
+      +'<td class="mono">'+(rec&&rec.sleep!=null?rec.sleep+'h':'—')+'</td></tr>';
+  });
+  html+='</table><p style="margin-top:10px;"><small>本周'+levels[0].name+'平均完成率：</small><b class="mono" style="color:var(--ok);">'+(cnt?Math.round(tot/cnt):0)+'%</b></p>';
+  $('#weekView').innerHTML=html;
+  /* 周复盘 */
+  const wk=weekKeyOf(today);
+  $('#rvWeekKey').textContent='（'+wk+' 起这一周）';
+  $('#rvWeekReview').value = reviews.week[wk]||'';
+  renderPastReviews('week');
+}
+
+/* ================= 回溯：月 ================= */
+function renderMonth(){
+  const ym=$('#rvMonth').value; if(!ym) return;
+  const [y,m]=ym.split('-').map(Number);
+  const daysIn=new Date(y,m,0).getDate();
+  let html='<div class="cal">';
+  ['一','二','三','四','五','六','日'].forEach(d=>html+='<div class="dow">'+d+'</div>');
+  let offset=(new Date(y,m-1,1).getDay()+6)%7;
+  for(let i=0;i<offset;i++) html+='<div class="day empty"></div>';
+  for(let d=1;d<=daysIn;d++){
+    const ds=ym+'-'+String(d).padStart(2,'0');
+    const rec=daily[ds];
+    let pct=null;
+    if(rec){ const roots=activeRoots(rec);
+      if(roots.length) pct=roots.filter(r=>rec.checks&&rec.checks[r.id]).length/roots.length; }
+    const bg=pct==null?'':'background:rgba(0,122,204,'+(0.15+pct*0.65)+');';
+    html+='<div class="day'+(ds===today?' today':'')+'" style="'+bg+'" onclick="gotoDay(\''+ds+'\')">'
+      +d+(pct!=null?'<span class="pct">'+Math.round(pct*100)+'%</span>':'')+'</div>';
+  }
+  $('#monthView').innerHTML=html+'</div>';
+  /* 月复盘 */
+  $('#rvMonthKey').textContent='（'+ym+'）';
+  $('#rvMonthReview').value = reviews.month[ym]||'';
+  renderPastReviews('month');
+}
+function gotoDay(ds){
+  $('#rvDate').value=ds;
+  document.querySelectorAll('#rvTabs button')[0].click();
+}
+
+/* ================= 复盘存取（日/周/月通用） ================= */
+function saveReview(scope, key, text){
+  if(text.trim()) reviews[scope][key]=text; else delete reviews[scope][key];
+  store.set('reviews',reviews);
+  renderPastReviews(scope);
+}
+function renderPastReviews(scope){
+  const elId = {day:'#pastDayReviews', week:'#pastWeekReviews', month:'#pastMonthReviews'}[scope];
+  const entries = Object.keys(reviews[scope]).sort().reverse().filter(k=>{
+    if(scope==='day') return k!==($('#rvDate').value||today);
+    if(scope==='week') return k!==weekKeyOf(today);
+    return k!==($('#rvMonth').value||today.slice(0,7));
+  }).slice(0,6);
+  $(elId).innerHTML = entries.length
+    ? '<div class="grp-title">历史复盘</div>'+entries.map(k=>'<div class="past-review"><span class="k">'+k+'</span><br>'+esc(reviews[scope][k])+'</div>').join('')
+    : '';
+}
+
+/* ================= 事件流 ================= */
+function evHTML(e,del){
+  const r=e.ruleId?ruleOf(e.ruleId):null;
+  return '<div class="ev ev-'+e.type+'"><span class="evtag">'+EVT[e.type]+'</span>'
+    +'<span class="t">'+e.ts+'</span><span style="flex:1;">'+esc(e.text||'')
+    +(r?'<br><small style="color:var(--dim);">关联定式：'+esc(r.t)+'</small>':'')
+    +(e.retro?'<span class="retro">↳ 回溯建议：'+esc(e.retro)+'</span>':'')
+    +'</span>'+(del?'<button class="x" onclick="delEvent('+e._i+')">×</button>':'')+'</div>';
+}
+function renderTimeline(f,btn){
+  if(btn){ document.querySelectorAll('#evFilters button').forEach(x=>x.classList.remove('active')); btn.classList.add('active'); }
+  let list=events.map((e,i)=>({...e,_i:i})).reverse();
+  if(f&&f!=='all') list=list.filter(e=>e.type===f);
+  $('#timelineView').innerHTML=list.slice(0,100).map(e=>evHTML(e,true)).join('')||'<p><small>暂无事件。</small></p>';
+}
+function delEvent(i){ events.splice(i,1); store.set('events',events);
+  const b=document.querySelector('#evFilters button.active'); if(b) b.click(); }
+
+/* ================= 阶段档案 ================= */
+function addPhase(parentId){
+  let nm;
+  if(parentId){ nm=(prompt('分支（小阶段）名称：')||'').trim(); if(!nm) return; }
+  else { nm=$('#phName').value.trim(); if(!nm) return alert('阶段名不能为空'); }
+  phases.push({ id:'p'+Date.now(), parent:parentId||null, name:nm,
+    start: parentId? today : ($('#phStart').value||today),
+    end: parentId? '' : ($('#phEnd').value||''),
+    goal: parentId? '' : $('#phGoal').value.trim(),
+    imp: parentId? 2 : +($('#phImp').value||2),
+    journal:'', done:false });
+  store.set('phases',phases);
+  if(!parentId){ $('#phName').value=''; $('#phGoal').value=''; }
+  renderPhases(); updatePhasePill();
+}
+function renderPhases(){
+  if(!phases.length){ $('#phaseList').innerHTML='<p><small>还没有阶段。</small></p>'; return; }
+  $('#phaseList').innerHTML = phases.filter(p=>!p.parent).map(p=>phaseHTML(p,0)).join('');
+}
+function phaseHTML(p,depth){
+  const s=phaseStats(p);
+  const kids=phases.filter(x=>x.parent===p.id);
+  let html='<div class="phase'+(isPhaseNow(p)?' now':'')+'" style="margin-left:'+(depth*18)+'px;">'
+    +'<h3 style="margin:0;">'+(depth?'└ ':'')+esc(p.name)+' '
+    +(p.done?'<span class="pill">已完结</span>':isPhaseNow(p)?'<span class="pill" style="color:var(--ok);border-color:var(--ok);">进行中</span>':'')
+    +'</h3><span class="stars">'+'★'.repeat(p.imp||1)+'☆'.repeat(3-(p.imp||1))+'</span>'
+    +'<p style="margin:4px 0;"><small class="mono">'+p.start+' ~ '+(p.end||'至今')+'</small>'
+    +(p.goal?'<br><small>目标：'+esc(p.goal)+'</small>':'')+'</p>'
+    +'<div class="stat-grid">'
+    +'<div class="stat"><div class="v">'+s.days+'</div><div class="k">有记录天数</div></div>'
+    +'<div class="stat"><div class="v">'+s.pct+'%</div><div class="k">'+levels[0].name+'完成率</div></div>'
+    +'<div class="stat"><div class="v">'+s.crashes+'</div><div class="k">崩溃/破戒</div></div>'
+    +'<div class="stat"><div class="v">'+s.sleepAvg+'</div><div class="k">平均睡眠(h)</div></div></div>'
+    +'<textarea rows="2" placeholder="阶段日志：主观复盘写这里（自动保存）" onchange="savePhaseJournal(\''+p.id+'\',this.value)">'+esc(p.journal||'')+'</textarea>'
+    +'<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">'
+    +'<button class="mini ghost" onclick="addPhase(\''+p.id+'\')">＋分支</button>'
+    +'<button class="mini ghost" onclick="togglePhaseEdit(\''+p.id+'\')">编辑</button>'
+    +'<button class="mini ghost" onclick="togglePhaseDone(\''+p.id+'\')">'+(p.done?'重开':'完结')+'</button>'
+    +'<button class="mini danger" onclick="delPhase(\''+p.id+'\')">删除</button></div>'
+    +'<div class="phedit" id="pe_'+p.id+'">'
+    +'<input type="text" id="pen_'+p.id+'" value="'+esc(p.name)+'">'
+    +'<div class="row"><input type="date" id="pes_'+p.id+'" value="'+p.start+'"><input type="date" id="pee_'+p.id+'" value="'+(p.end||'')+'">'
+    +'<select id="pei_'+p.id+'" style="width:130px;">'+[3,2,1].map(i=>'<option value="'+i+'"'+(p.imp===i?' selected':'')+'>'+'★'.repeat(i)+'</option>').join('')+'</select></div>'
+    +'<textarea rows="2" id="peg_'+p.id+'">'+esc(p.goal||'')+'</textarea>'
+    +'<button class="mini ok" onclick="savePhaseEdit(\''+p.id+'\')">保存修改</button></div></div>';
+  kids.forEach(k=>html+=phaseHTML(k,depth+1));
+  return html;
+}
+function phaseStats(p){
+  const end=p.end||today;
+  let days=0,tot=0,sleepSum=0,sleepN=0;
+  Object.keys(daily).forEach(d=>{
+    if(d>=p.start&&d<=end){ const rec=daily[d]; days++;
+      const roots=activeRoots(rec);
+      if(roots.length) tot+=roots.filter(r=>rec.checks&&rec.checks[r.id]).length/roots.length;
+      if(rec.sleep!=null){ sleepSum+=+rec.sleep; sleepN++; } }
+  });
+  const crashes=events.filter(e=>{ const d=e.day||e.ts.slice(0,10);
+    return d>=p.start&&d<=end&&(e.type==='crash'||e.type==='relapse'); }).length;
+  return { days, pct:days?Math.round(tot/days*100):0, crashes, sleepAvg:sleepN?(sleepSum/sleepN).toFixed(1):'—' };
+}
+function isPhaseNow(p){ return !p.done&&p.start<=today&&(!p.end||p.end>=today); }
+function savePhaseJournal(id,v){ const p=phases.find(x=>x.id===id); if(p){ p.journal=v; store.set('phases',phases); } }
+function togglePhaseEdit(id){ $('#pe_'+id).classList.toggle('show'); }
+function savePhaseEdit(id){ const p=phases.find(x=>x.id===id); if(!p) return;
+  p.name=$('#pen_'+id).value.trim()||p.name; p.start=$('#pes_'+id).value||p.start;
+  p.end=$('#pee_'+id).value||''; p.imp=+$('#pei_'+id).value; p.goal=$('#peg_'+id).value.trim();
+  store.set('phases',phases); renderPhases(); updatePhasePill(); }
+function togglePhaseDone(id){ const p=phases.find(x=>x.id===id); if(p){ p.done=!p.done; store.set('phases',phases); renderPhases(); updatePhasePill(); } }
+function delPhase(id){
+  const kids=phases.filter(x=>x.parent===id).length;
+  if(!confirm('删除该阶段'+(kids?'（含 '+kids+' 个分支）':'')+'？日志一并删除。')) return;
+  const kill=x=>{ phases.filter(p=>p.parent===x).forEach(p=>kill(p.id)); phases=phases.filter(p=>p.id!==x); };
+  kill(id); store.set('phases',phases); renderPhases(); updatePhasePill();
+}
+function updatePhasePill(){
+  const act=phases.filter(isPhaseNow);
+  const deep=act.find(p=>p.parent)||act[0];
+  $('#phasePill').textContent=deep?'📍 '+deep.name:'📍 无进行中阶段';
+}
+
+/* ================= 计时器 ================= */
+let timerInt=null;
+function startTimer(sec,title,hint,onDone){
+  clearInterval(timerInt);
+  $('#timerTitle').textContent=title; $('#timerHint').textContent=hint;
+  $('#timerModal').classList.add('show');
+  let left=sec;
+  const tick=()=>{ $('#timerText').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');
+    if(left<=0){ clearInterval(timerInt); closeModal('timerModal'); onDone&&onDone(); } left--; };
+  tick(); timerInt=setInterval(tick,1000);
+}
+function cancelTimer(){ clearInterval(timerInt); closeModal('timerModal'); }
+function closeModal(id){ document.getElementById(id).classList.remove('show'); }
+function startCooldown(){ startTimer(15*60,'🚨 冲动冷却执行中','现在：起身喝水 → 离开当前环境 → 手机放到够不着的地方。15 分钟后再评估。',
+  ()=>alert('✅ 冷却完成。冲动窗口期已过，回到主链。')); }
+function startFuse(){ startTimer(25*60,'📺 视频熔断倒计时','25 分钟后强制提醒关闭网页。',
+  ()=>alert('⛔ 熔断触发！立即关闭视频网页。')); }
+
+/* ================= 周报 ================= */
+function exportWeekly(){
+  const days=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); days.push(d.toLocaleDateString('sv')); }
+  const L=['===== 底层创造者OS 周报 =====','区间: '+days[0]+' ~ '+days[6],''];
+  L.push('【规则树版本】（🔀=支链）');
+  cats.forEach(c=>{ L.push('◆ '+c.name);
+    levels.forEach(l=>{ rules.filter(r=>r.cat===c.id&&r.lv===l.id)
+      .forEach(r=>L.push('  '+(r.on!==false?'[启用]':'[停用]')+' '+l.name+' · '+(r.parent?'🔀':'')+r.t)); }); });
+  L.push('','【'+levels[0].name+'完成】（含已激活支链；💥=主链节点崩溃）');
+  days.forEach(d=>{ const rec=daily[d];
+    if(rec){ const roots=activeRoots(rec);
+      const done=roots.filter(r=>rec.checks&&rec.checks[r.id]).length;
+      const tg=(rec.tags||[]).map(tid=>{const t=tagOf(tid);return t?t.name:'';}).filter(Boolean).join('/');
+      const br=Object.keys(rec.broken||{}).map(id=>{const r=ruleOf(id);return r?r.t:null;}).filter(Boolean).join('、');
+      L.push(d+'  '+done+'/'+roots.length+(tg?'  ['+tg+']':'')+(rec.sleep!=null?'  睡眠'+rec.sleep+'h':'')+(br?'  💥'+br:'')); }
+    else L.push(d+'  无记录'); });
+  L.push('','【本周事件】');
+  const we=events.filter(e=>{const d=e.day||e.ts.slice(0,10);return d>=days[0]&&d<=days[6];});
+  if(we.length) we.forEach(e=>L.push('· '+e.ts+' '+EVT[e.type]+' '+(e.text||'')+(e.retro?' ↳'+e.retro:'')));
+  else L.push('（无）');
+  const wk=weekKeyOf(today);
+  if(reviews.week[wk]) L.push('','【本周复盘】'+reviews.week[wk]);
+  const recentDayReviews=days.filter(d=>reviews.day[d]);
+  if(recentDayReviews.length){ L.push('','【日复盘】'); recentDayReviews.forEach(d=>L.push(d+': '+reviews.day[d])); }
+  const act=phases.filter(isPhaseNow);
+  L.push('','【进行中阶段】'+(act.length?act.map(p=>p.name).join(' / '):'无'));
+  L.push('============================');
+  const text=L.join('\n');
+  console.log(text);
+  $('#reportText').value=text;
+  $('#reportModal').classList.add('show');
+}
+function copyReport(){ $('#reportText').select();
+  navigator.clipboard.writeText($('#reportText').value).then(()=>alert('📋 已复制')).catch(()=>document.execCommand('copy')); }
+
+/* ================= JSON 备份 ================= */
+function exportJSON(){
+  const data={cats,levels,rules,tags,daily,events,phases,reviews,meta,_ver:'8.0',_at:new Date().toLocaleString('sv')};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='root-os-backup-'+today+'.json'; a.click();
+}
+function importJSON(ev){
+  const f=ev.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ try{
+      const d=JSON.parse(rd.result);
+      if(!d.rules||!d.daily) throw 0;
+      applyBag(d);
+      alert('📥 导入成功'); location.reload();
+    }catch(e){ alert('文件格式不对，导入失败'); } };
+  rd.readAsText(f);
+}
+
+/* 通用：把一份数据包写回所有存储键（导入/恢复/同步共用） */
+function applyBag(d){
+  if(!d.rules||!d.daily) throw 0;
+  cats=d.cats||SEED_CATS; levels=d.levels||SEED_LEVELS; rules=d.rules;
+  tags=d.tags||SEED_TAGS; daily=d.daily; events=d.events||[]; phases=d.phases||[];
+  reviews=d.reviews||{day:{},week:{},month:{}};
+  meta=Object.assign({}, d.meta||{});
+  const bag={cats,levels,rules,tags,daily,events,phases,reviews,meta};
+  Object.keys(bag).forEach(k=>store.set(k,bag[k]));
+}
+
+/* ================= 夜间宵禁提醒 ================= */
+function checkNight(){
+  const h=new Date().getHours();
+  $('#nightBar').style.display=(h>=22||h<6)?'block':'none';
+}
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/* ================= 多用户版：登录态 + 服务器端数据同步 ================= */
+let SESSION=false, suppressSave=false, serverTimer=null;
+const bagKeys=['cats','levels','rules','tags','daily','events','phases','reviews','meta'];
+function bagFromLocal(){
+  const o={}; bagKeys.forEach(k=>{ const v=store.get(k); if(v!==null && v!==undefined) o[k]=v; }); return o;
+}
+async function pushToServer(){
+  if(!SESSION) return;
+  try{
+    const r=await fetch('/api/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(bagFromLocal())});
+    if(!r.ok) console.warn('保存失败', r.status);
+  }catch(e){ console.warn('保存失败', e); }
+}
+function scheduleServerSave(){ if(suppressSave) return; clearTimeout(serverTimer); serverTimer=setTimeout(pushToServer, 1500); }
+/* 清空本地镜像：切换账号 / 登出时必须调用，否则会串号 */
+function wipeLocalMirror(){
+  suppressSave=true;
+  try{ Object.keys(localStorage).filter(k=>k.startsWith('pos_')).forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  suppressSave=false;
+}
+async function loadFromServer(){
+  const r=await fetch('/api/data'); if(!r.ok) throw new Error('load');
+  const data=await r.json();
+  wipeLocalMirror();
+  cats = data.cats || SEED_CATS;
+  levels = data.levels || SEED_LEVELS;
+  rules = data.rules || SEED_RULES.map(r=>({...r}));
+  tags = data.tags || SEED_TAGS.map(t=>({...t}));
+  daily = data.daily || {};
+  events = data.events || [];
+  phases = data.phases || SEED_PHASES.map(p=>({...p}));
+  reviews = data.reviews || {day:{},week:{},month:{}};
+  meta = data.meta || {};
+  store.set('cats',cats); store.set('levels',levels); store.set('rules',rules);
+  store.set('tags',tags); store.set('daily',daily); store.set('events',events);
+  store.set('phases',phases); store.set('reviews',reviews); store.set('meta',meta);
+}
+async function apiPost(url, body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return r.json();
+}
+function showApp(){ const a=document.getElementById('auth'); if(a) a.style.display='none'; }
+function showAuth(msg){ const a=document.getElementById('auth'); if(a){ a.style.display='flex'; if(msg) document.getElementById('authMsg').textContent=msg; } }
+async function doRegister(){
+  const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
+  if(u.length<2){ showAuth('用户名至少 2 个字符'); return; }
+  if(p.length<6){ showAuth('密码至少 6 位'); return; }
+  const j=await apiPost('/api/register',{username:u,password:p});
+  if(j.ok){ await afterLogin(); } else { showAuth(j.error||'注册失败'); }
+}
+async function doLogin(){
+  const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
+  const j=await apiPost('/api/login',{username:u,password:p});
+  if(j.ok){ await afterLogin(); } else { showAuth(j.error||'登录失败'); }
+}
+async function doLogout(){
+  clearTimeout(serverTimer);
+  try{ await pushToServer(); }catch(e){}      /* 退出前把未落盘的改动刷上去 */
+  SESSION=false;
+  await fetch('/api/logout',{method:'POST'});
+  wipeLocalMirror();                          /* 不给下一个账号留残留 */
+  location.reload();
+}
+async function afterLogin(){
+  SESSION=true;
+  try{ await loadFromServer(); }catch(e){ console.warn('加载数据失败', e); }
+  showApp(); bootApp();
+}
+
+/* ================= 启动 ================= */
+function bootApp(){
+  $('#datePill').textContent=today;
+  $('#todayTask').value=dayRec().task||'';
+  $('#dayNote').value=dayRec().note||'';
+  $('#sleepHr').value=dayRec().sleep??'';
+  renderTodayTags(); renderTodayRules(); updateProgress(); updatePhasePill();
+  checkNight(); setInterval(checkNight,60000);
+  $('#todayTask').addEventListener('input',()=>{ dayRec().task=$('#todayTask').value; saveDaily(); });
+  $('#dayNote').addEventListener('input',()=>{ dayRec().note=$('#dayNote').value; saveDaily(); });
+  $('#sleepHr').addEventListener('input',()=>{ const v=$('#sleepHr').value; dayRec().sleep = v===''?null:+v; saveDaily(); });
+  /* 复盘自动保存（失焦即存） */
+  $('#rvDayReview').addEventListener('input',()=>saveReview('day', $('#rvDate').value||today, $('#rvDayReview').value));
+  $('#rvWeekReview').addEventListener('input',()=>saveReview('week', weekKeyOf(today), $('#rvWeekReview').value));
+  $('#rvMonthReview').addEventListener('input',()=>saveReview('month', $('#rvMonth').value||today.slice(0,7), $('#rvMonthReview').value));
+  /* 显示当前用户 + 退出 */
+  fetch('/api/me').then(r=>r.json()).then(j=>{
+    if(!j.username) return;
+    const ub=document.getElementById('userBox');
+    if(ub) ub.innerHTML = esc(j.username)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
+    const an=document.getElementById('acctName'); if(an) an.textContent=j.username;
+  }).catch(()=>{});
+}
+window.onload=()=>{
+  fetch('/api/me').then(r=>r.json()).then(j=>{
+    if(j.username){ afterLogin(); } else { showAuth(); }
+  }).catch(()=>showAuth());
+};
+</script>
+
+<!-- 续命咒语（保留，勿删） -->
+<p style="max-width:960px;margin:24px auto 0;border-top:1px dashed #444;padding-top:8px;font-size:.75em;color:#666;">
+🔁 迭代咒语：这是一套基于「负反馈自控」的个人操作系统（规则树 × 三层级 × 支链降级 × 三级复盘），可把本页源码丢给任何 AI 继续改造。<br>
+© 底层创造者OS · 多用户版
+</p>
+
+</body>
+</html>

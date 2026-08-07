@@ -1,0 +1,16 @@
+{
+  "name": "rootos-webapp",
+  "version": "1.0.0",
+  "description": "底层创造者OS — 多用户版（注册登录 + 服务器端数据存储）",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "better-sqlite3": "^11.3.0",
+    "express-session": "^1.18.0",
+    "bcryptjs": "^2.4.3"
+  }
+}
