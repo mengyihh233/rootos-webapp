@@ -296,6 +296,14 @@ function makeDocx(text) {
   r = await fetch(base + '/api/forgot/send-code', { method:'POST', headers:hd, body: JSON.stringify({ email:'someone@test.com' }) });
   ok('SMTP 未配置：找回密码 → 503 降级提示', r.status === 503);
 
+  // ---- 微信小程序登录：未配置 503；配置假密钥时 code2session 被微信拒绝 → 400 ----
+  r = await fetch(base + '/api/wechat/login', { method:'POST', headers:hd, body: JSON.stringify({ code:'fakecode' }) });
+  ok('WX 未配置：小程序登录 → 503 降级提示', r.status === 503, 'status=' + r.status);
+  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ openid:'openid_x', username:'nobody', password:'x' }) });
+  ok('bind-openid：账号密码错 → 401', r.status === 401);
+  r = await fetch(base + '/api/data', { headers:{ authorization:'Bearer invalid-token'} });
+  ok('无效 Bearer token → 401', r.status === 401);
+
   // CSP 纵深：object-src none + base-uri self（frame-ancestors 未加，以兼容 WorkBuddy 预览跨域 iframe）
   // 注意：nonce 与 'unsafe-inline' 同现会被浏览器忽略 unsafe-inline，导致 style=""/onclick="" 全被拦，
   // 因此 CSP 不得再含 'nonce-（本站大量内联样式/事件，重构前只能保留 unsafe-inline）

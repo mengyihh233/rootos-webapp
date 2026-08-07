@@ -17,6 +17,30 @@ const db = require('./db');
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'rootos-dev-secret-change-me';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+/* 微信小程序登录（code2session）：AppID 公开，AppSecret 私密，只从环境变量读、绝不进代码 */
+const WX_APPID = process.env.WX_APPID || '';
+const WX_SECRET = process.env.WX_SECRET || '';
+
+/* 小程序无 cookie，用 Bearer token 维持登录态（进程内存；单实例够用）。
+ * token = 24 字节随机 hex，有效期 30 天，登录/绑定后签发。 */
+const wxTokens = new Map(); // token -> { uid, exp }
+function issueWxToken(uid) {
+  const token = crypto.randomBytes(24).toString('hex');
+  wxTokens.set(token, { uid, exp: Date.now() + 30 * 24 * 3600 * 1000 });
+  if (wxTokens.size > 10000) { /* 防内存泄漏：清过期 */
+    const now = Date.now();
+    for (const [k, v] of wxTokens) { if (now > v.exp) wxTokens.delete(k); }
+  }
+  return token;
+}
+function wxUidFromReq(req) {
+  const ah = req.headers['authorization'] || '';
+  const m = /^Bearer\s+(.+)$/.exec(ah);
+  if (!m) return null;
+  const t = wxTokens.get(m[1]);
+  if (!t || Date.now() > t.exp) return null;
+  return t.uid;
+}
 /* 邮箱验证码 SMTP（QQ/163/126 等开启 SMTP 服务后填入授权码）：
  * 未配置时绑定/找回密码接口返回 503 并提示，功能自动降级为「仅绑定字符串」。 */
 const SMTP = {
@@ -268,8 +292,12 @@ async function start() {
   }
   function authOk(ip) { authFails.delete(ip); }
 
+  /* 统一鉴权：网页走 session cookie，小程序走 Bearer token；后续逻辑统一用 req.session.userId */
   function requireAuth(req, res, next) {
-    if (!req.session.userId) return res.status(401).json({ error: '未登录' });
+    if (req.session.userId) return next();
+    const uid = wxUidFromReq(req);
+    if (!uid) return res.status(401).json({ error: '未登录' });
+    req.session.userId = uid;
     next();
   }
 
@@ -396,9 +424,43 @@ async function start() {
     res.json({ ok: true, wechat });
   }));
 
-  /* ⑥ 小程序微信登录：code2session 换 openid 后绑定/登录（预留，小程序阶段启用） */
+  /* ⑥ 小程序微信登录：wx.login 的 code 换 openid → 已有绑定则签发 token，未绑定则返回 openid 供绑定 */
   app.post('/api/wechat/login', wrap(async (req, res) => {
-    return res.status(501).json({ error: '微信小程序登录待配置 WX_APPID/WX_SECRET 后启用' });
+    if (!WX_APPID || !WX_SECRET) return res.status(503).json({ error: '服务端未配置 WX_APPID/WX_SECRET，暂不支持微信登录' });
+    const code = String(req.body.code || '').trim();
+    if (!code) return res.status(400).json({ error: '缺少 code' });
+    let openid = '';
+    try {
+      const url = `https://api.weixin.qq.com/sns/jscode2session?appid=${encodeURIComponent(WX_APPID)}&secret=${encodeURIComponent(WX_SECRET)}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`;
+      const r = await fetch(url);
+      const j = await r.json();
+      if (j.errcode) {
+        console.error('❌ code2session 失败：', j.errcode, j.errmsg);
+        return res.status(400).json({ error: '微信登录失败：' + (j.errmsg || ('errcode ' + j.errcode)) });
+      }
+      openid = j.openid || '';
+    } catch (e) {
+      console.error('❌ 请求微信 code2session 异常：', e.message);
+      return res.status(502).json({ error: '微信服务暂不可用，请稍后再试' });
+    }
+    if (!openid) return res.status(400).json({ error: '未获取到 openid' });
+    const u = await db.userFindByOpenid(openid);
+    if (u) return res.json({ ok: true, token: issueWxToken(u.id), username: u.username, bound: true });
+    res.json({ ok: true, bound: false, openid }); /* 未绑定：前端引导用 web 账号密码绑定 */
+  }));
+
+  /* ⑥b 小程序绑定 web 账号：openid + 网页账号密码 → 关联并签发 token */
+  app.post('/api/wechat/bind-openid', wrap(async (req, res) => {
+    const openid = String(req.body.openid || '').trim();
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
+    if (!openid) return res.status(400).json({ error: '缺少 openid' });
+    const u = await db.userByName(username);
+    if (!u || !bcrypt.compareSync(password, u.pw_hash)) return res.status(401).json({ error: '账号或密码错误' });
+    const holder = await db.userFindByOpenid(openid);
+    if (holder && holder.id !== u.id) return res.status(409).json({ error: '该微信已绑定其他账号' });
+    await db.userBindOpenid(u.id, openid);
+    res.json({ ok: true, token: issueWxToken(u.id), username: u.username, bound: true });
   }));
 
   /* ⑦ 修改密码（需旧密码） */
