@@ -520,4 +520,16 @@ async function start() {
   });
 }
 
-start();
+/* 启动兜底：任何未捕获的异常 / Promise 拒绝都打印清楚日志，
+ * 避免「Exited with status 1」却看不到真正原因（Render 部署失败难排查）。 */
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ 未捕获的 Promise 拒绝：', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('❌ 未捕获异常：', err);
+  process.exit(1);
+});
+start().catch((err) => {
+  console.error('❌ 应用启动失败：', err);
+  process.exit(1);
+});

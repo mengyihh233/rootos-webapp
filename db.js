@@ -124,18 +124,43 @@ async function init() {
     const { Pool } = require('pg');
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false }
+      ssl: { rejectUnauthorized: false },
+      /* 以下两个超时避免 Neon 免费层冷启动时无限挂起 */
+      connectionTimeoutMillis: 15000,
+      idleTimeoutMillis: 30000
     });
-    await pool.query(SCHEMA_PG.users);
-    await pool.query(SCHEMA_PG.profiles);
-    await pool.query(SCHEMA_PG.templates);
-    await pool.query(SCHEMA_PG.notifications);
-    await pool.query(SCHEMA_PG.ratings);
-    await pool.query(SCHEMA_PG.favorites);
+    /* Neon 免费层会在闲置后休眠，首次连接常返回「database is paused」类错误。
+     * 这里做有限次重试（带退避），等 Neon 唤醒，避免进程因一次连接失败而退出（status 1）。 */
+    const setup = async () => {
+      await pool.query(SCHEMA_PG.users);
+      await pool.query(SCHEMA_PG.profiles);
+      await pool.query(SCHEMA_PG.templates);
+      await pool.query(SCHEMA_PG.notifications);
+      await pool.query(SCHEMA_PG.ratings);
+      await pool.query(SCHEMA_PG.favorites);
+    };
+    let connected = false;
+    for (let attempt = 1; attempt <= 10 && !connected; attempt++) {
+      try {
+        await setup();
+        connected = true;
+      } catch (e) {
+        console.warn(`⚠️ Postgres 连接第 ${attempt}/10 次失败，3s 后重试：${(e && e.message) || e}`);
+        if (attempt < 10) await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+    if (!connected) {
+      throw new Error('无法连接 Postgres：请检查 DATABASE_URL（Neon 是否已暂停 / 连接串是否正确）');
+    }
     console.log('✅ 数据库：已连接 Postgres（DATABASE_URL）');
   } else {
     const Database = require('better-sqlite3');
-    sqlite = new Database(process.env.SQLITE_PATH || path.join(__dirname, 'data.db'));
+    const fs = require('fs');
+    const dbPath = process.env.SQLITE_PATH || path.join(__dirname, 'data.db');
+    /* SQLite 模式：若 SQLITE_PATH 指向的目录不存在，先递归创建，
+     * 否则 better-sqlite3 会直接抛「Cannot open database because the directory does not exist」使进程退出 1。 */
+    try { fs.mkdirSync(path.dirname(dbPath), { recursive: true }); } catch (e) { /* 已存在则忽略 */ }
+    sqlite = new Database(dbPath);
     sqlite.pragma('journal_mode = WAL');
     sqlite.exec(SCHEMA_SQLITE.users);
     sqlite.exec(SCHEMA_SQLITE.profiles);
