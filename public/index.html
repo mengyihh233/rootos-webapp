@@ -581,6 +581,15 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 
 </div>
 
+<!-- 模板市场 -->
+<div id="templates" class="section">
+  <div class="card">
+    <h2>🧩 模板市场</h2>
+    <p><small>官方与社区共享的「行为操作系统」预设。套用即用，作为起点再按自己情况改写。当前内置：通用计算机科学学生大学四年规划。</small></p>
+    <div id="tplList"><small style="color:var(--dim)">点击上方「🧩模板」标签加载…</small></div>
+  </div>
+</div>
+
 <!-- 计时器弹窗 -->
 <div class="modal-mask" id="timerModal">
   <div class="modal">
@@ -805,6 +814,7 @@ function show(id,btn){
   if(id==='rules') renderRulePage();
   if(id==='data') renderMyFailure();
   if(id==='resources') renderResources();
+  if(id==='templates') renderTemplates();
 }
 /* ================= 我的失败模式分析（人人可见，仅看自己） ================= */
 async function renderMyFailure(){
@@ -1844,6 +1854,52 @@ function applyBag(d){
   meta=Object.assign({}, d.meta||{});
   const bag={cats,levels,rules,tags,daily,events,phases,reviews,retros,resources,meta};
   Object.keys(bag).forEach(k=>store.set(k,bag[k]));
+}
+
+/* ================= 模板市场 ================= */
+async function renderTemplates(){
+  const box=document.getElementById('tplList'); if(!box) return;
+  box.innerHTML='<small style="color:var(--dim)">加载模板中…</small>';
+  try{
+    const r=await fetch('/templates/index.json'); if(!r.ok) throw new Error('list');
+    const list=await r.json();
+    if(!Array.isArray(list)||!list.length){ box.innerHTML='<small style="color:var(--dim)">暂无可套用模板</small>'; return; }
+    box.innerHTML=list.map(t=>{
+      const c=t.counts||{};
+      return '<div class="card tpl-card">'
+        +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">'
+        +'<h3 style="margin:0;">'+esc(t.title)+'</h3>'
+        +'<small style="color:var(--dim);white-space:nowrap;">'+esc(t.author||'')+'</small></div>'
+        +'<p style="margin:8px 0;opacity:.9;">'+esc(t.desc||'')+'</p>'
+        +'<div style="margin-bottom:10px;">'+(t.tags||[]).map(x=>'<span class="chip" style="border-color:var(--dim);color:var(--dim);">'+esc(x)+'</span>').join(' ')+'</div>'
+        +'<div style="font-size:.85em;color:var(--dim);margin-bottom:12px;">含 '+(c.rules||0)+' 条规则 · '+(c.phases||0)+' 个阶段 · '+(c.resources||0)+' 个资源 · '+(c.retros||0)+' 条复盘</div>'
+        +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+        +'<button class="ok" onclick="applyTemplate(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">套用模板</button>'
+        +'<button class="ghost" onclick="downloadTemplate(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">下载 JSON</button>'
+        +'</div></div>';
+    }).join('');
+  }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（静态目录 /templates 未被托管？）</small>'; }
+}
+async function applyTemplate(file,title){
+  if(!confirm('套用「'+title+'」将覆盖当前账户的全部数据（规则/阶段/记录/资源）。建议用新账号或先导出备份。确定继续？')) return;
+  try{
+    const r=await fetch('/templates/'+file); if(!r.ok) throw new Error('fetch');
+    const d=await r.json();
+    if(!isRootBag(d)) throw new Error('模板格式不合法');
+    applyBag(d);
+    meta.onboarded=true; store.set('meta',meta);   /* 套用模板者非新手，跳过引导 */
+    if(SESSION){ try{ await pushToServer(); }catch(e){ console.warn('套用后落盘失败',e); } }
+    alert('🧩 模板已套用，正在刷新…'); location.reload();
+  }catch(e){ alert('套用失败：'+(e&&e.message||e)); }
+}
+async function downloadTemplate(file,title){
+  try{
+    const r=await fetch('/templates/'+file); if(!r.ok) throw new Error('fetch');
+    const d=await r.json();
+    const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download=(file.replace(/\.json$/,'')+'-'+today+'.json'); a.click();
+  }catch(e){ alert('下载失败'); }
 }
 
 /* ================= 夜间宵禁提醒 ================= */

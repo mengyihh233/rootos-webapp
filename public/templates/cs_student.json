@@ -1,0 +1,793 @@
+{
+  "cats": [
+    {
+      "id": "c_study",
+      "name": "学习",
+      "color": "#4fc1ff"
+    },
+    {
+      "id": "c_focus",
+      "name": "专注",
+      "color": "#4ec9b0"
+    },
+    {
+      "id": "c_play",
+      "name": "娱乐",
+      "color": "#dcdcaa"
+    },
+    {
+      "id": "c_quit",
+      "name": "戒断",
+      "color": "#f44747"
+    },
+    {
+      "id": "c_life",
+      "name": "生活",
+      "color": "#c586c0"
+    }
+  ],
+  "levels": [
+    {
+      "id": "lv0",
+      "name": "根部"
+    },
+    {
+      "id": "lv1",
+      "name": "中层"
+    },
+    {
+      "id": "lv2",
+      "name": "顶层"
+    }
+  ],
+  "rules": [
+    {
+      "id": "r_stu1",
+      "cat": "c_study",
+      "lv": "lv0",
+      "t": "主线课程/主线任务推进 1 节",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_stu2",
+      "cat": "c_study",
+      "lv": "lv0",
+      "t": "背单词 / 记术语 30min",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_stu3",
+      "cat": "c_study",
+      "lv": "lv1",
+      "t": "动手练习：写代码 / 做题 / 实操 30min",
+      "on": true,
+      "parent": null,
+      "seq": 1,
+      "micro": "先只写 5 行代码 / 做 1 题，侦测手感再决定继续"
+    },
+    {
+      "id": "r_stu4",
+      "cat": "c_study",
+      "lv": "lv1",
+      "t": "啃一块硬骨头（当前最难的知识点）",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_stu5",
+      "cat": "c_study",
+      "lv": "lv2",
+      "t": "当日产出留痕（提交 / 笔记 / 截图）",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_stu6",
+      "cat": "c_study",
+      "lv": "lv2",
+      "t": "每周 10min 三问复盘",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_foc1",
+      "cat": "c_focus",
+      "lv": "lv0",
+      "t": "想干活先坐「神圣座位」（固定工位）",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_foc2",
+      "cat": "c_focus",
+      "lv": "lv0",
+      "t": "两分钟规则：只承诺做 2 分钟",
+      "on": true,
+      "parent": null,
+      "seq": 2,
+      "micro": "先只做 2 分钟，时间到再决定续不续"
+    },
+    {
+      "id": "r_foc3",
+      "cat": "c_focus",
+      "lv": "lv1",
+      "t": "45min 深专注块 ×2",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_foc4",
+      "cat": "c_focus",
+      "lv": "lv2",
+      "t": "到外部场所（图书馆/自习室/咖啡馆）≥2h",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_pla1",
+      "cat": "c_play",
+      "lv": "lv0",
+      "t": "视频看完一节就关网页",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_pla2",
+      "cat": "c_play",
+      "lv": "lv1",
+      "t": "娱乐只开熔断模式（先点 25min 计时）",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_pla3",
+      "cat": "c_play",
+      "lv": "lv2",
+      "t": "零无意识刷屏日",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_qui1",
+      "cat": "c_quit",
+      "lv": "lv0",
+      "t": "22:30 手机放到卧室外充电",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_qui2",
+      "cat": "c_quit",
+      "lv": "lv1",
+      "t": "冲动触发 → 立刻 15 分钟冷却",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_qui3",
+      "cat": "c_quit",
+      "lv": "lv2",
+      "t": "连续 7 天无破戒（链式记录）",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_lif1",
+      "cat": "c_life",
+      "lv": "lv0",
+      "t": "起床脚落地，不沾床",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_lif2a",
+      "cat": "c_life",
+      "lv": "lv0",
+      "t": "刷牙洗脸（冷水开机）",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_lif2",
+      "cat": "c_life",
+      "lv": "lv0",
+      "t": "开灯开窗帘（光照开机）",
+      "on": true,
+      "parent": null,
+      "seq": 3
+    },
+    {
+      "id": "r_lif2b",
+      "cat": "c_life",
+      "lv": "lv0",
+      "t": "吃一份带蛋白质的早餐",
+      "on": true,
+      "parent": null,
+      "seq": 4
+    },
+    {
+      "id": "r_lif7",
+      "cat": "c_life",
+      "lv": "lv0",
+      "t": "走出家门 → 去到学习/工作场所",
+      "on": true,
+      "parent": null,
+      "seq": 5
+    },
+    {
+      "id": "r_lif3",
+      "cat": "c_life",
+      "lv": "lv0",
+      "t": "清醒时段不吃零食/不喝含糖饮料",
+      "on": true,
+      "parent": null,
+      "seq": 6
+    },
+    {
+      "id": "r_lif1b1",
+      "cat": "c_life",
+      "lv": "lv0",
+      "t": "补觉 ≤20min（沙发，不躺回床）",
+      "on": true,
+      "parent": "r_lif1",
+      "seq": 1
+    },
+    {
+      "id": "r_lif1b2",
+      "cat": "c_life",
+      "lv": "lv0",
+      "t": "洗漱+光照后直接出门",
+      "on": true,
+      "parent": "r_lif1",
+      "seq": 2
+    },
+    {
+      "id": "r_lif4",
+      "cat": "c_life",
+      "lv": "lv1",
+      "t": "小睡 ≤20min 且不晚于 15 点",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_lif5",
+      "cat": "c_life",
+      "lv": "lv1",
+      "t": "23:30 前上床",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_lif6",
+      "cat": "c_life",
+      "lv": "lv2",
+      "t": "全天清醒无补觉",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    }
+  ],
+  "tags": [
+    {
+      "id": "t_social",
+      "name": "社交日",
+      "color": "#e8912d",
+      "degrade": true
+    },
+    {
+      "id": "t_lib",
+      "name": "外出学习日",
+      "color": "#4ec9b0",
+      "degrade": false
+    },
+    {
+      "id": "t_chaos",
+      "name": "高扰动",
+      "color": "#f44747",
+      "degrade": true
+    },
+    {
+      "id": "t_sleepy",
+      "name": "低能量日",
+      "color": "#569cd6",
+      "degrade": true
+    }
+  ],
+  "daily": {},
+  "events": [],
+  "phases": [
+    {
+      "id": "p_y0a",
+      "parent": null,
+      "name": "大一上 · 编程与数学地基",
+      "start": "2026-09-01",
+      "end": "2027-01-31",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "学会一门语言(Python/C)、搞定高数上/线代、养成每日编码与英语输入习惯"
+    },
+    {
+      "id": "p_launch",
+      "parent": "p_y0a",
+      "name": "7 天启动清单",
+      "start": "2026-09-01",
+      "end": "2026-09-07",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "Day1 砍到只留 3 条根部规则 / Day2 布置神圣座位 / Day3 跑通一次 45min 专注块 / Day5 建立产出留痕的地方 / Day7 做第一次周复盘"
+    },
+    {
+      "id": "p_mil",
+      "parent": "p_y0a",
+      "name": "军训 / 学期维护期",
+      "start": "2026-09-08",
+      "end": "2026-10-08",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "军训期间用「降级协议」保住晨间主链与每日编码，不做高强度新任务"
+    },
+    {
+      "id": "p_cs50",
+      "parent": "p_y0a",
+      "name": "CS50 计算机科学导论",
+      "start": "2026-09-15",
+      "end": "2027-01-15",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "跟完 CS50（cs50.harvard.edu），理解二进制/算法/内存/Web，完成 9 个 problem set"
+    },
+    {
+      "id": "p_math1",
+      "parent": "p_y0a",
+      "name": "高数(上) + 线性代数",
+      "start": "2026-09-15",
+      "end": "2027-01-20",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "高数上（极限/微分/积分）+ 线代（矩阵/向量空间），每周刷题留痕"
+    },
+    {
+      "id": "p_eng1",
+      "parent": "p_y0a",
+      "name": "英语 · 词汇+阅读",
+      "start": "2026-09-01",
+      "end": "2027-01-31",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "每天背单词 30min + 读 1 篇英文技术短文，为后续英文课程资料打底"
+    },
+    {
+      "id": "p_y0b",
+      "parent": null,
+      "name": "大一下 · 深入编程",
+      "start": "2027-02-01",
+      "end": "2027-07-15",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "数据结构入门、一门语言熟练、高数下、算法思维起步"
+    },
+    {
+      "id": "p_ds",
+      "parent": "p_y0b",
+      "name": "数据结构 (链表/树/图/排序)",
+      "start": "2027-02-01",
+      "end": "2027-07-10",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "手写实现链表/栈/队列/树/图/常见排序，理解复杂度"
+    },
+    {
+      "id": "p_cs61a",
+      "parent": "p_y0b",
+      "name": "CS61A / SICP 编程抽象",
+      "start": "2027-02-15",
+      "end": "2027-07-10",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "用 SICP 学抽象/递归/高阶函数，建立「把问题拆成可组合函数」的思维方式"
+    },
+    {
+      "id": "p_math2",
+      "parent": "p_y0b",
+      "name": "高数(下) + 概率统计",
+      "start": "2027-02-01",
+      "end": "2027-07-10",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "高数下（级数/多元微积分）+ 概率论与数理统计基础"
+    },
+    {
+      "id": "p_eng2",
+      "parent": "p_y0b",
+      "name": "英语 · 听说+长文",
+      "start": "2027-02-01",
+      "end": "2027-07-15",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "练听力与口语、能读英文教材/文档"
+    },
+    {
+      "id": "p_y1a",
+      "parent": null,
+      "name": "大二上 · 计算机核心",
+      "start": "2027-09-01",
+      "end": "2028-01-31",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "计算机组成、离散数学、算法、操作系统导论"
+    },
+    {
+      "id": "p_co",
+      "parent": "p_y1a",
+      "name": "计算机组成原理 / CS61C",
+      "start": "2027-09-01",
+      "end": "2028-01-20",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "理解 CPU/内存/指令集，能用 C 写底层程序"
+    },
+    {
+      "id": "p_discrete",
+      "parent": "p_y1a",
+      "name": "离散数学",
+      "start": "2027-09-01",
+      "end": "2028-01-20",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "集合/逻辑/图论/关系，为算法与理论打底"
+    },
+    {
+      "id": "p_algo",
+      "parent": "p_y1a",
+      "name": "算法设计与分析 (CLRS)",
+      "start": "2027-09-15",
+      "end": "2028-01-31",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "分治/动态规划/贪心/图算法，刷 LeetCode 中等题"
+    },
+    {
+      "id": "p_os1",
+      "parent": "p_y1a",
+      "name": "操作系统导论",
+      "start": "2027-10-01",
+      "end": "2028-01-20",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "进程/线程/内存/文件系统概念，读《操作系统导论》"
+    },
+    {
+      "id": "p_y1b",
+      "parent": null,
+      "name": "大二下 · 系统层",
+      "start": "2028-02-01",
+      "end": "2028-07-15",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "操作系统深入、数据库、网络基础"
+    },
+    {
+      "id": "p_os2",
+      "parent": "p_y1b",
+      "name": "操作系统 (xv6/写内核)",
+      "start": "2028-02-01",
+      "end": "2028-07-10",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "读 xv6 源码、实现简易调度/内存分配，理解系统调用"
+    },
+    {
+      "id": "p_db",
+      "parent": "p_y1b",
+      "name": "数据库系统 (SQL+实现)",
+      "start": "2028-02-15",
+      "end": "2028-07-10",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "SQL 熟练 + 理解 B+树/事务/索引，手写迷你数据库"
+    },
+    {
+      "id": "p_net1",
+      "parent": "p_y1b",
+      "name": "计算机网络基础",
+      "start": "2028-03-01",
+      "end": "2028-07-10",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "TCP/IP/HTTP/DNS 概念，会用抓包工具"
+    },
+    {
+      "id": "p_y2a",
+      "parent": null,
+      "name": "大三上 · 进阶与方向",
+      "start": "2028-09-01",
+      "end": "2029-01-31",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "网络深入、编译原理、软件工程、机器学习导论，确定方向"
+    },
+    {
+      "id": "p_net2",
+      "parent": "p_y2a",
+      "name": "计算机网络 (自顶向下)",
+      "start": "2028-09-01",
+      "end": "2029-01-20",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "精读《计算机网络：自顶向下》，理解各层协议设计"
+    },
+    {
+      "id": "p_comp",
+      "parent": "p_y2a",
+      "name": "编译原理",
+      "start": "2028-09-15",
+      "end": "2029-01-20",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "词法/语法/语义分析，写迷你编译器"
+    },
+    {
+      "id": "p_se",
+      "parent": "p_y2a",
+      "name": "软件工程 + 团队项目",
+      "start": "2028-09-15",
+      "end": "2029-01-31",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "Git/CI/测试/敏捷，完成一个 3-5 人协作项目并上线"
+    },
+    {
+      "id": "p_ml",
+      "parent": "p_y2a",
+      "name": "机器学习导论",
+      "start": "2028-10-01",
+      "end": "2029-01-31",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "线性回归/神经网络基础，跑通第一个模型（吴恩达/CS229 入门）"
+    },
+    {
+      "id": "p_y2b",
+      "parent": null,
+      "name": "大三下 · 工程与实习",
+      "start": "2029-02-01",
+      "end": "2029-07-15",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "第一段实习 / 大项目、系统编程、方向深耕"
+    },
+    {
+      "id": "p_intern",
+      "parent": "p_y2b",
+      "name": "暑期实习准备 + 投递",
+      "start": "2029-02-01",
+      "end": "2029-06-30",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "刷面经/做项目作品集/投简历，争取一段开发实习"
+    },
+    {
+      "id": "p_sys",
+      "parent": "p_y2b",
+      "name": "系统编程 (C/Unix/6.S081)",
+      "start": "2029-02-15",
+      "end": "2029-07-10",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "深入 Unix/Linux 系统编程，跟 6.S081 写一个操作系统"
+    },
+    {
+      "id": "p_dir",
+      "parent": "p_y2b",
+      "name": "方向深耕 (AI/系统/前端/安全 选一)",
+      "start": "2029-03-01",
+      "end": "2029-07-15",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "从 AI / 系统 / 前端 / 安全 中选定一个方向持续深耕"
+    },
+    {
+      "id": "p_y3a",
+      "parent": null,
+      "name": "大四上 · 毕业设计 + 出路",
+      "start": "2029-09-01",
+      "end": "2030-01-31",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "毕设开题与中期、就业/深造决策与准备"
+    },
+    {
+      "id": "p_thesis",
+      "parent": "p_y3a",
+      "name": "毕业设计 (选题→实现→论文)",
+      "start": "2029-09-01",
+      "end": "2030-01-31",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "开题→中期→实现→写论文，留痕每周进度"
+    },
+    {
+      "id": "p_career",
+      "parent": "p_y3a",
+      "name": "就业 or 深造准备",
+      "start": "2029-09-01",
+      "end": "2030-01-31",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "决定就业/考研/留学并准备（简历/考研科目/语言成绩）"
+    },
+    {
+      "id": "p_y3b",
+      "parent": null,
+      "name": "大四下 · 收尾交付",
+      "start": "2030-02-01",
+      "end": "2030-07-15",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "毕设答辩、offer/录取收尾、毕业"
+    },
+    {
+      "id": "p_defense",
+      "parent": "p_y3b",
+      "name": "毕设答辩 + 归档",
+      "start": "2030-02-01",
+      "end": "2030-06-30",
+      "imp": 3,
+      "done": false,
+      "journal": "",
+      "goal": "完成毕设答辩、代码与论文归档"
+    },
+    {
+      "id": "p_offer",
+      "parent": "p_y3b",
+      "name": "offer/录取确认 + 过渡",
+      "start": "2030-03-01",
+      "end": "2030-07-15",
+      "imp": 2,
+      "done": false,
+      "journal": "",
+      "goal": "确认 offer/录取，准备入职或入学"
+    }
+  ],
+  "reviews": {
+    "day": {},
+    "week": {},
+    "month": {}
+  },
+  "retros": [
+    {
+      "id": "rt_t1",
+      "date": "2026-09-01",
+      "text": "这是一套通用的计算机科学学生大学规划模板，已套用到我的账户。先跑通晨间主链与每日编码习惯，课程路线按学校实际排课微调。规则树里「主线任务」对应本学期的主课，每周用数据页看自己的失败模式。",
+      "createdAt": 1786086709071
+    }
+  ],
+  "resources": [
+    {
+      "id": "res_t1",
+      "title": "三条铁律（通用）",
+      "tags": [
+        "铁律"
+      ],
+      "body": "① 根部保命定式优先：每天先跑通晨间主链与 1 节主线任务，再谈进阶。\n② 改规则 = 发版本：规则树不是待办，是「行为操作系统」的版本，改动要走复盘闭环。\n③ 执行 → 回溯 → 改规则：每天/周留痕，崩溃的定式才值得改。",
+      "updatedAt": "2026-08-07 15:11:49"
+    },
+    {
+      "id": "res_t2",
+      "title": "CS 学习官网书签",
+      "tags": [
+        "官网",
+        "路径"
+      ],
+      "body": "CS50: https://cs50.harvard.edu\nMIT OCW: https://ocw.mit.edu\n《计算机网络：自顶向下》配套: https://gaia.cs.umass.edu/kurose_ross\nxv6 源码: https://github.com/mit-pdos/xv6-riscv\n6.S081: https://pdos.csail.mit.edu/6.S081",
+      "updatedAt": "2026-08-07 15:11:49"
+    },
+    {
+      "id": "res_t3",
+      "title": "经典书单索引",
+      "tags": [
+        "书单"
+      ],
+      "body": "算法: CLRS《算法导论》\n编程抽象: SICP《计算机程序的构造和解释》\n系统: CSAPP《深入理解计算机系统》\n操作系统: 《操作系统导论》(OSTEP)\n网络: 《计算机网络：自顶向下方法》\n编译: 《编译原理》(龙书)\n数据库: 《数据库系统概念》(恐龙书)",
+      "updatedAt": "2026-08-07 15:11:49"
+    },
+    {
+      "id": "res_t4",
+      "title": "每日执行系统（怎么用这个 OS）",
+      "tags": [
+        "铁律",
+        "路径"
+      ],
+      "body": "1) 今日页：勾选根部定式 + 推进 1 节主线任务；\n2) 卡住点「💥」记崩溃事件并跳规则树改/恢复；\n3) 回溯页：日/周/月复盘留痕；\n4) 数据页：看自己的失败模式，定位最该改的定式；\n5) 规划·资源：收藏方法论与书单。",
+      "updatedAt": "2026-08-07 15:11:49"
+    },
+    {
+      "id": "res_t5",
+      "title": "四年学习路径总览",
+      "tags": [
+        "路径"
+      ],
+      "body": "大一：语言+数学地基 → 大二：数据结构/算法/组成/OS/DB/网络 → 大三：网络深入/编译/软工/ML + 实习 → 大四：毕设+出路。每年上学期打核心、下学期做系统与项目。",
+      "updatedAt": "2026-08-07 15:11:49"
+    },
+    {
+      "id": "res_t6",
+      "title": "竞赛 / 科研入门（可选）",
+      "tags": [
+        "竞赛",
+        "方向"
+      ],
+      "body": "算法竞赛: ICPC/CCPC（大一开始刷 LeetCode/洛谷）；\n科研: 大二下联系导师、读论文复现；\n开源: 给知名项目提 PR 积累履历。按需参与，不强行。",
+      "updatedAt": "2026-08-07 15:11:49"
+    },
+    {
+      "id": "res_t7",
+      "title": "英语贯穿策略",
+      "tags": [
+        "英语"
+      ],
+      "body": "每天 30min 单词 + 读 1 篇英文技术文；大二起能直接读英文教材/文档/论文。语言是 CS 的杠杆。",
+      "updatedAt": "2026-08-07 15:11:49"
+    }
+  ],
+  "meta": {
+    "_ver": "8.0",
+    "template": "cs-student-4yr",
+    "templateName": "计算机科学学生 · 大学四年规划（通用）",
+    "note": "通用模板：默认 27 条日常规则 + 四年 CS 核心课程路线。阶段日期锚定「2026 年秋季入学」假设，导入后可在阶段页改日期。不含任何个人数据。",
+    "anchorEnroll": "2026-09"
+  }
+}

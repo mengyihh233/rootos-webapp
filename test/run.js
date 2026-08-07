@@ -180,6 +180,16 @@ function makeDocx(text) {
   ok('响应带 Content-Security-Policy', !!r.headers.get('content-security-policy'));
   ok('响应带 X-Content-Type-Options', r.headers.get('x-content-type-options') === 'nosniff');
 
+  // 模板市场：静态目录可访问 + 模板可导入（与 applyBag 对称）
+  r = await fetch(base + '/templates/index.json');
+  ok('模板索引 200', r.status === 200);
+  const idx = await r.json();
+  ok('模板索引为数组且含 cs_student', Array.isArray(idx) && idx.some(x => x.id === 'cs_student'));
+  r = await fetch(base + '/templates/cs_student.json');
+  ok('CS 模板 JSON 200', r.status === 200);
+  const tpl = await r.json();
+  ok('CS 模板通过 isRootBag（可导入）', L.isRootBag(tpl) === true);
+
   child.kill();
   try { fs.unlinkSync(TMP_DB); fs.unlinkSync(TMP_DB + '-wal'); fs.unlinkSync(TMP_DB + '-shm'); } catch (e) {}
 
