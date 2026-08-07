@@ -225,14 +225,14 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 <div id="degradeBanner"></div>
 
 <!-- ================= 新手引导 ================= -->
-<div id="obMask" class="modal-mask" style="z-index:200;">
+<div id="obMask" class="modal-mask" style="z-index:200;" onclick="if(event.target===this)obSkip()">
   <div class="modal" style="max-width:470px;">
     <div id="obStepNo" style="color:var(--accent);font-size:.78rem;font-family:var(--mono);"></div>
     <div id="obIcon" style="font-size:2.4rem;margin:6px 0;"></div>
     <h2 id="obTitle" style="margin:0 0 8px;"></h2>
     <div id="obBody" style="font-size:.92rem;line-height:1.7;color:var(--txt);"></div>
     <div style="display:flex;gap:8px;margin-top:18px;align-items:center;">
-      <button class="ghost mini" onclick="obSkip()">跳过</button>
+      <button class="mini" style="color:var(--dim);" onclick="obSkip()">跳过引导</button>
       <span style="flex:1;"></span>
       <button class="ghost mini" id="obPrev" onclick="obPrev()">上一步</button>
       <button class="ok" id="obNext" onclick="obNext()">下一步</button>
@@ -1724,7 +1724,8 @@ const OB = [
   { icon:'🚀', title:'开始你的第一个闭环', tab:'today',
     body:'不用一次全搞懂。今天只做一件事：勾选一个根部定式，完成它。<br><br>明天回溯、改一条规则——闭环就转起来了。<br><br><b>随时点右上角「❓ 引导」可重看本教程。</b>现在，去勾你的第一个小动作吧 💪' },
 ];
-function startOnboarding(){ obStep=0; renderOnboarding(); $('#obMask').classList.add('show'); }
+function startOnboarding(){ obStep=0; renderOnboarding(); $('#obMask').classList.add('show'); document.addEventListener('keydown', obKeyHandler); }
+function obKeyHandler(e){ if(e.key==='Escape' && $('#obMask').classList.contains('show')) obSkip(); }
 function gotoTab(id){
   let found=null;
   document.querySelectorAll('.tabbtn').forEach(b=>{ if(b.getAttribute('onclick').includes("'"+id+"'")) found=b; });
@@ -1745,6 +1746,7 @@ function obPrev(){ if(obStep>0){ obStep--; renderOnboarding(); } }
 function obSkip(){ obFinish(); }
 function obFinish(){
   $('#obMask').classList.remove('show');
+  document.removeEventListener('keydown', obKeyHandler);
   meta.onboarded = true;
   try{ store.set('meta', meta); }catch(e){}
   scheduleServerSave();   /* 把"已引导"标记同步到云端，换设备也不再弹 */
