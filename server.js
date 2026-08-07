@@ -532,8 +532,9 @@ async function start() {
     if (target.id === req.session.userId) return res.status(400).json({ error: '当前已是该账号，无需绑定' });
     const cur = await db.userById(req.session.userId);
     if (!cur || !cur.wx_openid) return res.status(400).json({ error: '当前账号没有微信绑定，无法合并' });
+    /* 只禁止：openid 已被【其他账号】绑定。当前账号自己持有 openid 是正常情况（就是要转给目标账号） */
     const holder = await db.userFindByOpenid(cur.wx_openid);
-    if (holder && holder.id !== target.id) return res.status(409).json({ error: '该微信已绑定其他账号' });
+    if (holder && holder.id !== req.session.userId && holder.id !== target.id) return res.status(409).json({ error: '该微信已绑定其他账号' });
     /* 数据合并：目标账号为主，当前微信账号补缺失结构 + 合并 daily/events */
     const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
     const curData = parse(await db.profileGet(req.session.userId));

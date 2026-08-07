@@ -317,6 +317,24 @@ function makeDocx(text) {
   r = await fetch(base + '/api/share/nonexistent');
   ok('不存在分享 → 404', r.status === 404);
 
+  // ---- 账号合并 merge-web：微信自动注册账号 → 并入已有网页账号 ----
+  const mergeWxUser = 'mergewx_' + Date.now();
+  const mergeWebUser = 'mergeweb_' + Date.now();
+  await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: mergeWxUser, password: 'pass123456' }) });
+  await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: mergeWebUser, password: 'pass123456' }) });
+  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ openid:'openid_merge_1', username: mergeWxUser, password: 'pass123456' }) });
+  const mwxJ = await r.json();
+  ok('merge 前置：微信账号绑定 openid → 200', r.status===200 && mwxJ.ok && mwxJ.token);
+  const mwxAuth = 'Bearer ' + mwxJ.token;
+  /* 关键回归：当前账号自己持有 openid 时，合并到另一个账号不应报"已被绑定" */
+  r = await fetch(base + '/api/account/merge-web', { method:'POST', headers:{...hd, authorization: mwxAuth}, body: JSON.stringify({ username: mergeWebUser, password: 'pass123456' }) });
+  const mergeJ = await r.json();
+  ok('merge-web：自身 openid 转移不误报 409 → 200 且返回目标账号 token', r.status===200 && mergeJ.ok && mergeJ.token, JSON.stringify(mergeJ).slice(0,120));
+  r = await fetch(base + '/api/account/merge-web', { method:'POST', headers:{...hd, authorization: 'Bearer ' + mergeJ.token}, body: JSON.stringify({ username: mergeWebUser, password: 'pass123456' }) });
+  ok('合并后已是目标账号 → 400', r.status === 400);
+  r = await fetch(base + '/api/account/merge-web', { method:'POST', headers:{...hd, authorization: mwxAuth}, body: JSON.stringify({ username: mergeWebUser, password: 'wrongpass' }) });
+  ok('merge-web：密码错误 → 401', r.status === 401);
+
   // CSP 纵深：object-src none + base-uri self（frame-ancestors 未加，以兼容 WorkBuddy 预览跨域 iframe）
   // 注意：nonce 与 'unsafe-inline' 同现会被浏览器忽略 unsafe-inline，导致 style=""/onclick="" 全被拦，
   // 因此 CSP 不得再含 'nonce-（本站大量内联样式/事件，重构前只能保留 unsafe-inline）
