@@ -588,23 +588,53 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <p><small>官方与社区共享的「行为操作系统」预设。套用即用，作为起点再按自己情况改写。当前内置：通用计算机科学学生大学四年规划。</small></p>
     <div id="tplList"><small style="color:var(--dim)">点击上方「🧩模板」标签加载…</small></div>
   </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h2>📤 分享我的模板</h2>
+    <p><small>把你当前的规划结构（规则 / 阶段 / 资源等）分享到社区模板市场，供其他用户套用。提交后需管理员审核通过才会公开显示。</small></p>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <input id="tplUpTitle" placeholder="模板标题（如：考研+实习双线规划）" style="flex:2;min-width:180px;">
+      <input id="tplUpAuthor" placeholder="作者名（留空用当前账号）" style="flex:1;min-width:140px;">
+    </div>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <input id="tplUpTags" placeholder="标签，逗号分隔（如：考研,实习,CS）" style="flex:2;min-width:180px;">
+      <input id="tplUpDesc" placeholder="一句话简介" style="flex:2;min-width:180px;">
+    </div>
+    <button class="ok" onclick="uploadTemplate()">上传我的当前规划</button>
+  </div>
 </div>
 
-<!-- 套用模板：合并 / 覆盖 选择 -->
+<!-- 套用模板：合并 / 仅追加阶段资源 / 覆盖 选择 -->
 <div class="modal-mask" id="tplApplyModal" style="display:none;z-index:210;" onclick="if(event.target===this)closeApplyModal()">
   <div class="modal" style="max-width:460px;text-align:left;">
     <h3 style="margin:0 0 6px;">套用模板：<span id="tplApplyName" style="color:var(--accent);"></span></h3>
     <p style="color:var(--dim);font-size:.85rem;margin:0 0 16px;">请选择如何处理你当前的数据：</p>
     <div style="display:flex;flex-direction:column;gap:10px;">
-      <button class="ok" style="text-align:left;" onclick="confirmApplyMode('merge')">
-        🔀 合并到当前数据<small style="display:block;color:var(--dim);font-weight:normal;margin-top:4px;">保留你现有的全部数据，仅追加/更新模板里的内容（建议日常使用，不丢数据）</small>
+      <button class="ok" style="text-align:left;" onclick="closeApplyModal();previewMerge(applyTplFile,applyTplTitle)">
+        🔀 合并到当前数据<small style="display:block;color:var(--dim);font-weight:normal;margin-top:4px;">保留你现有的全部数据，仅按 id 追加/更新模板内容（会先预览哪些项被更新）</small>
       </button>
-      <button class="ghost" style="text-align:left;" onclick="confirmApplyMode('overwrite')">
+      <button class="ghost" style="text-align:left;" onclick="closeApplyModal();if(confirm('仅追加模式：不改动你的规则/门类/标签等，只把模板的阶段、资源补充进来（同名 id 更新，不删除你任何数据）。确定？'))applyTemplate(applyTplFile,applyTplTitle,'append')">
+        ➕ 仅追加阶段与资源<small style="display:block;color:var(--dim);font-weight:normal;margin-top:4px;">借用他人的阶段/资源结构，不动你已有的规则与数据（适合取长补短）</small>
+      </button>
+      <button class="ghost" style="text-align:left;" onclick="closeApplyModal();if(confirm('覆盖模式：将以模板完全替换你现在的全部数据（规则/阶段/记录/资源）。建议先导出备份。确定？'))applyTemplate(applyTplFile,applyTplTitle,'overwrite')">
         ♻️ 覆盖当前数据<small style="display:block;color:var(--dim);font-weight:normal;margin-top:4px;">以模板完全替换你现在的全部数据（适合新账号或想从零开始）</small>
       </button>
       <button class="ghost" style="text-align:left;" onclick="closeApplyModal()">取消</button>
     </div>
     <p style="color:var(--dim);font-size:.78rem;margin:14px 0 0;">提示：套用前可在「数据」页先「💾 下载完整备份」，以防需要回滚。</p>
+  </div>
+</div>
+
+<!-- 合并冲突预览 -->
+<div class="modal-mask" id="tplMergeModal" style="display:none;z-index:220;" onclick="if(event.target===this)closeMergeModal()">
+  <div class="modal" style="max-width:480px;text-align:left;">
+    <h3 style="margin:0 0 6px;">合并预览：<span id="tplMergeName" style="color:var(--accent);"></span></h3>
+    <p style="color:var(--dim);font-size:.85rem;margin:0 0 12px;">合并会保留你现有的全部数据，仅按 id 追加/更新模板内容。以下为将要发生的变化：</p>
+    <div id="tplMergeDetail" style="font-size:.9rem;line-height:1.6;"></div>
+    <div style="display:flex;gap:8px;margin-top:18px;">
+      <button class="ok" onclick="confirmMergeApply()">确认合并</button>
+      <button class="ghost" onclick="closeMergeModal()">取消</button>
+    </div>
   </div>
 </div>
 
@@ -1879,15 +1909,19 @@ async function renderTemplates(){
   const box=document.getElementById('tplList'); if(!box) return;
   box.innerHTML='<small style="color:var(--dim)">加载模板中…</small>';
   try{
-    const r=await fetch('/templates/index.json'); if(!r.ok) throw new Error('list');
+    const r=await fetch('/api/templates'); if(!r.ok) throw new Error('list');
     const list=await r.json();
     if(!Array.isArray(list)||!list.length){ box.innerHTML='<small style="color:var(--dim)">暂无可套用模板</small>'; return; }
     box.innerHTML=list.map(t=>{
       const c=t.counts||{};
+      const src = t.source==='community'
+        ? '<span class="chip" style="border-color:var(--ok);color:var(--ok);">社区</span>'
+        : '<span class="chip" style="border-color:var(--accent);color:var(--accent);">官方</span>';
       return '<div class="card tpl-card">'
         +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">'
         +'<h3 style="margin:0;">'+esc(t.title)+'</h3>'
         +'<small style="color:var(--dim);white-space:nowrap;">'+esc(t.author||'')+'</small></div>'
+        +'<div style="margin:6px 0;">'+src+'</div>'
         +'<p style="margin:8px 0;opacity:.9;">'+esc(t.desc||'')+'</p>'
         +'<div style="margin-bottom:10px;">'+(t.tags||[]).map(x=>'<span class="chip" style="border-color:var(--dim);color:var(--dim);">'+esc(x)+'</span>').join(' ')+'</div>'
         +'<div style="font-size:.85em;color:var(--dim);margin-bottom:12px;">含 '+(c.rules||0)+' 条规则 · '+(c.phases||0)+' 个阶段 · '+(c.resources||0)+' 个资源 · '+(c.retros||0)+' 条复盘</div>'
@@ -1896,18 +1930,27 @@ async function renderTemplates(){
         +'<button class="ghost" onclick="downloadTemplate(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">下载 JSON</button>'
         +'</div></div>';
     }).join('');
-  }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（静态目录 /templates 未被托管？）</small>'; }
+  }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（/api/templates 接口异常？）</small>'; }
 }
 async function applyTemplate(file,title,mode){
   try{
-    const r=await fetch('/templates/'+file); if(!r.ok) throw new Error('fetch');
-    const d=await r.json();
-    if(!isRootBag(d)) throw new Error('模板格式不合法');
-    if(mode==='merge') mergeBag(d); else applyBag(d);   /* 合并 / 覆盖 */
+    const d=await fetchTemplateData(file);
+    if(mode==='append') appendBag(d);
+    else if(mode==='merge') mergeBag(d);
+    else applyBag(d);   /* append=仅追加阶段资源 / merge=合并 / 其余=覆盖 */
     meta.onboarded=true; store.set('meta',meta);   /* 套用模板者非新手，跳过引导 */
     if(SESSION){ try{ await pushToServer(); }catch(e){ console.warn('套用后落盘失败',e); } }
-    alert('🧩 模板已'+(mode==='merge'?'合并':'覆盖')+'套用，正在刷新…'); location.reload();
+    const label = mode==='append' ? '仅追加(阶段/资源)' : (mode==='merge' ? '合并' : '覆盖');
+    alert('🧩 模板已'+label+'套用，正在刷新…'); location.reload();
   }catch(e){ alert('套用失败：'+(e&&e.message||e)); }
+}
+/* 按 file 取模板数据：内置走静态 /templates/，社区走 /api/templates/community/:id */
+async function fetchTemplateData(file){
+  const url = file.indexOf('community:')===0 ? '/api/templates/community/'+file.slice('community:'.length) : '/templates/'+file;
+  const r=await fetch(url); if(!r.ok) throw new Error('fetch');
+  const d=await r.json();
+  if(!isRootBag(d)) throw new Error('模板格式不合法');
+  return d;
 }
 
 /* 合并模式：保留当前用户数据，仅追加/更新模板中不存在或同 id 的内容。
@@ -1927,33 +1970,82 @@ function mergeBag(d){
   Object.keys(bag).forEach(k=>store.set(k,bag[k]));
 }
 
-/* 套用前让用户选择「合并当前数据」还是「覆盖当前数据」 */
+/* 仅追加模式：不改动规则/门类/标签等，只把模板的阶段、资源补充进来（同名 id 更新，不删除用户任何数据） */
+function appendBag(d){
+  phases=mergeById(phases, d.phases||[]);
+  resources=mergeById(resources, d.resources||[]);
+  const bag={cats,levels,rules,tags,daily,events,phases,reviews,retros,resources,meta};
+  Object.keys(bag).forEach(k=>store.set(k,bag[k]));
+}
+
+/* 套用前选择：合并 / 仅追加阶段资源 / 覆盖 */
+let applyTplFile=null, applyTplTitle=null;
 function askApplyMode(file,title){
+  applyTplFile=file; applyTplTitle=title;
   const modal=document.getElementById('tplApplyModal'); if(!modal) return;
-  modal._file=file; modal._title=title;
   document.getElementById('tplApplyName').textContent=title||'';
   modal.style.display='flex';
 }
 function closeApplyModal(){
   const modal=document.getElementById('tplApplyModal'); if(modal) modal.style.display='none';
 }
-function confirmApplyMode(mode){
-  const modal=document.getElementById('tplApplyModal'); if(!modal) return;
-  const {_file,_title}=modal; closeApplyModal();
-  if(mode==='merge'){
-    if(!confirm('合并模式：保留你现在的全部数据，仅追加/更新模板里的内容（同名 id 以模板为准）。确定？')) return;
-  }else{
-    if(!confirm('覆盖模式：将以模板完全替换你现在的全部数据（规则/阶段/记录/资源）。建议先导出备份。确定？')) return;
-  }
-  applyTemplate(_file,_title,mode);
+function closeMergeModal(){
+  const m=document.getElementById('tplMergeModal'); if(m) m.style.display='none';
+}
+/* 合并前先算冲突并预览，再让用户确认 */
+async function previewMerge(file,title){
+  try{
+    const d=await fetchTemplateData(file);
+    const cur={cats,levels,rules,tags,daily,events,phases,reviews,retros,resources,meta};
+    const fields=[
+      {k:'rules',label:'规则',name:'t'},
+      {k:'phases',label:'阶段',name:'name'},
+      {k:'resources',label:'资源',name:'title'},
+      {k:'cats',label:'门类',name:'name'},
+      {k:'tags',label:'标签',name:'name'},
+      {k:'levels',label:'层级',name:'name'}
+    ];
+    let added=0,updated=0,unchanged=0; const conflicts=[];
+    fields.forEach(f=>{
+      const diff=diffById(cur[f.k]||[], d[f.k]||[]);
+      added+=diff.added.length; updated+=diff.updated.length; unchanged+=diff.unchanged.length;
+      const tmap=new Map((d[f.k]||[]).map(x=>[x.id,x]));
+      diff.updated.forEach(id=>{ const item=tmap.get(id); conflicts.push(f.label+'：'+(item&&item[f.name]||id)); });
+    });
+    const box=document.getElementById('tplMergeDetail');
+    box.innerHTML='模板将向你当前数据：<b style="color:var(--ok)">新增 '+added+' 项</b>、<b style="color:var(--warn)">更新 '+updated+' 项</b>、与你相同的 '+unchanged+' 项。'
+      + (conflicts.length
+          ? '<div style="margin-top:10px;color:var(--warn);font-size:.85rem;">将被模板覆盖/更新的内容（共 '+conflicts.length+' 项，最多显示 25）：<br>'+conflicts.slice(0,25).map(x=>'· '+esc(x)).join('<br>')+'</div>'
+          : '<div style="margin-top:10px;color:var(--dim);font-size:.85rem;">（无冲突，模板内容均为新增）</div>');
+    document.getElementById('tplMergeName').textContent=title||'';
+    document.getElementById('tplMergeModal').style.display='flex';
+  }catch(e){ alert('预览失败：'+(e&&e.message||e)); }
+}
+function confirmMergeApply(){ closeMergeModal(); applyTemplate(applyTplFile,applyTplTitle,'merge'); }
+/* 分享我的模板：把当前规划提交到社区（待审核） */
+async function uploadTemplate(){
+  const title=document.getElementById('tplUpTitle').value.trim();
+  const author=document.getElementById('tplUpAuthor').value.trim();
+  const desc=document.getElementById('tplUpDesc').value.trim();
+  const tags=document.getElementById('tplUpTags').value.split(',').map(s=>s.trim()).filter(Boolean).slice(0,12);
+  const data=bagFromLocal();
+  if(!isRootBag(data)){ alert('当前数据不合法，无法分享'); return; }
+  try{
+    const r=await fetch('/api/templates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title,author,desc,tags,data})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||'上传失败');
+    alert('✅ 已提交，等待管理员审核通过后即可在模板市场看到（当前状态：待审核）');
+    document.getElementById('tplUpTitle').value='';
+    document.getElementById('tplUpDesc').value='';
+    document.getElementById('tplUpTags').value='';
+  }catch(e){ alert('上传失败：'+(e.message||e)); }
 }
 async function downloadTemplate(file,title){
   try{
-    const r=await fetch('/templates/'+file); if(!r.ok) throw new Error('fetch');
-    const d=await r.json();
+    const d=await fetchTemplateData(file);
     const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
-    a.download=(file.replace(/\.json$/,'')+'-'+today+'.json'); a.click();
+    a.download=(file.replace(/^community:/,'').replace(/\.json$/,'')+'-'+today+'.json'); a.click();
   }catch(e){ alert('下载失败'); }
 }
 

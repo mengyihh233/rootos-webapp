@@ -28,6 +28,18 @@ const SCHEMA_SQLITE = {
       user_id    INTEGER PRIMARY KEY,
       data       TEXT NOT NULL DEFAULT '{}',
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  templates: `
+    CREATE TABLE IF NOT EXISTS templates (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      author     TEXT NOT NULL DEFAULT '',
+      title      TEXT NOT NULL DEFAULT '',
+      desc       TEXT NOT NULL DEFAULT '',
+      tags       TEXT NOT NULL DEFAULT '[]',
+      counts     TEXT NOT NULL DEFAULT '{}',
+      data       TEXT NOT NULL DEFAULT '{}',
+      status     TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
 };
 
@@ -44,6 +56,18 @@ const SCHEMA_PG = {
       user_id    INTEGER PRIMARY KEY,
       data       TEXT NOT NULL DEFAULT '{}',
       updated_at TEXT NOT NULL DEFAULT NOW()
+    )`,
+  templates: `
+    CREATE TABLE IF NOT EXISTS templates (
+      id         SERIAL PRIMARY KEY,
+      author     TEXT NOT NULL DEFAULT '',
+      title      TEXT NOT NULL DEFAULT '',
+      desc       TEXT NOT NULL DEFAULT '',
+      tags       TEXT NOT NULL DEFAULT '[]',
+      counts     TEXT NOT NULL DEFAULT '{}',
+      data       TEXT NOT NULL DEFAULT '{}',
+      status     TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT NOW()
     )`
 };
 
@@ -56,6 +80,7 @@ async function init() {
     });
     await pool.query(SCHEMA_PG.users);
     await pool.query(SCHEMA_PG.profiles);
+    await pool.query(SCHEMA_PG.templates);
     console.log('✅ 数据库：已连接 Postgres（DATABASE_URL）');
   } else {
     const Database = require('better-sqlite3');
@@ -63,6 +88,7 @@ async function init() {
     sqlite.pragma('journal_mode = WAL');
     sqlite.exec(SCHEMA_SQLITE.users);
     sqlite.exec(SCHEMA_SQLITE.profiles);
+    sqlite.exec(SCHEMA_SQLITE.templates);
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
   }
 }
@@ -129,4 +155,61 @@ async function adminUsers() {
   }));
 }
 
-module.exports = { init, userByName, createUser, profileGet, profileSet, adminUsers, USE_PG };
+/* ---------- 社区模板（需审核） ----------
+ * status: 'pending'（待审） | 'approved'（已公开） | 'rejected'（已拒绝）
+ * data / tags / counts 均以 JSON 字符串存储，列表接口解析后返回。 */
+async function templateAdd({ author, title, desc, tags, counts, data }) {
+  const status = 'pending';
+  if (USE_PG) {
+    const r = await pool.query(
+      `INSERT INTO templates (author,title,desc,tags,counts,data,status,created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()) RETURNING id`,
+      [author, title, desc, JSON.stringify(tags || []), JSON.stringify(counts || {}), JSON.stringify(data), status]
+    );
+    return r.rows[0].id;
+  }
+  const info = sqlite.prepare(
+    `INSERT INTO templates (author,title,desc,tags,counts,data,status,created_at)
+     VALUES (?,?,?,?,?,?,?,datetime('now'))`
+  ).run(author, title, desc, JSON.stringify(tags || []), JSON.stringify(counts || {}), JSON.stringify(data), status);
+  return info.lastInsertRowid;
+}
+
+async function templateListApproved() {
+  const sql = `SELECT id,author,title,desc,tags,counts FROM templates WHERE status='approved' ORDER BY id DESC`;
+  const rows = USE_PG ? (await pool.query(sql)).rows : sqlite.prepare(sql).all();
+  return rows.map(r => ({
+    id: r.id, author: r.author, title: r.title, desc: r.desc,
+    tags: JSON.parse(r.tags || '[]'), counts: JSON.parse(r.counts || '{}')
+  }));
+}
+
+async function templateListAll() {
+  const sql = `SELECT id,author,title,desc,tags,counts,status,created_at FROM templates ORDER BY id DESC`;
+  const rows = USE_PG ? (await pool.query(sql)).rows : sqlite.prepare(sql).all();
+  return rows.map(r => ({
+    id: r.id, author: r.author, title: r.title, desc: r.desc,
+    tags: JSON.parse(r.tags || '[]'), counts: JSON.parse(r.counts || '{}'),
+    status: r.status, created_at: r.created_at
+  }));
+}
+
+async function templateGet(id) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT * FROM templates WHERE id=$1', [id]);
+    return r.rows[0];
+  }
+  return sqlite.prepare('SELECT * FROM templates WHERE id=?').get(id);
+}
+
+async function templateApprove(id) {
+  if (USE_PG) { await pool.query(`UPDATE templates SET status='approved' WHERE id=$1`, [id]); return; }
+  sqlite.prepare(`UPDATE templates SET status='approved' WHERE id=?`).run(id);
+}
+
+async function templateReject(id) {
+  if (USE_PG) { await pool.query(`UPDATE templates SET status='rejected' WHERE id=$1`, [id]); return; }
+  sqlite.prepare(`UPDATE templates SET status='rejected' WHERE id=?`).run(id);
+}
+
+module.exports = { init, userByName, createUser, profileGet, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, USE_PG };

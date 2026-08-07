@@ -65,7 +65,22 @@ function mergeReviews(cur, tpl) {
   };
 }
 
+/* 合并预览：对比当前(cur)与模板(tpl)，按 id 统计 新增 / 更新(同 id 内容不同) / 未变。
+ * 用于「套用模板·合并」前提示用户哪些项会被模板覆盖（冲突可视化）。 */
+function diffById(cur, tpl) {
+  const curMap = new Map();
+  (cur || []).forEach(x => { if (x && x.id != null) curMap.set(x.id, x); });
+  const res = { added: [], updated: [], unchanged: [] };
+  (tpl || []).forEach(x => {
+    if (!x || x.id == null) return;
+    if (!curMap.has(x.id)) res.added.push(x.id);
+    else if (JSON.stringify(curMap.get(x.id)) !== JSON.stringify(x)) res.updated.push(x.id);
+    else res.unchanged.push(x.id);
+  });
+  return res;
+}
+
 /* 同时兼容浏览器(全局)与 node(模块)两种使用方式 */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { esc, isRootBag, linkify, mergeById, mergeReviews };
+  module.exports = { esc, isRootBag, linkify, mergeById, mergeReviews, diffById };
 }

@@ -156,7 +156,46 @@ async function dashboard() {
         <thead><tr><th>定式</th><th class="num">崩溃次数</th><th class="num">支链恢复</th><th class="num">恢复率</th></tr></thead>
         <tbody>${faRows}</tbody>
       </table>
+    </div>
+
+    <div class="section">
+      <h2>社区模板审核</h2>
+      <div id="tplReviewBody"><div class="sub">加载中…</div></div>
     </div>`;
+
+  loadTplReview();
+}
+
+async function loadTplReview() {
+  const box = document.getElementById('tplReviewBody');
+  if (!box) return;
+  const r = await api('/api/admin/templates');
+  if (!r.ok) { box.innerHTML = '<div class="sub">无权限或加载失败</div>'; return; }
+  const list = r.body || [];
+  if (!list.length) { box.innerHTML = '<div class="sub">暂无模板提交</div>'; return; }
+  box.innerHTML = list.map(t => {
+    const badge = t.status === 'approved' ? '<span class="badge">已通过</span>'
+      : t.status === 'rejected' ? '<span class="badge" style="background:#322;color:#f88;">已拒绝</span>'
+      : '<span class="badge" style="background:#332;color:#fd8;">待审核</span>';
+    const c = t.counts || {};
+    const actions = t.status === 'approved'
+      ? '<span class="sub">已公开</span>'
+      : `<button onclick="tplAct(${t.id},'approve')">通过</button> <button class="ghost" onclick="tplAct(${t.id},'reject')">拒绝</button>`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);">
+      <div>
+        <b>${escapeHtml(t.title)}</b> ${badge}
+        <div class="sub">作者：${escapeHtml(t.author)} · 含 ${c.rules||0} 规则 / ${c.phases||0} 阶段 / ${c.resources||0} 资源 · ${fmt(t.created_at)}</div>
+        <div class="sub">${escapeHtml(t.desc || '')}</div>
+      </div>
+      <div style="white-space:nowrap;">${actions}</div>
+    </div>`;
+  }).join('');
+}
+
+async function tplAct(id, action) {
+  const r = await api('/api/admin/templates/' + id + '/' + action, { method: 'POST', body: JSON.stringify({}) });
+  if (r.ok) loadTplReview();
+  else alert((r.body && r.body.error) || '操作失败');
 }
 
 function escapeHtml(s) {

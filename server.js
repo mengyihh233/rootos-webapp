@@ -371,6 +371,75 @@ async function start() {
     });
   }));
 
+  /* ---- 模板市场：社区模板（需审核后公开） ---- */
+  app.get('/api/templates', wrap(async (req, res) => {
+    let builtin = [];
+    try {
+      const fs = require('fs');
+      const idxPath = path.join(__dirname, 'public', 'templates', 'index.json');
+      if (fs.existsSync(idxPath)) builtin = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+    } catch (e) { builtin = []; }
+    const community = await db.templateListApproved();
+    const list = [
+      ...builtin.map(t => ({ ...t, source: 'builtin' })),
+      ...community.map(t => ({
+        id: t.id, title: t.title, author: t.author, desc: t.desc,
+        tags: t.tags, counts: t.counts, file: 'community:' + t.id, source: 'community'
+      }))
+    ];
+    res.json(list);
+  }));
+
+  /* 登录用户可提交自己的规划作为社区模板（默认待审） */
+  app.post('/api/templates', requireAuth, wrap(async (req, res) => {
+    const b = req.body || {};
+    const data = b.data;
+    if (!data || !Array.isArray(data.rules) || !Array.isArray(data.cats) ||
+        !Array.isArray(data.tags) || !Array.isArray(data.phases) || typeof data.daily !== 'object') {
+      return res.status(400).json({ error: '模板数据不合法（缺 rules/cats/tags/phases/daily）' });
+    }
+    const title = String(b.title || '').trim() || '未命名模板';
+    const author = String(b.author || '').trim() || (req.session.username || '匿名');
+    const desc = String(b.desc || '').trim();
+    const tags = Array.isArray(b.tags) ? b.tags.slice(0, 12).map(String) : [];
+    const counts = {
+      rules: (data.rules || []).length,
+      phases: (data.phases || []).length,
+      resources: (data.resources || []).length,
+      retros: (data.retros || []).length
+    };
+    const id = await db.templateAdd({ author, title, desc, tags, counts, data });
+    res.status(201).json({ ok: true, id, status: 'pending' });
+  }));
+
+  /* 已审核社区模板的数据（供套用/下载） */
+  app.get('/api/templates/community/:id', wrap(async (req, res) => {
+    const row = await db.templateGet(Number(req.params.id));
+    if (!row || row.status !== 'approved') return res.status(404).json({ error: '模板不存在或未审核' });
+    let data = {};
+    try { data = JSON.parse(row.data); } catch (e) { data = {}; }
+    res.json(data);
+  }));
+
+  /* ---- 管理后台：社区模板审核 ---- */
+  app.get('/api/admin/templates', requireAdmin, wrap(async (req, res) => {
+    const rows = await db.templateListAll();
+    res.json(rows.map(r => ({
+      id: r.id, author: r.author, title: r.title, desc: r.desc,
+      tags: r.tags || [], counts: r.counts || {}, status: r.status, created_at: r.created_at
+    })));
+  }));
+
+  app.post('/api/admin/templates/:id/approve', requireAdmin, wrap(async (req, res) => {
+    await db.templateApprove(Number(req.params.id));
+    res.json({ ok: true });
+  }));
+
+  app.post('/api/admin/templates/:id/reject', requireAdmin, wrap(async (req, res) => {
+    await db.templateReject(Number(req.params.id));
+    res.json({ ok: true });
+  }));
+
   /* 静态前端 */
   app.use(express.static(path.join(__dirname, 'public')));
 

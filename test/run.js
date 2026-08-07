@@ -60,6 +60,7 @@ process.env.PORT = PORT;
 process.env.SESSION_SECRET = 'test-secret';
 process.env.SQLITE_PATH = TMP_DB;
 process.env.NODE_ENV = 'test';
+process.env.ADMIN_TOKEN = 'test-admin-token';
 
 const child = spawn('node', ['server.js'], { cwd: path.join(__dirname, '..'), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
 child.stderr.on('data', d => process.stderr.write('[srv] ' + d));
@@ -197,6 +198,37 @@ function makeDocx(text) {
   ok('CS 模板 JSON 200', r.status === 200);
   const tpl = await r.json();
   ok('CS 模板通过 isRootBag（可导入）', L.isRootBag(tpl) === true);
+
+  // 社区模板上传 + 审核流程
+  const tplData = { rules:[{id:'r1',cat:'c_study',t:'X',lv:'lv0',on:true}],
+    cats:[{id:'c_study',name:'学习'}], tags:[{id:'t1',name:'T'}], phases:[{id:'p1',name:'P',parent:null}],
+    daily:{}, events:[], reviews:{day:{},week:{},month:{}}, retros:[], resources:[], meta:{} };
+  r = await fetch(base + '/api/templates', { method:'POST', headers: hd, body: JSON.stringify({ title:'T1', data: tplData }) });
+  ok('未登录上传模板 → 401', r.status === 401);
+  r = await fetch(base + '/api/templates', { method:'POST', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify({ title:'我的模板', author:'tester', tags:['cs'], data: tplData }) });
+  ok('登录上传模板 → 201', r.status === 201);
+  r = await fetch(base + '/api/templates');
+  ok('公开列表默认不含待审模板', !(await r.json()).some(x => x.title === '我的模板'));
+  r = await fetch(base + '/api/admin/login', { method:'POST', headers: hd, body: JSON.stringify({ token:'test-admin-token' }) });
+  ok('admin 登录 200', r.status === 200);
+  const adminCookie = r.headers.get('set-cookie').split(';')[0];
+  r = await fetch(base + '/api/admin/templates', { headers: { cookie: adminCookie } });
+  const adminList = await r.json();
+  ok('admin 模板列表含待审', r.status === 200 && adminList.some(x => x.title === '我的模板'));
+  const tid = adminList.find(x => x.title === '我的模板').id;
+  r = await fetch(base + '/api/admin/templates/' + tid + '/approve', { method:'POST', headers: { cookie: adminCookie }, body: JSON.stringify({}) });
+  ok('admin 通过模板 → 200', r.status === 200);
+  r = await fetch(base + '/api/templates');
+  ok('通过后公开列表含该社区模板(source=community)', (await r.json()).some(x => x.title === '我的模板' && x.source === 'community'));
+  r = await fetch(base + '/api/templates/community/' + tid);
+  ok('community/:id 返回模板数据', r.status === 200 && (await r.json()).rules.length === 1);
+  // 再上传一个并拒绝，验证拒绝后不出现在公开列表
+  await fetch(base + '/api/templates', { method:'POST', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify({ title:'待拒模板', data: tplData }) });
+  const adminList2 = await (await fetch(base + '/api/admin/templates', { headers: { cookie: adminCookie } })).json();
+  const tid2 = adminList2.find(x => x.title === '待拒模板').id;
+  await fetch(base + '/api/admin/templates/' + tid2 + '/reject', { method:'POST', headers: { cookie: adminCookie }, body: JSON.stringify({}) });
+  r = await fetch(base + '/api/templates');
+  ok('拒绝后公开列表不含该模板', !(await r.json()).some(x => x.title === '待拒模板'));
 
   child.kill();
   try { fs.unlinkSync(TMP_DB); fs.unlinkSync(TMP_DB + '-wal'); fs.unlinkSync(TMP_DB + '-shm'); } catch (e) {}
