@@ -164,6 +164,7 @@ table.wk th { color:var(--dim); font-weight:normal; font-size:.75rem; }
 .chain-row { display:flex; align-items:center; gap:6px; }
 .chain-row label { flex:1; margin:0; }
 .chain-row button { flex-shrink:0; }
+.chain-row.dim { opacity:.38; filter:grayscale(60%); }
 .branch-box { margin-left:26px; padding-left:12px; border-left:2px dashed var(--warn); margin-top:2px; }
 details.chain-detail { margin-top:8px; }
 details.chain-detail summary { cursor:pointer; font-size:.78rem; color:var(--dim); font-family:var(--mono); }
@@ -537,6 +538,19 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   </div>
 </div>
 
+<!-- 【新增】最小可完成：5分钟侦测弹窗 -->
+<div class="modal-mask" id="microModal">
+  <div class="modal" style="max-width:420px;text-align:left;">
+    <h3 id="microTitle">启动侦测</h3>
+    <p id="microText" style="line-height:1.7;color:var(--text);"></p>
+    <p style="color:var(--dim);font-size:.82rem;margin:8px 0 14px;">⏱ 先只做这一步，5 分钟后再回来判断：</p>
+    <div style="display:flex;gap:8px;">
+      <button class="ok" onclick="microPass()" style="flex:1;">✅ 侦测通过，继续</button>
+      <button class="ghost" onclick="microFail()" style="flex:1;">🔀 不合适，换任务</button>
+    </div>
+  </div>
+</div>
+
 <script>
 /* ============================================================
    数据层 v8.0
@@ -553,12 +567,14 @@ const today = new Date().toLocaleDateString('sv');
 
 /* 【v8 修复】savedTimer 必须先于任何 store.set 声明（v7 的 TDZ bug 根因） */
 let savedTimer = null;
+let localSavedAt = Number(localStorage.getItem('pos_savedAt'))||0;  /* 【新增】本地最后保存时间戳，用于多端冲突判断 */
 function markSaved(){
   try{
     const el = $('#savedTag'); if(!el) return;
     el.textContent = '✓ '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+' 已存';
     clearTimeout(savedTimer); savedTimer = setTimeout(()=>el.textContent='',2500);
   }catch(e){}
+  try{ localSavedAt = Date.now(); localStorage.setItem('pos_savedAt', String(localSavedAt)); }catch(e){}
   /* 多用户版：改动后防抖推送到服务器（已登录时） */
   try{ if(SESSION) scheduleServerSave(); }catch(e){}
 }
@@ -594,13 +610,13 @@ const SEED_RULES = [
   /* 学习 */
   {id:'r_stu1', cat:'c_study', lv:'lv0', t:'主线课程/主线任务推进 1 节', on:true, parent:null, seq:1},
   {id:'r_stu2', cat:'c_study', lv:'lv0', t:'背单词 / 记术语 30min', on:true, parent:null, seq:2},
-  {id:'r_stu3', cat:'c_study', lv:'lv1', t:'动手练习：写代码 / 做题 / 实操 30min', on:true, parent:null, seq:1},
+  {id:'r_stu3', cat:'c_study', lv:'lv1', t:'动手练习：写代码 / 做题 / 实操 30min', on:true, parent:null, seq:1, micro:'先只写 5 行代码 / 做 1 题，侦测手感再决定继续'},
   {id:'r_stu4', cat:'c_study', lv:'lv1', t:'啃一块硬骨头（当前最难的知识点）', on:true, parent:null, seq:2},
   {id:'r_stu5', cat:'c_study', lv:'lv2', t:'当日产出留痕（提交 / 笔记 / 截图）', on:true, parent:null, seq:1},
   {id:'r_stu6', cat:'c_study', lv:'lv2', t:'每周 10min 三问复盘', on:true, parent:null, seq:2},
   /* 专注 */
   {id:'r_foc1', cat:'c_focus', lv:'lv0', t:'想干活先坐「神圣座位」（固定工位）', on:true, parent:null, seq:1},
-  {id:'r_foc2', cat:'c_focus', lv:'lv0', t:'两分钟规则：只承诺做 2 分钟', on:true, parent:null, seq:2},
+  {id:'r_foc2', cat:'c_focus', lv:'lv0', t:'两分钟规则：只承诺做 2 分钟', on:true, parent:null, seq:2, micro:'先只做 2 分钟，时间到再决定续不续'},
   {id:'r_foc3', cat:'c_focus', lv:'lv1', t:'45min 深专注块 ×2', on:true, parent:null, seq:1},
   {id:'r_foc4', cat:'c_focus', lv:'lv2', t:'到外部场所（图书馆/自习室/咖啡馆）≥2h', on:true, parent:null, seq:1},
   /* 娱乐 */
@@ -747,18 +763,22 @@ function renderTodayRules(){
   const lvName = id => (lvOf(id)||{}).name||'?';
   const lvIdx = id => levels.findIndex(l=>l.id===id);
   const bySeq = (a,b)=>(a.seq||0)-(b.seq||0);
+  /* 【新增】降级协议自动触发：当日含降级标签时，最深层级(lv2)节点灰显并禁用，只留侦查任务(lv0/1) */
+  const degradeActive = (rec.tags||[]).some(tid=>{ const t=tagOf(tid); return t&&t.degrade; });
+  const deepestLv = levels.length ? levels[levels.length-1].id : null;
 
   /* 单个节点：崩溃态禁用勾选并标红；有支链且父崩溃/支链已执行时展开支链 */
   const item = (r,branch)=>{
     const broken = !!(rec.broken&&rec.broken[r.id]);
     const kids = on.filter(k=>k.parent===r.id).sort(bySeq);
     const showKids = kids.length && (broken || kids.some(k=>rec.checks[k.id]));
-    let h='<div class="chain-row">'
-      +'<label><input type="checkbox" '+(rec.checks[r.id]?'checked':'')+(broken?' disabled':'')
+    const dim = degradeActive && deepestLv && r.lv===deepestLv;
+    let h='<div class="chain-row'+(dim?' dim':'')+'">'
+      +'<label><input type="checkbox" '+(rec.checks[r.id]?'checked':'')+((broken||dim)?' disabled':'')
       +' onchange="checkRule(\''+r.id+'\',this.checked)">'
       +'<span class="lv-badge lv'+Math.min(lvIdx(r.lv),3)+'">'+lvName(r.lv)+'</span>'
       +'<span'+(broken?' style="color:var(--danger);"':'')+'>'
-      +(branch?'🔀 ':'')+esc(r.t)+(broken?' <small>[已崩溃]</small>':'')+'</span></label>'
+      +(branch?'🔀 ':'')+esc(r.t)+(broken?' <small>[已崩溃]</small>':'')+(dim?' <small style="color:var(--warn);">[降级·暂隐]</small>':'')+'</span></label>'
       +(broken
         ? '<button class="mini ghost" onclick="unbreakRule(\''+r.id+'\')">↩</button>'
         : '<button class="mini ghost" title="此节点今天崩溃，激活支链" onclick="breakRule(\''+r.id+'\')">💥</button>')
@@ -848,7 +868,25 @@ function chainPathActual(catRules, rec){
   });
   return parts;
 }
-function checkRule(id,val){ dayRec().checks[id]=val; saveDaily(); updateProgress(); }
+let pendingMicro=null;
+function checkRule(id,val){
+  /* 【新增】最小可完成：勾选带 micro 的规则时，先弹「5分钟侦测」决策，不直接标记完成 */
+  if(val){
+    const r=ruleOf(id);
+    if(r && r.micro){
+      pendingMicro={id, t:r.t};
+      $('#microTitle').textContent='启动侦测：'+r.t;
+      $('#microText').textContent=r.micro;
+      $('#microModal').classList.add('show');
+      return;
+    }
+  }
+  dayRec().checks[id]=val; saveDaily(); updateProgress();
+}
+function microPass(){ const id=pendingMicro&&pendingMicro.id; closeModal('microModal'); pendingMicro=null;
+  if(id){ dayRec().checks[id]=true; saveDaily(); updateProgress(); } toast('✅ 侦测通过，已标记完成'); }
+function microFail(){ const id=pendingMicro&&pendingMicro.id; closeModal('microModal'); pendingMicro=null;
+  if(id) toast('🔀 暂不实，先重规划或换任务'); }
 /* 【v9】当日"有效根部"集合：主链根部 + 已激活支链（父崩溃或支链已被勾选），未激活支链不计入分母 */
 function activeRoots(rec){
   return rules.filter(r=>r.lv===lv0id()&&r.on!==false)
@@ -938,6 +976,8 @@ function selectNode(el,kind,cat,lv,id){
     const r=ruleOf(id);
     $('#npTitle').textContent='规则';
     $('#npBody').innerHTML='<input type="text" id="npText" value="'+esc(r.t)+'">'
+      +'<div style="margin-top:8px;"><label style="font-size:.78rem;color:var(--muted);">最小可完成（可选）：勾选时弹出「5分钟侦测」提示</label>'
+      +'<textarea id="npMicro" rows="2" placeholder="例：先只学5分钟，侦测后适合就继续、不适合就换任务" style="width:100%;margin-top:4px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;">'+(r.micro||'')+'</textarea></div>'
       +'<div class="row" style="margin-top:8px;"><select id="npCat">'+cats.map(c=>'<option value="'+c.id+'"'+(c.id===r.cat?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select>'
       +'<select id="npLv">'+levels.map(l=>'<option value="'+l.id+'"'+(l.id===r.lv?' selected':'')+'>'+esc(l.name)+'</option>').join('')+'</select></div>'
       +'<div style="margin-top:8px;"><button class="mini ok" onclick="npSaveRule()">保存修改</button> '
@@ -974,6 +1014,7 @@ function npAddRule(){
 }
 function npSaveRule(){ const r=ruleOf(selNode.id);
   r.t=$('#npText').value.trim()||r.t; r.cat=$('#npCat').value; r.lv=$('#npLv').value;
+  r.micro=$('#npMicro').value.trim();
   store.set('rules',rules); renderRulePage(); renderTodayRules(); $('#nodePanel').classList.remove('show'); }
 function npToggleRule(){ const r=ruleOf(selNode.id); r.on=r.on===false?true:false;
   store.set('rules',rules); renderTree(); renderTodayRules(); $('#nodePanel').classList.remove('show'); }
@@ -1467,6 +1508,7 @@ function bagFromLocal(){
 async function pushToServer(){
   if(!SESSION) return;
   try{
+    meta.savedAt = localSavedAt;   /* 【新增】带上本地时间戳，供多端冲突判断 */
     const r=await fetch('/api/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(bagFromLocal())});
     if(!r.ok) console.warn('保存失败', r.status);
   }catch(e){ console.warn('保存失败', e); }
@@ -1478,9 +1520,28 @@ function wipeLocalMirror(){
   try{ Object.keys(localStorage).filter(k=>k.startsWith('pos_')).forEach(k=>localStorage.removeItem(k)); }catch(e){}
   suppressSave=false;
 }
+/* 【新增】启动/登出时先把本地镜像载入内存，作为多端同步的基线 */
+function loadLocal(){
+  cats = store.get('cats') || SEED_CATS.map(c=>({...c}));
+  levels = store.get('levels') || SEED_LEVELS.map(l=>({...l}));
+  rules = store.get('rules') || SEED_RULES.map(r=>({...r}));
+  tags = store.get('tags') || SEED_TAGS.map(t=>({...t}));
+  daily = store.get('daily') || {};
+  events = store.get('events') || []; syncEventIds();
+  phases = store.get('phases') || SEED_PHASES.map(p=>({...p}));
+  reviews = store.get('reviews') || {day:{},week:{},month:{}};
+  meta = store.get('meta') || {};
+}
 async function loadFromServer(){
   const r=await fetch('/api/data'); if(!r.ok) throw new Error('load');
   const data=await r.json();
+  const localTs = Number(localStorage.getItem('pos_savedAt'))||0;
+  const serverTs = (data.meta && data.meta.savedAt) ? Number(data.meta.savedAt) : 0;
+  /* 【新增】多端同步：本地有更新的未推送改动时，优先把本地推上去再返回，避免被旧服务器数据覆盖 */
+  if(SESSION && localTs > serverTs){
+    try{ await pushToServer(); console.warn('[sync] 本地改动较新，已优先推送，不覆盖'); }catch(e){ console.warn('[sync] 本地优先推送失败', e); }
+    return;
+  }
   wipeLocalMirror();
   cats = data.cats || SEED_CATS;
   levels = data.levels || SEED_LEVELS;
@@ -1494,6 +1555,9 @@ async function loadFromServer(){
   store.set('cats',cats); store.set('levels',levels); store.set('rules',rules);
   store.set('tags',tags); store.set('daily',daily); store.set('events',events);
   store.set('phases',phases); store.set('reviews',reviews); store.set('meta',meta);
+  /* 本地时间戳与服务端对齐，避免后续误判为"本地较新" */
+  localSavedAt = serverTs || Date.now();
+  try{ localStorage.setItem('pos_savedAt', String(localSavedAt)); }catch(e){}
 }
 async function apiPost(url, body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1551,6 +1615,7 @@ function bootApp(){
   }).catch(()=>{});
 }
 window.onload=()=>{
+  loadLocal();   /* 【新增】先把本地镜像载入内存，作为多端同步基线 */
   fetch('/api/me').then(r=>r.json()).then(j=>{
     if(j.username){ afterLogin(); } else { showAuth(); }
   }).catch(()=>showAuth());

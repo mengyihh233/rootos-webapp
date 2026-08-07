@@ -105,6 +105,15 @@ async function dashboard() {
       <td>${fmt(u.updated_at)}</td>
     </tr>`).join('');
 
+  const fa = s.failureAnalysis || { totalCrashes:0, totalRecovered:0, branchRate:0, topCrashed:[] };
+  const faRows = (fa.topCrashed||[]).map(x => `
+    <tr>
+      <td>${escapeHtml(x.rule)}</td>
+      <td class="num">${x.count}</td>
+      <td class="num">${x.recovered}</td>
+      <td class="num">${x.rate}%</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="sub">暂无崩溃记录</td></tr>';
+
   app.innerHTML = `
     <div class="topbar">
       <div>
@@ -134,6 +143,18 @@ async function dashboard() {
           <th>更新时间</th>
         </tr></thead>
         <tbody>${rows}</tbody>
+      </table>
+    </div>
+
+    <div class="section">
+      <h2>失败模式分析 · 崩溃最多的定式（全站汇总）</h2>
+      <div class="cards" style="margin-bottom:12px;">
+        <div class="card"><div class="num">${fa.totalCrashes}</div><div class="lbl">总崩溃次数</div></div>
+        <div class="card"><div class="num">${fa.branchRate}%</div><div class="lbl">崩溃后支链恢复率</div></div>
+      </div>
+      <table>
+        <thead><tr><th>定式</th><th class="num">崩溃次数</th><th class="num">支链恢复</th><th class="num">恢复率</th></tr></thead>
+        <tbody>${faRows}</tbody>
       </table>
     </div>`;
 }

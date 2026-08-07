@@ -231,6 +231,32 @@ async function start() {
         tags: data.tags ? data.tags.length : 0
       });
     }
+    /* 失败模式分析：崩溃最多的定式 + 崩溃后支链恢复率 */
+    const crashByRule = {};
+    let totalCrashes = 0, totalRecovered = 0;
+    for (const r of rows) {
+      let d0 = {};
+      try { d0 = typeof r.data === 'string' ? JSON.parse(r.data || '{}') : (r.data || {}); } catch (e) { d0 = {}; }
+      const ruleMap = {}; (d0.rules || []).forEach(x => { ruleMap[x.id] = x.t || x.id; });
+      const daily = d0.daily || {};
+      const crashEvents = (d0.events || []).filter(e => e.type === 'crash' && e.ruleId);
+      for (const e of crashEvents) {
+        const rid = e.ruleId;
+        const txt = ruleMap[rid] || rid;
+        if (!crashByRule[txt]) crashByRule[txt] = { count: 0, recovered: 0 };
+        crashByRule[txt].count++; totalCrashes++;
+        const day = e.day || (e.ts ? String(e.ts).slice(0, 10) : null);
+        const childIds = (d0.rules || []).filter(x => x.parent === rid).map(x => x.id);
+        const rec = day ? daily[day] : null;
+        const tookBranch = rec && rec.checks && childIds.some(cid => rec.checks[cid]);
+        if (tookBranch) { crashByRule[txt].recovered++; totalRecovered++; }
+      }
+    }
+    const topCrashed = Object.keys(crashByRule)
+      .map(t => ({ rule: t, count: crashByRule[t].count, recovered: crashByRule[t].recovered,
+        rate: crashByRule[t].count ? Math.round(crashByRule[t].recovered / crashByRule[t].count * 100) : 0 }))
+      .sort((a, b) => b.count - a.count).slice(0, 12);
+
     const now = Date.now();
     const inLast = (d, days) => (now - new Date(d).getTime()) <= days * 86400000;
     res.json({
@@ -239,6 +265,12 @@ async function start() {
       last30: users.filter(u => inLast(u.created_at, 30)).length,
       registrationsByDay: Object.keys(regDays).sort().map(d => ({ date: d, count: regDays[d] })),
       users,
+      failureAnalysis: {
+        totalCrashes,
+        totalRecovered,
+        branchRate: totalCrashes ? Math.round(totalRecovered / totalCrashes * 100) : 0,
+        topCrashed
+      },
       generatedAt: new Date().toISOString()
     });
   }));
