@@ -824,6 +824,30 @@ function chainPath(rs,rec){
   };
   return rs.filter(r=>!r.parent).sort(bySeq).map(node).join(' → ')||'（空）';
 }
+/* 【v9.1】回溯专用：只呈现当天「实际执行过」的链条——勾选过(✅)或崩溃过(💥)的节点，
+   不罗列未触碰的预设节点；崩溃节点后接其实际走动的支链(🔀)。 */
+function chainPathActual(catRules, rec){
+  const bySeq=(a,b)=>(a.seq||0)-(b.seq||0);
+  const chk=id=>!!(rec.checks&&rec.checks[id]);
+  const brk=id=>!!(rec.broken&&rec.broken[id]);
+  const engaged=r=>chk(r.id)||brk(r.id);
+  const mains=catRules.filter(r=>!r.parent).sort(bySeq);
+  const parts=[];
+  mains.filter(engaged).forEach(r=>{
+    const broken=brk(r.id), checked=chk(r.id);
+    let s=(checked?'✅':broken?'💥':'')+r.t;
+    if(broken){
+      const kids=catRules.filter(k=>k.parent===r.id).sort(bySeq).filter(engaged);
+      if(kids.length) s+=' 〉🔀支链('+kids.map(k=>(chk(k.id)?'✅':'💥')+k.t).join(' → ')+')';
+    }
+    parts.push(s);
+  });
+  /* 独立执行的支链（父未崩溃但直接勾了支链） */
+  catRules.filter(r=>r.parent&&engaged(r)&&!brk(r.parent)).forEach(k=>{
+    parts.push('🔀 支链：'+(chk(k.id)?'✅':'💥')+k.t);
+  });
+  return parts;
+}
 function checkRule(id,val){ dayRec().checks[id]=val; saveDaily(); updateProgress(); }
 /* 【v9】当日"有效根部"集合：主链根部 + 已激活支链（父崩溃或支链已被勾选），未激活支链不计入分母 */
 function activeRoots(rec){
@@ -1114,12 +1138,20 @@ function renderDayView(){
       +'<div class="stat"><div class="v">'+(rec.sleep??'—')+'</div><div class="k">睡眠(h)</div></div></div>';
     if(rec.tags&&rec.tags.length)
       html+='<p>'+rec.tags.map(tid=>{const t=tagOf(tid); return t?'<span class="chip" style="color:'+t.color+';border-color:'+t.color+';cursor:default;">'+esc(t.name)+'</span>':'';}).join('')+'</p>';
+    const chkR=id=>!!(rec.checks&&rec.checks[id]);
+    const brkR=id=>!!(rec.broken&&rec.broken[id]);
     cats.forEach(c=>{
       const rs=rules.filter(r=>r.cat===c.id); if(!rs.length) return;
+      const parts=chainPathActual(rs,rec); if(!parts.length) return; /* 本门当天无执行，不列预设 */
       html+='<div class="grp-title" style="color:'+c.color+';">'+esc(c.name)+'</div>';
-      /* 【v9】日视图用链路路径呈现：主链/支链执行情况一目了然 */
+      /* 【v9.1】只呈现当天实际执行/崩溃的链条，不罗列未触发的预设节点 */
       html+='<div class="path" style="font-size:.82rem;font-family:var(--mono);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;line-height:1.8;">'
-        +chainPath(rs,rec)+'</div>';
+        +parts.join(' → ')+'</div>';
+      const ec=rs.filter(r=>chkR(r.id)&&!brkR(r.id)).length;
+      const bc=rs.filter(r=>brkR(r.id)).length;
+      const kc=rs.filter(r=>r.parent&&chkR(r.id)).length;
+      html+='<div style="font-size:.72rem;color:var(--dim);margin:-2px 0 10px;">'
+        +(ec?('✅ 执行 '+ec+' 条　'):'')+(bc?('💥 崩溃 '+bc+' 条　'):'')+(kc?('🔀 走支链 '+kc+' 条'):'')+'</div>';
     });
     if(rec.task) html+='<p><small>当日焦点：</small>'+esc(rec.task)+'</p>';
     if(rec.note) html+='<p><small>备注：</small>'+esc(rec.note)+'</p>';
