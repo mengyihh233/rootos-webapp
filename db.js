@@ -124,12 +124,23 @@ async function init() {
   /* 已连接则直接返回（支持 server 后台反复重试时幂等，避免重复建池） */
   if (connected) return;
   if (USE_PG) {
+    /* 诊断：把 DATABASE_URL 解析后的主机/库名打出来（隐去账号密码），
+     * 便于在 Render 日志确认环境变量到底配置成了什么。
+     * 若连接串本身不合法（如误带 psql 前缀、特殊字符未编码），这里会直接暴露。 */
+    try {
+      const u = new URL(process.env.DATABASE_URL);
+      console.log(`🔎 DATABASE_URL 目标：协议=${u.protocol} 主机=${u.hostname} 端口=${u.port || 5432} 库=${u.pathname.replace('/', '')} 用户=${u.username ? u.username.slice(0, 3) + '***' : '(空)'}`);
+    } catch (e) {
+      console.error('❌ DATABASE_URL 不是合法的连接串（可能误带了 psql 前缀或多余引号）：', e.message);
+    }
     const { Pool } = require('pg');
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      /* 以下两个超时避免 Neon 免费层冷启动时无限挂起 */
-      connectionTimeoutMillis: 15000,
+      /* Neon 免费层计算节点会休眠，首次连接会触发自动唤醒，唤醒耗时可达 30~60s。
+       * 若 connectionTimeoutMillis 过短（如 15s），连接会被提前掐断、永远等不到唤醒 → 持续连接失败。
+       * 这里放宽到 60s，给足唤醒时间；idleTimeout 保持 30s 不影响。 */
+      connectionTimeoutMillis: 60000,
       idleTimeoutMillis: 30000
     });
     /* Neon 免费层会在闲置后休眠，首次连接常返回「database is paused」类错误。
@@ -145,11 +156,13 @@ async function init() {
       await pool.query(SCHEMA_PG.favorites);
     };
     let ok = false;
+    let lastErr = null;
     for (let attempt = 1; attempt <= 10 && !ok; attempt++) {
       try {
         await setup();
         ok = true;
       } catch (e) {
+        lastErr = e;
         console.warn(`⚠️ Postgres 连接第 ${attempt}/10 次失败，3s 后重试：${(e && e.message) || e}`);
         if (attempt < 10) await new Promise(r => setTimeout(r, 3000));
       }
@@ -158,7 +171,10 @@ async function init() {
       /* 清理半初始化的 pool，便于下次重试重新建池 */
       try { await pool.end(); } catch (_) { /* ignore */ }
       pool = null;
-      throw new Error('无法连接 Postgres：请检查 DATABASE_URL（Neon 是否已暂停 / 连接串是否正确）');
+      /* 把底层真实错误带出来，方便在 Render 日志里直接看到根因
+       * （如 password authentication failed / database does not exist / connection refused / timeout） */
+      const detail = lastErr && lastErr.message ? lastErr.message : String(lastErr);
+      throw new Error('无法连接 Postgres：' + detail);
     }
     connected = true;
     console.log('✅ 数据库：已连接 Postgres（DATABASE_URL）');
