@@ -44,6 +44,14 @@ linkCases.forEach(([inp, shouldLink, desc]) => {
   ok('linkify: ' + desc, hasAnchor === shouldLink, out);
 });
 
+/* 模板「合并」模式的核心纯函数 */
+ok('mergeById：保留当前 + 追加模板', JSON.stringify(L.mergeById([{id:'a',v:1}],[{id:'b',v:2}])) === JSON.stringify([{id:'a',v:1},{id:'b',v:2}]));
+ok('mergeById：同 id 模板覆盖当前', JSON.stringify(L.mergeById([{id:'a',v:1}],[{id:'a',v:9}])) === JSON.stringify([{id:'a',v:9}]));
+ok('mergeById：空当前不报错', L.mergeById(null,[{id:'x'}]).length === 1);
+ok('mergeById：空模板不报错', L.mergeById([{id:'x'}],null).length === 1);
+eq('mergeReviews：当前优先、按日期合并', L.mergeReviews({day:{'2026-08-07':{a:1}},week:{},month:{}}, {day:{'2026-08-07':{b:2},'2026-08-08':{c:3}},week:{},month:{}}),
+  {day:{'2026-08-07':{a:1},'2026-08-08':{c:3}},week:{},month:{}});
+
 /* ---------- 集成测试：起 server ---------- */
 console.log('\n[集成测试] 后端 API');
 const PORT = 4399;

@@ -43,7 +43,29 @@ function linkify(txt) {
   });
 }
 
+/* 数组合并（按 id 去重）：当前数据在前，模板数据追加在後；
+ * 当 id 冲突时模板版本覆盖当前版本（同一 id 视为「同一事物的更新版」）。
+ * 用于「套用模板·合并」模式，避免重复条目又能接收模板的改进。 */
+function mergeById(cur, tpl) {
+  const m = new Map();
+  (cur || []).forEach(x => { if (x && x.id != null) m.set(x.id, x); });
+  (tpl || []).forEach(x => { if (x && x.id != null) m.set(x.id, x); });
+  return Array.from(m.values());
+}
+
+/* 复盘记录合并（按 day/week/month 子对象 key=日期 合并）：
+ * 当前用户记录优先，模板中缺失的日期才补入，不覆盖用户已有复盘。 */
+function mergeReviews(cur, tpl) {
+  cur = cur || { day: {}, week: {}, month: {} };
+  tpl = tpl || { day: {}, week: {}, month: {} };
+  return {
+    day: Object.assign({}, tpl.day || {}, cur.day || {}),
+    week: Object.assign({}, tpl.week || {}, cur.week || {}),
+    month: Object.assign({}, tpl.month || {}, cur.month || {}),
+  };
+}
+
 /* 同时兼容浏览器(全局)与 node(模块)两种使用方式 */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { esc, isRootBag, linkify };
+  module.exports = { esc, isRootBag, linkify, mergeById, mergeReviews };
 }

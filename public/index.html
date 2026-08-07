@@ -590,6 +590,24 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   </div>
 </div>
 
+<!-- 套用模板：合并 / 覆盖 选择 -->
+<div class="modal-mask" id="tplApplyModal" style="display:none;z-index:210;" onclick="if(event.target===this)closeApplyModal()">
+  <div class="modal" style="max-width:460px;text-align:left;">
+    <h3 style="margin:0 0 6px;">套用模板：<span id="tplApplyName" style="color:var(--accent);"></span></h3>
+    <p style="color:var(--dim);font-size:.85rem;margin:0 0 16px;">请选择如何处理你当前的数据：</p>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button class="ok" style="text-align:left;" onclick="confirmApplyMode('merge')">
+        🔀 合并到当前数据<small style="display:block;color:var(--dim);font-weight:normal;margin-top:4px;">保留你现有的全部数据，仅追加/更新模板里的内容（建议日常使用，不丢数据）</small>
+      </button>
+      <button class="ghost" style="text-align:left;" onclick="confirmApplyMode('overwrite')">
+        ♻️ 覆盖当前数据<small style="display:block;color:var(--dim);font-weight:normal;margin-top:4px;">以模板完全替换你现在的全部数据（适合新账号或想从零开始）</small>
+      </button>
+      <button class="ghost" style="text-align:left;" onclick="closeApplyModal()">取消</button>
+    </div>
+    <p style="color:var(--dim);font-size:.78rem;margin:14px 0 0;">提示：套用前可在「数据」页先「💾 下载完整备份」，以防需要回滚。</p>
+  </div>
+</div>
+
 <!-- 计时器弹窗 -->
 <div class="modal-mask" id="timerModal">
   <div class="modal">
@@ -1874,23 +1892,60 @@ async function renderTemplates(){
         +'<div style="margin-bottom:10px;">'+(t.tags||[]).map(x=>'<span class="chip" style="border-color:var(--dim);color:var(--dim);">'+esc(x)+'</span>').join(' ')+'</div>'
         +'<div style="font-size:.85em;color:var(--dim);margin-bottom:12px;">含 '+(c.rules||0)+' 条规则 · '+(c.phases||0)+' 个阶段 · '+(c.resources||0)+' 个资源 · '+(c.retros||0)+' 条复盘</div>'
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'
-        +'<button class="ok" onclick="applyTemplate(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">套用模板</button>'
+        +'<button class="ok" onclick="askApplyMode(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">套用模板</button>'
         +'<button class="ghost" onclick="downloadTemplate(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">下载 JSON</button>'
         +'</div></div>';
     }).join('');
   }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（静态目录 /templates 未被托管？）</small>'; }
 }
-async function applyTemplate(file,title){
-  if(!confirm('套用「'+title+'」将覆盖当前账户的全部数据（规则/阶段/记录/资源）。建议用新账号或先导出备份。确定继续？')) return;
+async function applyTemplate(file,title,mode){
   try{
     const r=await fetch('/templates/'+file); if(!r.ok) throw new Error('fetch');
     const d=await r.json();
     if(!isRootBag(d)) throw new Error('模板格式不合法');
-    applyBag(d);
+    if(mode==='merge') mergeBag(d); else applyBag(d);   /* 合并 / 覆盖 */
     meta.onboarded=true; store.set('meta',meta);   /* 套用模板者非新手，跳过引导 */
     if(SESSION){ try{ await pushToServer(); }catch(e){ console.warn('套用后落盘失败',e); } }
-    alert('🧩 模板已套用，正在刷新…'); location.reload();
+    alert('🧩 模板已'+(mode==='merge'?'合并':'覆盖')+'套用，正在刷新…'); location.reload();
   }catch(e){ alert('套用失败：'+(e&&e.message||e)); }
+}
+
+/* 合并模式：保留当前用户数据，仅追加/更新模板中不存在或同 id 的内容。
+ * daily 为运行时状态不合并（保留当前用户的当日进度）；meta 以当前用户为主、模板补缺失默认。 */
+function mergeBag(d){
+  cats=mergeById(cats, d.cats||SEED_CATS);
+  levels=mergeById(levels, d.levels||SEED_LEVELS);
+  rules=mergeById(rules, d.rules);
+  tags=mergeById(tags, d.tags||SEED_TAGS);
+  events=mergeById(events, d.events||[]);
+  phases=mergeById(phases, d.phases||[]);
+  retros=mergeById(retros, d.retros||[]);
+  resources=mergeById(resources, d.resources||[]);
+  reviews=mergeReviews(reviews, d.reviews);
+  meta=Object.assign({}, d.meta||{}, meta);   /* 当前 meta 优先，模板只补缺失默认 */
+  const bag={cats,levels,rules,tags,daily,events,phases,reviews,retros,resources,meta};
+  Object.keys(bag).forEach(k=>store.set(k,bag[k]));
+}
+
+/* 套用前让用户选择「合并当前数据」还是「覆盖当前数据」 */
+function askApplyMode(file,title){
+  const modal=document.getElementById('tplApplyModal'); if(!modal) return;
+  modal._file=file; modal._title=title;
+  document.getElementById('tplApplyName').textContent=title||'';
+  modal.style.display='flex';
+}
+function closeApplyModal(){
+  const modal=document.getElementById('tplApplyModal'); if(modal) modal.style.display='none';
+}
+function confirmApplyMode(mode){
+  const modal=document.getElementById('tplApplyModal'); if(!modal) return;
+  const {_file,_title}=modal; closeApplyModal();
+  if(mode==='merge'){
+    if(!confirm('合并模式：保留你现在的全部数据，仅追加/更新模板里的内容（同名 id 以模板为准）。确定？')) return;
+  }else{
+    if(!confirm('覆盖模式：将以模板完全替换你现在的全部数据（规则/阶段/记录/资源）。建议先导出备份。确定？')) return;
+  }
+  applyTemplate(_file,_title,mode);
 }
 async function downloadTemplate(file,title){
   try{
