@@ -562,6 +562,14 @@ function markSaved(){
   /* 多用户版：改动后防抖推送到服务器（已登录时） */
   try{ if(SESSION) scheduleServerSave(); }catch(e){}
 }
+function toast(msg){
+  let t=document.getElementById('toast');
+  if(!t){ t=document.createElement('div'); t.id='toast';
+    t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:rgba(20,22,28,.96);color:#e6e6e6;border:1px solid #3a7bd5;padding:10px 16px;border-radius:10px;z-index:9999;opacity:0;transition:opacity .25s;font-size:.9rem;max-width:80vw;';
+    document.body.appendChild(t); }
+  t.textContent=msg; t.style.opacity='1';
+  clearTimeout(t._t); t._t=setTimeout(()=>{ t.style.opacity='0'; },1900);
+}
 const store = {
   get(k,d){ try{ const v=localStorage.getItem('pos_'+k); return v?JSON.parse(v):d; }catch(e){ return d; } },
   set(k,v){ localStorage.setItem('pos_'+k, JSON.stringify(v)); markSaved(); }
@@ -754,6 +762,7 @@ function renderTodayRules(){
       +(broken
         ? '<button class="mini ghost" onclick="unbreakRule(\''+r.id+'\')">↩</button>'
         : '<button class="mini ghost" title="此节点今天崩溃，激活支链" onclick="breakRule(\''+r.id+'\')">💥</button>')
+      +'<button class="mini ghost" title="清除今日该定式的勾选/崩溃，重新设置" onclick="resetRuleToday(\''+r.id+'\')">⟲</button>'
       +'</div>';
     if(showKids) h+='<div class="branch-box">'+kids.map(k=>item(k,true)).join('')+'</div>';
     return h;
@@ -794,6 +803,12 @@ function breakRule(id){
 function unbreakRule(id){
   const rec=dayRec(); delete rec.broken[id]; saveDaily();
   renderTodayRules(); updateProgress();
+}
+function resetRuleToday(id){
+  const rec=dayRec();
+  delete rec.checks[id]; delete rec.broken[id];
+  saveDaily(); renderTodayRules(); updateProgress();
+  toast('已清除今日该定式状态，可重新设置');
 }
 
 /* 【v9】链路路径文本：✅完成 💥崩溃 ⬜未执行；崩溃节点后接 🔀支链 */
@@ -936,7 +951,7 @@ function npDelRule(){
   if(!confirm('删除这条规则'+(kidsN?'（含 '+kidsN+' 个支链节点）':'')+'？历史勾选数据保留但不再显示。')) return;
   const kill=x=>{ rules.filter(k=>k.parent===x).forEach(k=>kill(k.id)); rules=rules.filter(k=>k.id!==x); };
   kill(selNode.id);
-  store.set('rules',rules); renderTree(); renderTodayRules(); $('#nodePanel').classList.remove('show');
+  store.set('rules',rules); renderTree(); renderTodayRules(); $('#nodePanel').classList.remove('show'); toast('已删除规则');
 }
 /* 【v9】节点面板：加支链 / 链内排序 */
 function npAddBranch(){
@@ -974,7 +989,7 @@ function renderRuleList(v){
   $('#rmList').innerHTML=html;
 }
 function toggleRuleOn(id,on){ const r=ruleOf(id); if(r){ r.on=on; store.set('rules',rules); renderTodayRules(); } }
-function delRuleDirect(id){ if(confirm('删除这条规则？')){ rules=rules.filter(x=>x.id!==id); store.set('rules',rules); renderRulePage(); renderTodayRules(); } }
+function delRuleDirect(id){ if(confirm('删除这条规则？')){ rules=rules.filter(x=>x.id!==id); store.set('rules',rules); renderRulePage(); renderTodayRules(); toast('已删除规则'); } }
 
 /* ---------- 门类 & 层级设置 ---------- */
 function renderCatLvList(){
@@ -1008,7 +1023,8 @@ function delLv(id){
 
 /* ================= 快速事件 ================= */
 function pushEvent(type, text, ruleId, retro){
-  events.push({ ts:new Date().toLocaleString('sv').slice(0,16), day:today, type, text:text||'', ruleId:ruleId||null, retro:retro||'' });
+  events.push({ id:'e'+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
+    ts:new Date().toLocaleString('sv').slice(0,16), day:today, type, text:text||'', ruleId:ruleId||null, retro:retro||'' });
   store.set('events',events);
 }
 function quickEvent(type){
@@ -1018,7 +1034,9 @@ function quickEvent(type){
   alert(EVT[type]+' 已记录。只记事实，不归零。');
 }
 /* 【v8】事件弹窗（关联定式 + 回溯建议） */
+let editingEventId = null;
 function openEventModal(){
+  editingEventId=null; $('#eventModalTitle').textContent='记录事件';
   $('#m_evRule').innerHTML='<option value="">-- 不关联 --</option>'
     +rules.map(r=>'<option value="'+r.id+'">'+esc(r.t)+'</option>').join('');
   $('#m_evDesc').value=''; $('#m_evRetro').value='';
@@ -1027,9 +1045,28 @@ function openEventModal(){
 function saveEventModal(){
   const desc=$('#m_evDesc').value.trim();
   if(!desc) return alert('请填写事实描述');
+  if(editingEventId){
+    const e=events.find(x=>x.id===editingEventId);
+    if(e){ e.type=$('#m_evType').value; e.text=desc; e.ruleId=$('#m_evRule').value||null; e.retro=$('#m_evRetro').value.trim(); store.set('events',events); }
+    editingEventId=null; $('#eventModalTitle').textContent='记录事件';
+    closeModal('eventModal');
+    renderTimeline('all', document.querySelector('#evFilters button'));
+    try{ renderDayView(); }catch(_){}
+    toast('已更新事件'); return;
+  }
   pushEvent($('#m_evType').value, desc, $('#m_evRule').value, $('#m_evRetro').value.trim());
   closeModal('eventModal');
   renderTimeline('all', document.querySelector('#evFilters button'));
+  try{ renderDayView(); }catch(_){}
+  toast('已记录事件');
+}
+function editEvent(id){
+  const e=events.find(x=>x.id===id); if(!e) return;
+  editingEventId=id; $('#eventModalTitle').textContent='编辑事件';
+  $('#m_evType').value=e.type;
+  $('#m_evRule').innerHTML='<option value="">-- 不关联 --</option>'+rules.map(r=>'<option value="'+r.id+'"'+(r.id===e.ruleId?' selected':'')+'>'+esc(r.t)+'</option>').join('');
+  $('#m_evDesc').value=e.text||''; $('#m_evRetro').value=e.retro||'';
+  $('#eventModal').classList.add('show');
 }
 
 /* ================= 【v8】定式迭代台 ================= */
@@ -1088,7 +1125,7 @@ function renderDayView(){
     if(rec.note) html+='<p><small>备注：</small>'+esc(rec.note)+'</p>';
   } else html='<p><small>这一天没有记录。</small></p>';
   const evs=events.filter(e=>(e.day||e.ts.slice(0,10))===d);
-  if(evs.length){ html+='<div class="grp-title">当日事件</div>'; evs.forEach(e=>html+=evHTML(e,false)); }
+  if(evs.length){ html+='<div class="grp-title">当日事件</div>'; evs.forEach(e=>html+=evHTML(e,true)); }
   $('#dayView').innerHTML=html;
   /* 日复盘 */
   $('#rvDayKey').textContent='（'+d+'）';
@@ -1187,7 +1224,10 @@ function evHTML(e,del){
     +'<span class="t">'+e.ts+'</span><span style="flex:1;">'+esc(e.text||'')
     +(r?'<br><small style="color:var(--dim);">关联定式：'+esc(r.t)+'</small>':'')
     +(e.retro?'<span class="retro">↳ 回溯建议：'+esc(e.retro)+'</span>':'')
-    +'</span>'+(del?'<button class="x" onclick="delEvent('+e._i+')">×</button>':'')+'</div>';
+    +'</span>'
+    +(del?('<button class="x" title="编辑" onclick="editEvent(\''+e.id+'\')">✎</button>'
+          +'<button class="x" title="删除" onclick="delEventById(\''+e.id+'\')">×</button>'):'')
+    +'</div>';
 }
 function renderTimeline(f,btn){
   if(btn){ document.querySelectorAll('#evFilters button').forEach(x=>x.classList.remove('active')); btn.classList.add('active'); }
@@ -1195,8 +1235,14 @@ function renderTimeline(f,btn){
   if(f&&f!=='all') list=list.filter(e=>e.type===f);
   $('#timelineView').innerHTML=list.slice(0,100).map(e=>evHTML(e,true)).join('')||'<p><small>暂无事件。</small></p>';
 }
-function delEvent(i){ events.splice(i,1); store.set('events',events);
-  const b=document.querySelector('#evFilters button.active'); if(b) b.click(); }
+function delEventById(id){
+  events = events.filter(x=>x.id!==id);
+  store.set('events',events);
+  const b=document.querySelector('#evFilters button.active');
+  if(b) b.click(); else renderTimeline('all',null);
+  try{ renderDayView(); }catch(e){}
+  toast('已删除事件');
+}
 
 /* ================= 阶段档案 ================= */
 function addPhase(parentId){
@@ -1357,7 +1403,7 @@ function importJSON(ev){
 function applyBag(d){
   if(!d.rules||!d.daily) throw 0;
   cats=d.cats||SEED_CATS; levels=d.levels||SEED_LEVELS; rules=d.rules;
-  tags=d.tags||SEED_TAGS; daily=d.daily; events=d.events||[]; phases=d.phases||[];
+  tags=d.tags||SEED_TAGS; daily=d.daily; events=d.events||[]; syncEventIds(); phases=d.phases||[];
   reviews=d.reviews||{day:{},week:{},month:{}};
   meta=Object.assign({}, d.meta||{});
   const bag={cats,levels,rules,tags,daily,events,phases,reviews,meta};
@@ -1371,6 +1417,7 @@ function checkNight(){
 }
 
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function syncEventIds(){ events.forEach(e=>{ if(!e.id) e.id='e'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }); }
 
 /* ================= 多用户版：登录态 + 服务器端数据同步 ================= */
 let SESSION=false, suppressSave=false, serverTimer=null;
@@ -1401,7 +1448,7 @@ async function loadFromServer(){
   rules = data.rules || SEED_RULES.map(r=>({...r}));
   tags = data.tags || SEED_TAGS.map(t=>({...t}));
   daily = data.daily || {};
-  events = data.events || [];
+  events = data.events || []; syncEventIds();
   phases = data.phases || SEED_PHASES.map(p=>({...p}));
   reviews = data.reviews || {day:{},week:{},month:{}};
   meta = data.meta || {};
