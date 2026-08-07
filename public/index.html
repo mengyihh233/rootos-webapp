@@ -1953,9 +1953,22 @@ function applyBag(d){
 async function renderTemplates(){
   const box=document.getElementById('tplList'); if(!box) return;
   box.innerHTML='<small style="color:var(--dim)">加载模板中…</small>';
+  const fetchList=async()=>{ const r=await fetch('/api/templates'); if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); };
+  let list=null;
   try{
-    const r=await fetch('/api/templates'); if(!r.ok) throw new Error('list');
-    const list=await r.json();
+    list=await fetchList();
+  }catch(e){
+    /* 数据库冷启动窗口（服务返回 503）：自动重试 3 次，避免用户误判为「接口坏了」 */
+    const is503=/503/.test(e.message);
+    for(const wait of [3000,5000,8000]){
+      if(!is503) break;
+      box.innerHTML='<small style="color:var(--warn)">数据库正在唤醒，'+Math.round(wait/1000)+' 秒后自动重试…</small>';
+      await new Promise(s=>setTimeout(s,wait));
+      try{ list=await fetchList(); break; }catch(e2){ list=null; }
+    }
+  }
+  try{
+    if(!list) throw 0;
     if(!Array.isArray(list)||!list.length){ box.innerHTML='<small style="color:var(--dim)">暂无可套用模板</small>'; return; }
     box.innerHTML=list.map(t=>{
       const c=t.counts||{};
@@ -1983,7 +1996,7 @@ async function renderTemplates(){
         +'<button class="ghost" onclick="downloadTemplate(\''+escJs(t.file)+'\',\''+escJs(t.title)+'\')">下载 JSON</button>'
         +'</div></div>';
     }).join('');
-  }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（/api/templates 接口异常？）</small>'; }
+  }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（网络异常或服务暂不可用），<a href="javascript:renderTemplates()" style="color:var(--accent);text-decoration:underline;">点击重试</a></small>'; }
 }
 
 /* 模板卡片星级评分 / 平均分 */
