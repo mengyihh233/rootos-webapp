@@ -137,6 +137,14 @@ table.wk th { color:var(--dim); font-weight:normal; font-size:.75rem; }
 .stat .k { font-size:.72rem; color:var(--dim); }
 .phedit { display:none; margin-top:10px; border-top:1px dashed var(--border); padding-top:10px; }
 .phedit.show { display:block; }
+.phase-head { cursor:pointer; display:flex; align-items:center; gap:6px; user-select:none; }
+.phase-head:hover h3 { color:var(--accent); }
+.caret { font-size:.75rem; color:var(--dim); transition:transform .15s; flex:0 0 auto; }
+.phase.mini { padding:8px 14px; }
+.phase.mini .stars { font-size:.72rem; }
+.phase-collapsed-hint { font-size:.72rem; color:var(--dim); margin-left:auto; padding-left:8px; }
+.phToolbar { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; align-items:center; }
+.phToolbar .count { color:var(--dim); font-size:.78rem; margin-left:auto; }
 
 /* 【v8 新增】复盘框 */
 .review-box { border:1px dashed var(--border); border-radius:10px; padding:12px; margin-top:14px; }
@@ -201,7 +209,8 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <div id="progressTrack"><div id="progressFill"></div></div>
     <span id="progressPct">0%</span>
     <span id="savedTag"></span>
-  <span id="userBox" style="margin-left:auto;"></span>
+    <button class="mini ghost" onclick="startOnboarding()" style="margin-left:10px;" title="新手引导">❓ 引导</button>
+  <span id="userBox" style="margin-left:10px;"></span>
   </div>
 </div>
 
@@ -214,6 +223,22 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 </p>
 <div id="nightBar">🌙 宵禁时段：手机该放客厅了 · 饿了只喝温水 · 躺床+手机=不可逃逸区</div>
 <div id="degradeBanner"></div>
+
+<!-- ================= 新手引导 ================= -->
+<div id="obMask" class="modal-mask" style="z-index:200;">
+  <div class="modal" style="max-width:470px;">
+    <div id="obStepNo" style="color:var(--accent);font-size:.78rem;font-family:var(--mono);"></div>
+    <div id="obIcon" style="font-size:2.4rem;margin:6px 0;"></div>
+    <h2 id="obTitle" style="margin:0 0 8px;"></h2>
+    <div id="obBody" style="font-size:.92rem;line-height:1.7;color:var(--txt);"></div>
+    <div style="display:flex;gap:8px;margin-top:18px;align-items:center;">
+      <button class="ghost mini" onclick="obSkip()">跳过</button>
+      <span style="flex:1;"></span>
+      <button class="ghost mini" id="obPrev" onclick="obPrev()">上一步</button>
+      <button class="ok" id="obNext" onclick="obNext()">下一步</button>
+    </div>
+  </div>
+</div>
 
 <div class="tab">
   <button class="tabbtn active" onclick="show('today',this)">今日</button>
@@ -418,6 +443,11 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 <div id="phase" class="section">
   <div class="card">
     <h2>🏔️ 阶段档案 <small>（大阶段套小阶段，系统数据自动汇总）</small></h2>
+    <div class="phToolbar">
+      <button class="mini ghost" onclick="expandAllPhases()">⊟ 全部展开</button>
+      <button class="mini ghost" onclick="collapseAllPhases()">⊞ 全部折叠（看全局）</button>
+      <span class="count" id="phaseCount"></span>
+    </div>
     <div id="phaseList"></div>
     <h3 style="margin-top:18px;">➕ 新建顶层大阶段</h3>
     <input type="text" id="phName" placeholder="阶段名">
@@ -1593,16 +1623,31 @@ function addPhase(parentId){
   renderPhases(); updatePhasePill();
 }
 function renderPhases(){
-  if(!phases.length){ $('#phaseList').innerHTML='<p><small>还没有阶段。</small></p>'; return; }
+  if(!phases.length){ $('#phaseList').innerHTML='<p><small>还没有阶段。</small></p>'; $('#phaseCount').textContent=''; return; }
+  const total=phases.length, top=phases.filter(p=>!p.parent).length;
+  $('#phaseCount').textContent='共 '+total+' 个阶段（'+top+' 大阶段）';
   $('#phaseList').innerHTML = phases.filter(p=>!p.parent).map(p=>phaseHTML(p,0)).join('');
 }
+let phaseCollapsed = new Set(store.get('phaseCollapsed') || []);
+function persistPhaseCollapsed(){ try{ store.set('phaseCollapsed', [...phaseCollapsed]); }catch(e){} }
+function togglePhaseCollapse(id){ if(phaseCollapsed.has(id)) phaseCollapsed.delete(id); else phaseCollapsed.add(id); persistPhaseCollapsed(); renderPhases(); }
+function expandAllPhases(){ phaseCollapsed.clear(); persistPhaseCollapsed(); renderPhases(); }
+function collapseAllPhases(){ phases.forEach(p=>{ if(phases.some(x=>x.parent===p.id)) phaseCollapsed.add(p.id); }); persistPhaseCollapsed(); renderPhases(); }
 function phaseHTML(p,depth){
   const s=phaseStats(p);
   const kids=phases.filter(x=>x.parent===p.id);
-  let html='<div class="phase'+(isPhaseNow(p)?' now':'')+'" style="margin-left:'+(depth*18)+'px;">'
-    +'<h3 style="margin:0;">'+(depth?'└ ':'')+esc(p.name)+' '
+  const collapsed=phaseCollapsed.has(p.id);
+  const caret = kids.length ? '<span class="caret">'+(collapsed?'▶':'▼')+'</span>' : '<span class="caret" style="opacity:.25">•</span>';
+  let html='<div class="phase'+(isPhaseNow(p)?' now':'')+(collapsed?' mini':'')+'" style="margin-left:'+(depth*18)+'px;">'
+    +'<div class="phase-head" onclick="togglePhaseCollapse(\''+p.id+'\')">'+caret
+    +'<h3 style="margin:0;display:inline;">'+(depth?'└ ':'')+esc(p.name)+' '
     +(p.done?'<span class="pill">已完结</span>':isPhaseNow(p)?'<span class="pill" style="color:var(--ok);border-color:var(--ok);">进行中</span>':'')
-    +'</h3><span class="stars">'+'★'.repeat(p.imp||1)+'☆'.repeat(3-(p.imp||1))+'</span>'
+    +'</h3>'
+    +(collapsed?'<span class="phase-collapsed-hint">含 '+kids.length+' 子项 · 点开看详情</span>':'')
+    +'</div>';
+  if(collapsed){ html += '</div>'; return html; }
+  html
+    +='<span class="stars">'+'★'.repeat(p.imp||1)+'☆'.repeat(3-(p.imp||1))+'</span>'
     +'<p style="margin:4px 0;"><small class="mono">'+p.start+' ~ '+(p.end||'至今')+'</small>'
     +(p.goal?'<br><small>目标：'+esc(p.goal)+'</small>':'')+'</p>'
     +'<div class="stat-grid">'
@@ -1621,8 +1666,9 @@ function phaseHTML(p,depth){
     +'<div class="row"><input type="date" id="pes_'+p.id+'" value="'+p.start+'"><input type="date" id="pee_'+p.id+'" value="'+(p.end||'')+'">'
     +'<select id="pei_'+p.id+'" style="width:130px;">'+[3,2,1].map(i=>'<option value="'+i+'"'+(p.imp===i?' selected':'')+'>'+'★'.repeat(i)+'</option>').join('')+'</select></div>'
     +'<textarea rows="2" id="peg_'+p.id+'">'+esc(p.goal||'')+'</textarea>'
-    +'<button class="mini ok" onclick="savePhaseEdit(\''+p.id+'\')">保存修改</button></div></div>';
+    +'<button class="mini ok" onclick="savePhaseEdit(\''+p.id+'\')">保存修改</button></div>';
   kids.forEach(k=>html+=phaseHTML(k,depth+1));
+  html += '</div>';
   return html;
 }
 function phaseStats(p){
@@ -1656,6 +1702,52 @@ function updatePhasePill(){
   const act=phases.filter(isPhaseNow);
   const deep=act.find(p=>p.parent)||act[0];
   $('#phasePill').textContent=deep?'📍 '+deep.name:'📍 无进行中阶段';
+}
+
+/* ================= 新手引导 ================= */
+let obStep = 0;
+const OB = [
+  { icon:'🛠️', title:'欢迎来到底层创造者 OS', tab:null,
+    body:'你是自己人生的 <b>运维工程师</b>。崩溃不是道德失败，而是 <b>系统报错</b>——记录它、改规则、次日重启即可。<br><br>这个工具帮你把"想变好"变成一套可运行、可迭代的系统。下面用 1 分钟带你走一遍。' },
+  { icon:'🌱', title:'① 今日：从根部保命定式做起', tab:'today',
+    body:'每天进来的第一件事，是勾选今天的 <b>根部定式</b>（傻瓜级、脑子浆糊也能做的小动作）。<br><br>记住 <b>1 动作法则</b>：与其想"今天要学 3 小时"，不如"现在只打开书第 1 页"。微小到不可能失败，才算好定式。' },
+  { icon:'🌳', title:'② 规则树：改规则 = 发版本', tab:'rules',
+    body:'规则分三层：<b>根部</b>（保命，崩塌日只保它）/ <b>中层</b>（状态正常的推进）/ <b>顶层</b>（巅峰冲刺）。<br><br>带 <b>micro</b> 属性的规则，做到一半崩了可以"换任务"而不是硬扛。哪条定式不合理？改它——就像给系统发一个新版本。' },
+  { icon:'🏔️', title:'③ 阶段：你的人生路线图', tab:'phase',
+    body:'大阶段里套小阶段（比如"大二 → 专升本冲刺 → 四科拆解"）。系统会自动汇总每个阶段的完成率、崩溃数、睡眠。<br><br><b>每个支点都能折叠</b>——收起细节看全局，展开看路径。这是你升学 / 留学路线的全景图。' },
+  { icon:'🔁', title:'④ 回溯：每日执行 → 回溯 → 改规则', tab:'review',
+    body:'这就是 <b>RSIP 递归稳态迭代协议</b>：每天执行真实动作 → 晚上回溯"哪条链执行了、哪条崩了" → 去迭代台改定式 → 明天重启。<br><br>崩溃了别归零，去"全部复盘 / 定式迭代台"记一笔，闭环就转起来了。' },
+  { icon:'📉', title:'⑤ 数据：看清自己的失败模式', tab:'data',
+    body:'在「数据」页，你能看到 <b>自己崩溃最多的定式</b> 和"崩溃后支链恢复率"。<br><br>这不是为了自我批判，而是为了 <b>精准修最该修的那条规则</b>——把复盘变成可执行的下一步。' },
+  { icon:'📚', title:'⑥ 规划·资源：收藏你的方法论', tab:'resources',
+    body:'把规划文档、方法论、书单、网址收进「规划·资源」。支持 <b>导入 Word / txt</b>，正文网址自动变可点击链接，还能 <b>搜索 + 按标签筛选</b>。<br><br>这是你的第二大脑。' },
+  { icon:'🚀', title:'开始你的第一个闭环', tab:'today',
+    body:'不用一次全搞懂。今天只做一件事：勾选一个根部定式，完成它。<br><br>明天回溯、改一条规则——闭环就转起来了。<br><br><b>随时点右上角「❓ 引导」可重看本教程。</b>现在，去勾你的第一个小动作吧 💪' },
+];
+function startOnboarding(){ obStep=0; renderOnboarding(); $('#obMask').classList.add('show'); }
+function gotoTab(id){
+  let found=null;
+  document.querySelectorAll('.tabbtn').forEach(b=>{ if(b.getAttribute('onclick').includes("'"+id+"'")) found=b; });
+  if(found) show(id, found); else show(id);
+}
+function renderOnboarding(){
+  const s = OB[obStep];
+  $('#obStepNo').textContent = '第 '+(obStep+1)+' / '+OB.length+' 步';
+  $('#obIcon').textContent = s.icon;
+  $('#obTitle').textContent = s.title;
+  $('#obBody').innerHTML = s.body;
+  $('#obPrev').style.visibility = obStep===0 ? 'hidden' : 'visible';
+  $('#obNext').textContent = obStep===OB.length-1 ? '开始使用 →' : '下一步';
+  if(s.tab) gotoTab(s.tab);
+}
+function obNext(){ if(obStep<OB.length-1){ obStep++; renderOnboarding(); } else obFinish(); }
+function obPrev(){ if(obStep>0){ obStep--; renderOnboarding(); } }
+function obSkip(){ obFinish(); }
+function obFinish(){
+  $('#obMask').classList.remove('show');
+  meta.onboarded = true;
+  try{ store.set('meta', meta); }catch(e){}
+  scheduleServerSave();   /* 把"已引导"标记同步到云端，换设备也不再弹 */
 }
 
 /* ================= 计时器 ================= */
@@ -1873,6 +1965,8 @@ function bootApp(){
     if(ub) ub.innerHTML = esc(j.username)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
     const an=document.getElementById('acctName'); if(an) an.textContent=j.username;
   }).catch(()=>{});
+  /* 新手引导：仅首次（meta.onboarded 未置位）自动弹出 */
+  if(!meta || !meta.onboarded){ setTimeout(startOnboarding, 350); }
 }
 window.onload=()=>{
   loadLocal();   /* 【新增】先把本地镜像载入内存，作为多端同步基线 */
