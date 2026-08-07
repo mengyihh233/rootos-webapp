@@ -23,25 +23,36 @@ const WX_SECRET = process.env.WX_SECRET || '';
 /* 启动诊断：打印 WX 配置状态（隐去敏感位），部署后在日志确认环境变量是否生效 */
 console.log(`🔎 微信登录配置：WX_APPID=${WX_APPID ? WX_APPID.slice(0, 6) + '…' + WX_APPID.slice(-4) + '（共' + WX_APPID.length + '位）' : '⚠️未配置'} | WX_SECRET=${WX_SECRET ? '✅已配置（' + WX_SECRET.length + '位）' : '⚠️未配置'}`);
 
-/* 小程序无 cookie，用 Bearer token 维持登录态（进程内存；单实例够用）。
- * token = 24 字节随机 hex，有效期 30 天，登录/绑定后签发。 */
-const wxTokens = new Map(); // token -> { uid, exp }
-function issueWxToken(uid) {
-  const token = crypto.randomBytes(24).toString('hex');
-  wxTokens.set(token, { uid, exp: Date.now() + 30 * 24 * 3600 * 1000 });
-  if (wxTokens.size > 10000) { /* 防内存泄漏：清过期 */
-    const now = Date.now();
-    for (const [k, v] of wxTokens) { if (now > v.exp) wxTokens.delete(k); }
-  }
-  return token;
+/* 小程序无 cookie，用 Bearer token 维持登录态。
+ * 【v1.4 改造】改为无状态 JWT（HMAC-SHA256 + SESSION_SECRET 签名）：
+ *   - 不存服务器内存 → 云托管实例重启/闲置回收后 token 依然有效
+ *   - 过期 30 天；SESSION_SECRET 不变即可长期有效
+ * 注：SESSION_SECRET 一旦更换，所有已签发 token 作废（重新登录即可）。 */
+function b64url(buf){ return Buffer.from(buf).toString('base64url'); }
+function signJwt(payload){
+  const data = b64url(JSON.stringify(payload));
+  return data + '.' + crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('base64url');
 }
-function wxUidFromReq(req) {
-  const ah = req.headers['authorization'] || '';
-  const m = /^Bearer\s+(.+)$/.exec(ah);
+function verifyJwt(token){
+  const parts = String(token || '').split('.');
+  if (parts.length !== 2) return null;
+  const [data, sig] = parts;
+  const expect = crypto.createHmac('sha256', SESSION_SECRET).update(data).digest('base64url');
+  if (sig !== expect) return null;
+  try {
+    const p = JSON.parse(Buffer.from(data, 'base64url').toString('utf8'));
+    if (!p || !p.uid || Date.now() > (p.exp || 0)) return null;
+    return p;
+  } catch (e) { return null; }
+}
+function issueWxToken(uid){
+  return signJwt({ uid, exp: Date.now() + 30 * 24 * 3600 * 1000 });
+}
+function wxUidFromReq(req){
+  const m = /^Bearer\s+(.+)$/.exec(req.headers['authorization'] || '');
   if (!m) return null;
-  const t = wxTokens.get(m[1]);
-  if (!t || Date.now() > t.exp) return null;
-  return t.uid;
+  const p = verifyJwt(m[1]);
+  return p ? p.uid : null;
 }
 /* 邮箱验证码 SMTP（QQ/163/126 等开启 SMTP 服务后填入授权码）：
  * 未配置时绑定/找回密码接口返回 503 并提示，功能自动降级为「仅绑定字符串」。 */
