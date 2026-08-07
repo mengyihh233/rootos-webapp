@@ -210,7 +210,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <span id="progressPct">0%</span>
     <span id="savedTag"></span>
     <button class="mini ghost" onclick="startOnboarding()" style="margin-left:10px;" title="新手引导">❓ 引导</button>
-  <span id="userBox" style="margin-left:10px;"></span>
+    <span id="userBox" style="margin-left:auto;"></span>
   </div>
 </div>
 
@@ -232,7 +232,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <h2 id="obTitle" style="margin:0 0 8px;"></h2>
     <div id="obBody" style="font-size:.92rem;line-height:1.7;color:var(--txt);"></div>
     <div style="display:flex;gap:8px;margin-top:18px;align-items:center;">
-      <button class="mini" style="color:var(--dim);" onclick="obSkip()">跳过引导</button>
+      <button class="ghost mini" onclick="obSkip()">跳过引导</button>
       <span style="flex:1;"></span>
       <button class="ghost mini" id="obPrev" onclick="obPrev()">上一步</button>
       <button class="ok" id="obNext" onclick="obNext()">下一步</button>
@@ -1812,17 +1812,24 @@ function exportJSON(){
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='root-os-backup-'+today+'.json'; a.click();
 }
+function isRootBag(d){
+  if(!d || typeof d!=='object') return false;
+  if(!Array.isArray(d.rules) || !Array.isArray(d.cats) || !Array.isArray(d.tags) || !Array.isArray(d.phases)) return false;
+  if(typeof d.daily!=='object' || d.daily===null) return false;
+  return true;
+}
 function importJSON(ev){
   const f=ev.target.files[0]; if(!f) return;
   const rd=new FileReader();
   rd.onload=async ()=>{ try{
       const d=JSON.parse(rd.result);
-      if(!d.rules||!d.daily) throw 0;
+      if(!isRootBag(d)) throw new Error('不是有效的 ROOT-OS 数据包（缺少 rules/cats/tags/phases/daily）');
+      if(!confirm('导入将覆盖当前账户的全部数据（规则/阶段/记录/资源）。确定继续？')){ ev.target.value=''; return; }
       applyBag(d);
       /* 登录态下把导入结果先落盘到服务器，否则刷新时 loadFromServer 会用旧数据覆盖本地 */
-      if(SESSION) await pushToServer();
-      alert('📥 导入成功'); location.reload();
-    }catch(e){ alert('文件格式不对，导入失败'); } };
+      if(SESSION){ try{ await pushToServer(); }catch(e){ console.warn('导入后落盘失败', e); } }
+      alert('📥 导入成功，正在刷新…'); location.reload();
+    }catch(e){ alert('导入失败：'+(e&&e.message||e)); ev.target.value=''; } };
   rd.readAsText(f);
 }
 

@@ -166,6 +166,18 @@ async function start() {
       if (!res.headersSent) res.status(500).json({ error: '服务器内部错误' });
     });
 
+  /* 登录 / 注册爆破防护：同一 IP 在 15 分钟内失败超过 20 次即限流（返回 429）。
+   * 成功一次即清空该 IP 的失败计数。内存级、单机够用；多实例部署可换 Redis。 */
+  const authFails = new Map();
+  function authFail(ip) {
+    const now = Date.now(), win = 15 * 60 * 1000;
+    let b = authFails.get(ip);
+    if (!b || now > b.reset) { b = { n: 0, reset: now + win }; authFails.set(ip, b); }
+    b.n++;
+    return b.n > 20;
+  }
+  function authOk(ip) { authFails.delete(ip); }
+
   function requireAuth(req, res, next) {
     if (!req.session.userId) return res.status(401).json({ error: '未登录' });
     next();
@@ -179,31 +191,37 @@ async function start() {
 
   /* 注册 */
   app.post('/api/register', wrap(async (req, res) => {
+    const ip = req.ip;
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
-    if (username.length < 2) return res.status(400).json({ error: '用户名至少 2 个字符' });
-    if (password.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
+    if (username.length < 2) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(400).json({ error: '用户名至少 2 个字符' }); }
+    if (password.length < 6) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(400).json({ error: '密码至少 6 位' }); }
     const exists = await db.userByName(username);
-    if (exists) return res.status(409).json({ error: '用户名已被占用' });
+    if (exists) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(409).json({ error: '用户名已被占用' }); }
     const pw_hash = bcrypt.hashSync(password, 10);
     const uid = await db.createUser(username, pw_hash);
     await db.profileSet(uid, JSON.stringify(defaultBag()));
     req.session.userId = uid;
     req.session.username = username;
+    authOk(ip);
     res.json({ ok: true, username });
   }));
 
-  /* 登录 */
+  /* 登录：先校验密码，正确即放行并清零失败计数（不误伤终于输对的人）；
+     只有密码错误时才累加限流，连续失败超阈值才返回 429。 */
   app.post('/api/login', wrap(async (req, res) => {
+    const ip = req.ip;
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
     const u = await db.userByName(username);
-    if (!u || !bcrypt.compareSync(password, u.pw_hash)) {
-      return res.status(401).json({ error: '用户名或密码错误' });
+    if (u && bcrypt.compareSync(password, u.pw_hash)) {
+      req.session.userId = u.id;
+      req.session.username = u.username;
+      authOk(ip);
+      return res.json({ ok: true, username: u.username });
     }
-    req.session.userId = u.id;
-    req.session.username = u.username;
-    res.json({ ok: true, username: u.username });
+    if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
+    return res.status(401).json({ error: '用户名或密码错误' });
   }));
 
   /* 登出 */
