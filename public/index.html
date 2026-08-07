@@ -1348,7 +1348,11 @@ function ruleNodeHTML(r,c,l){
   return '<div class="tnode"><div class="trow" data-nid="rule:'+r.id+'" onclick="selectNode(this,\'rule\',\''+c.id+'\',\''+l.id+'\',\''+r.id+'\')">'
     +(r.parent?'<span style="color:var(--warn);">🔀</span>':'')
     +(kids.length?'<span style="color:var(--dim);font-size:.7rem;">▸'+kids.length+'</span>':'')
-    +'<span class="tname" style="'+(r.on===false?'opacity:.4;text-decoration:line-through;':'')+'">'+esc(r.t)+'</span></div>'
+    +'<span class="tname" style="'+(r.on===false?'opacity:.4;text-decoration:line-through;':'')+'">'+esc(r.t)+'</span>'
+    +'<span class="mv" style="margin-left:auto;display:flex;gap:2px;align-items:center;">'
+    +'<button class="mini ghost" title="上移" onclick="event.stopPropagation();npQuickMove(\''+r.id+'\',-1)">▲</button>'
+    +'<button class="mini ghost" title="下移" onclick="event.stopPropagation();npQuickMove(\''+r.id+'\',1)">▼</button>'
+    +'</span></div>'
     +(kids.length?'<div class="tkids">'+kids.map(k=>ruleNodeHTML(k,c,l)).join('')+'</div>':'')
     +'</div>';
 }
@@ -1381,8 +1385,6 @@ function selectNode(el,kind,cat,lv,id){
       +'<select id="npLv">'+levels.map(l=>'<option value="'+l.id+'"'+(l.id===r.lv?' selected':'')+'>'+esc(l.name)+'</option>').join('')+'</select></div>'
       +'<div style="margin-top:8px;"><button class="mini ok" onclick="npSaveRule()">保存修改</button> '
       +'<button class="mini ghost" onclick="npToggleRule()">'+(r.on!==false?'停用':'启用')+'</button> '
-      +'<button class="mini ghost" onclick="npMove(-1)">↑ 链内上移</button> '
-      +'<button class="mini ghost" onclick="npMove(1)">↓ 下移</button> '
       +'<button class="mini danger" onclick="npDelRule()">删除</button></div>'
       /* 【v9】给该节点加支链 */
       +'<div class="row" style="margin-top:10px;"><input type="text" id="npBranchText" placeholder="支链节点：此节点崩溃时的备选路径" style="flex:1;">'
@@ -1442,6 +1444,17 @@ function npMove(dir){
   const tmp=sibs[i].seq; sibs[i].seq=sibs[j].seq; sibs[j].seq=tmp;
   store.set('rules',rules); renderTree(); renderTodayRules();
   selectNode(document.querySelector('[data-nid="rule:'+r.id+'"]'),'rule',r.cat,r.lv,r.id);
+}
+/* 行内快捷移动：同门类+父+层级组内，先规范化 seq 再交换（与小程序一致），不打开面板 */
+function npQuickMove(id,dir){
+  const r=ruleOf(id); if(!r) return;
+  const sibs=rules.filter(k=>k.cat===r.cat&&k.lv===r.lv&&(k.parent||null)===(r.parent||null)).sort((a,b)=>(a.seq||0)-(b.seq||0));
+  sibs.forEach((x,i)=>{ x.seq=i+1; });
+  const i=sibs.findIndex(k=>k.id===id), j=i+dir;
+  if(j<0||j>=sibs.length) return;
+  const tmp=sibs[i].seq; sibs[i].seq=sibs[j].seq; sibs[j].seq=tmp;
+  store.set('rules',rules); renderTree(); renderTodayRules();
+  scheduleServerSave();
 }
 function renderRuleList(v){
   const item=r=>'<div class="trow"><input type="checkbox" '+(r.on!==false?'checked':'')+' onchange="toggleRuleOn(\''+r.id+'\',this.checked)">'
