@@ -112,4 +112,21 @@ async function profileSet(uid, dataStr) {
   ).run(uid, dataStr);
 }
 
-module.exports = { init, userByName, createUser, profileGet, profileSet, USE_PG };
+async function adminUsers() {
+  const sql = `SELECT u.id, u.username, u.created_at, p.updated_at, p.data
+               FROM users u LEFT JOIN profiles p ON p.user_id = u.id
+               ORDER BY u.id`;
+  if (USE_PG) {
+    const r = await pool.query(sql);
+    return r.rows.map(row => ({
+      id: row.id, username: row.username,
+      created_at: row.created_at, updated_at: row.updated_at, data: row.data
+    }));
+  }
+  return sqlite.prepare(sql).all().map(row => ({
+    id: row.id, username: row.username,
+    created_at: row.created_at, updated_at: row.updated_at, data: row.data
+  }));
+}
+
+module.exports = { init, userByName, createUser, profileGet, profileSet, adminUsers, USE_PG };

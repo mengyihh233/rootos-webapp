@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>业务数据看板 · 底层创造者OS</title>
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --line:#2a2e37; --text:#e6e8eb; --muted:#9aa0aa; --accent:#4fc1ff; --green:#4ec9b0; --amber:#e8912d; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif; padding:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+  .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  button { background:var(--accent); color:#06121c; border:none; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--line); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:14px; margin-bottom:24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
+  .card .num { font-size:28px; font-weight:700; }
+  .card .lbl { color:var(--muted); font-size:12px; margin-top:4px; }
+  .section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:24px; }
+  .section h2 { font-size:14px; margin:0 0 12px; color:var(--muted); font-weight:500; }
+  .bar-row { display:flex; align-items:center; gap:10px; margin:6px 0; font-size:12px; }
+  .bar-row .d { width:92px; color:var(--muted); }
+  .bar-track { flex:1; background:#0c0e12; border-radius:6px; height:18px; overflow:hidden; }
+  .bar-fill { height:100%; background:var(--accent); border-radius:6px; }
+  .bar-row .c { width:28px; text-align:right; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  td.num, th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .login { max-width:360px; margin:80px auto; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:28px; }
+  .login h1 { margin-bottom:14px; }
+  input { width:100%; padding:10px 12px; border-radius:8px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font-size:14px; margin-bottom:12px; }
+  .err { color:#ff6b6b; font-size:13px; min-height:18px; margin-bottom:8px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; background:#223; color:var(--green); }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+const app = document.getElementById('app');
+
+function fmt(dt) {
+  if (!dt) return '—';
+  const d = new Date(dt);
+  if (isNaN(d)) return String(dt);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({ credentials:'include', headers:{'Content-Type':'application/json'} }, opts));
+  let body = null;
+  try { body = await r.json(); } catch(e) {}
+  return { ok: r.ok, status: r.status, body };
+}
+
+function loginView() {
+  app.innerHTML = `
+    <div class="login">
+      <h1>业务数据看板</h1>
+      <div class="sub">请输入管理员 Token</div>
+      <div class="err" id="err"></div>
+      <input id="token" type="password" placeholder="ADMIN_TOKEN" autocomplete="off">
+      <button style="width:100%" onclick="doLogin()">进入</button>
+    </div>`;
+  document.getElementById('token').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+}
+
+async function doLogin() {
+  const token = document.getElementById('token').value.trim();
+  const r = await api('/api/admin/login', { method:'POST', body: JSON.stringify({ token }) });
+  if (r.ok) { dashboard(); }
+  else { document.getElementById('err').textContent = (r.body && r.body.error) || '登录失败'; }
+}
+
+async function doLogout() {
+  await api('/api/admin/logout', { method:'POST', body: JSON.stringify({}) });
+  loginView();
+}
+
+async function dashboard() {
+  const r = await api('/api/admin/stats');
+  if (!r.ok) { loginView(); return; }
+  const s = r.body;
+  const maxDay = Math.max(1, ...s.registrationsByDay.map(x => x.count));
+
+  const trend = s.registrationsByDay.map(x => `
+    <div class="bar-row">
+      <span class="d">${x.date}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${(x.count/maxDay*100).toFixed(1)}%"></div></div>
+      <span class="c">${x.count}</span>
+    </div>`).join('') || '<div class="sub">暂无注册记录</div>';
+
+  const rows = s.users.map(u => `
+    <tr>
+      <td>${u.id}</td>
+      <td>${escapeHtml(u.username)}</td>
+      <td>${fmt(u.created_at)}</td>
+      <td class="num">${u.rules}</td>
+      <td class="num">${u.phases}</td>
+      <td class="num">${u.cats}</td>
+      <td class="num">${u.tags}</td>
+      <td>${fmt(u.updated_at)}</td>
+    </tr>`).join('');
+
+  app.innerHTML = `
+    <div class="topbar">
+      <div>
+        <h1>业务数据看板</h1>
+        <div class="sub">生成于 ${fmt(s.generatedAt)}</div>
+      </div>
+      <button class="ghost" onclick="doLogout()">退出登录</button>
+    </div>
+
+    <div class="cards">
+      <div class="card"><div class="num">${s.totalUsers}</div><div class="lbl">总用户数</div></div>
+      <div class="card"><div class="num">${s.last7}</div><div class="lbl">近 7 天新增</div></div>
+      <div class="card"><div class="num">${s.last30}</div><div class="lbl">近 30 天新增</div></div>
+    </div>
+
+    <div class="section">
+      <h2>注册趋势（按天）</h2>
+      ${trend}
+    </div>
+
+    <div class="section">
+      <h2>用户明细（${s.users.length}）</h2>
+      <table>
+        <thead><tr>
+          <th>ID</th><th>用户名</th><th>注册时间</th>
+          <th class="num">定式</th><th class="num">阶段</th><th class="num">门类</th><th class="num">标签</th>
+          <th>更新时间</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+loginView();
+</script>
+</body>
+</html>

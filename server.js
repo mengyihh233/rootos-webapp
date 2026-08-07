@@ -15,6 +15,7 @@ const db = require('./db');
 
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'rootos-dev-secret-change-me';
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 
 /* ---------- 新用户默认数据包 ----------
  * 通用启动模板（已剔除医学 / 成人内容模块，完整保留坏习惯戒断链）。
@@ -128,6 +129,12 @@ async function start() {
     next();
   }
 
+  /* 管理后台鉴权：仅 ADMIN_TOKEN 持有者可进入 */
+  function requireAdmin(req, res, next) {
+    if (!req.session.isAdmin) return res.status(401).json({ error: '未授权' });
+    next();
+  }
+
   /* 注册 */
   app.post('/api/register', wrap(async (req, res) => {
     const username = String(req.body.username || '').trim();
@@ -188,6 +195,52 @@ async function start() {
     if (clean.meta) delete clean.meta.ghToken;
     await db.profileSet(req.session.userId, JSON.stringify(clean));
     res.json({ ok: true });
+  }));
+
+  /* ---- 管理后台：业务数据看板 ---- */
+  app.post('/api/admin/login', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN) return res.status(403).json({ error: '后台未启用（服务端未设置 ADMIN_TOKEN）' });
+    const token = String(req.body.token || '').trim();
+    if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Token 错误' });
+    req.session.isAdmin = true;
+    res.json({ ok: true });
+  }));
+
+  app.post('/api/admin/logout', requireAdmin, wrap(async (req, res) => {
+    req.session.isAdmin = false;
+    res.json({ ok: true });
+  }));
+
+  app.get('/api/admin/stats', requireAdmin, wrap(async (req, res) => {
+    const rows = await db.adminUsers();
+    const users = [];
+    const regDays = {};
+    for (const r of rows) {
+      let data = {};
+      try { data = typeof r.data === 'string' ? JSON.parse(r.data || '{}') : (r.data || {}); } catch (e) { data = {}; }
+      const day = new Date(r.created_at).toISOString().slice(0, 10);
+      regDays[day] = (regDays[day] || 0) + 1;
+      users.push({
+        id: r.id,
+        username: r.username,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        rules: data.rules ? data.rules.length : 0,
+        phases: data.phases ? data.phases.length : 0,
+        cats: data.cats ? data.cats.length : 0,
+        tags: data.tags ? data.tags.length : 0
+      });
+    }
+    const now = Date.now();
+    const inLast = (d, days) => (now - new Date(d).getTime()) <= days * 86400000;
+    res.json({
+      totalUsers: users.length,
+      last7: users.filter(u => inLast(u.created_at, 7)).length,
+      last30: users.filter(u => inLast(u.created_at, 30)).length,
+      registrationsByDay: Object.keys(regDays).sort().map(d => ({ date: d, count: regDays[d] })),
+      users,
+      generatedAt: new Date().toISOString()
+    });
   }));
 
   /* 静态前端 */
