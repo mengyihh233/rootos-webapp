@@ -205,6 +205,10 @@ async function start() {
     let b = authFails.get(ip);
     if (!b || now > b.reset) { b = { n: 0, reset: now + win }; authFails.set(ip, b); }
     b.n++;
+    /* 防内存泄漏：条目过多时清理已过期记录（含被伪造 IP 刷量的场景） */
+    if (authFails.size > 5000) {
+      for (const [k, v] of authFails) { if (now > v.reset) authFails.delete(k); }
+    }
     return b.n > 20;
   }
   function authOk(ip) { authFails.delete(ip); }
@@ -306,6 +310,10 @@ async function start() {
       data = defaultBag();
       await db.profileSet(req.session.userId, JSON.stringify(data));
     }
+    /* 多端同步：以服务器时钟为准，返回数据最后更新时间（供前端判断本地是否较新），
+     * 避免依赖客户端时钟（设备时钟不一致会导致数据被静默覆盖） */
+    const updatedAt = await db.profileUpdatedAt(req.session.userId);
+    if (updatedAt) res.setHeader('X-Data-Updated', updatedAt);
     res.json(data);
   }));
 

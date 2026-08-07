@@ -275,6 +275,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   <button class="tabbtn" onclick="show('phase',this)">阶段</button>
   <button class="tabbtn" onclick="show('method',this)">总体思想</button>
   <button class="tabbtn" onclick="show('resources',this)">规划·资源</button>
+  <button class="tabbtn" onclick="show('templates',this)">🧩模板</button>
   <button class="tabbtn" onclick="show('data',this)">数据</button>
 </div>
 
@@ -651,7 +652,10 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   <div class="modal" style="max-width:480px;text-align:left;">
     <h3 style="margin:0 0 12px;">🔔 通知</h3>
     <div id="notifList" style="max-height:60vh;overflow:auto;"></div>
-    <div style="text-align:right;margin-top:14px;"><button class="ghost" onclick="closeNotif()">关闭</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+      <button class="ghost" id="notifReadAll" style="display:none;" onclick="markAllNotifRead()">全部标记已读</button>
+      <button class="ghost" onclick="closeNotif()">关闭</button>
+    </div>
   </div>
 </div>
 
@@ -2019,10 +2023,29 @@ async function openNotifications(){
             : '你有新的通知';
           return '<div class="card" style="margin:8px 0;padding:12px;' + (n.is_read ? 'opacity:.6;' : 'border-left:3px solid var(--accent);') + '">' + esc(txt) + '</div>';
         }).join('');
-    await fetch('/api/notifications/read', { method: 'POST' });
-    updateNotifDot(0);
+    /* 不再「打开即全部已读」：红点保留，用户点「全部标记已读」才清除 */
+    const btn = document.getElementById('notifReadAll');
+    if (btn) btn.style.display = (d.unread > 0) ? 'inline-block' : 'none';
   } catch (e) { if (box) box.innerHTML = '加载失败'; }
   modal.style.display = 'flex';
+}
+async function markAllNotifRead(){
+  try{
+    await fetch('/api/notifications/read', { method: 'POST' });
+    updateNotifDot(0);
+    const btn = document.getElementById('notifReadAll');
+    if (btn) btn.style.display = 'none';
+    /* 刷新当前列表的未读样式 */
+    const r = await fetch('/api/notifications');
+    const d = await r.json();
+    const box = document.getElementById('notifList');
+    if (box && d.list && d.list.length) box.innerHTML = d.list.map(n => {
+      const title = (n.payload && n.payload.title) || '';
+      const txt = n.type === 'template_approved' ? '🎉 你的模板《' + title + '》已通过审核，现已在模板市场公开！'
+        : n.type === 'template_rejected' ? '📝 你的模板《' + title + '》未通过审核。' : '你有新的通知';
+      return '<div class="card" style="margin:8px 0;padding:12px;opacity:.6;">' + esc(txt) + '</div>';
+    }).join('');
+  }catch(e){ alert('操作失败'); }
 }
 function closeNotif(){ const m = document.getElementById('notifModal'); if (m) m.style.display = 'none'; }
 
@@ -2170,6 +2193,7 @@ function syncEventIds(){ events.forEach(e=>{ if(!e.id) e.id='e'+Date.now().toStr
 
 /* ================= 多用户版：登录态 + 服务器端数据同步 ================= */
 let SESSION=false, suppressSave=false, serverTimer=null;
+let pendingPushData=null, pushRetryTimer=null;  /* 推送失败暂存 + 自动重试 */
 const bagKeys=['cats','levels','rules','tags','daily','events','phases','reviews','retros','resources','meta'];
 function bagFromLocal(){
   const o={}; bagKeys.forEach(k=>{ const v=store.get(k); if(v!==null && v!==undefined) o[k]=v; }); return o;
@@ -2177,10 +2201,28 @@ function bagFromLocal(){
 async function pushToServer(){
   if(!SESSION) return;
   try{
-    meta.savedAt = localSavedAt;   /* 【新增】带上本地时间戳，供多端冲突判断 */
-    const r=await fetch('/api/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(bagFromLocal())});
-    if(!r.ok) console.warn('保存失败', r.status);
-  }catch(e){ console.warn('保存失败', e); }
+    /* 显式把本地时间戳注入 body.meta（bagFromLocal 取自 localStorage，不会含内存中刚赋值的字段） */
+    const bag=bagFromLocal();
+    bag.meta=Object.assign({}, bag.meta||{}, { savedAt: localSavedAt });
+    const r=await fetch('/api/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(bag)});
+    if(!r.ok) throw new Error('http '+r.status);
+    pendingPushData=null;
+    try{ localStorage.removeItem('pos_pendingPush'); }catch(e){}
+    return true;
+  }catch(e){
+    /* 失败不丢数据：暂存最新改动到 localStorage，30s 后自动重试并提示用户 */
+    console.warn('保存失败，已暂存待重试', e);
+    try{
+      const b=bagFromLocal();
+      b.meta=Object.assign({}, b.meta||{}, { savedAt: localSavedAt });
+      pendingPushData=b;
+      localStorage.setItem('pos_pendingPush', JSON.stringify(b));
+    }catch(e2){}
+    toast('⚠️ 网络异常，改动已暂存本地，30 秒后自动重试');
+    clearTimeout(pushRetryTimer);
+    pushRetryTimer=setTimeout(()=>{ if(SESSION) pushToServer(); }, 30000);
+    return false;
+  }
 }
 function scheduleServerSave(){ if(suppressSave) return; clearTimeout(serverTimer); serverTimer=setTimeout(pushToServer, 1500); }
 /* 清空本地镜像：切换账号 / 登出时必须调用，否则会串号 */
@@ -2206,10 +2248,14 @@ function loadLocal(){
 async function loadFromServer(){
   const r=await fetch('/api/data'); if(!r.ok) throw new Error('load');
   const data=await r.json();
+  /* 上次推送失败暂存的改动：刷新后从 localStorage 恢复，作为「本地较新」依据 */
+  if(!pendingPushData){
+    try{ const s=localStorage.getItem('pos_pendingPush'); pendingPushData=s?JSON.parse(s):null; }catch(e){ pendingPushData=null; }
+  }
+  /* 多端同步：以服务器时钟（X-Data-Updated 头）为权威；本地有未推送改动或暂存时优先推上去再返回，避免被旧服务器数据覆盖 */
   const localTs = Number(localStorage.getItem('pos_savedAt'))||0;
-  const serverTs = (data.meta && data.meta.savedAt) ? Number(data.meta.savedAt) : 0;
-  /* 【新增】多端同步：本地有更新的未推送改动时，优先把本地推上去再返回，避免被旧服务器数据覆盖 */
-  if(SESSION && localTs > serverTs){
+  const serverTs = Number(new Date(r.headers.get('X-Data-Updated')||0)) || 0;
+  if(SESSION && (pendingPushData || localTs > serverTs)){
     try{ await pushToServer(); console.warn('[sync] 本地改动较新，已优先推送，不覆盖'); }catch(e){ console.warn('[sync] 本地优先推送失败', e); }
     return;
   }

@@ -230,6 +230,20 @@ async function profileGet(uid) {
   return row ? row.data : null;
 }
 
+/* 读取数据最后更新时间（服务器时钟，跨设备冲突判断的权威依据）。
+ * 返回 ISO 字符串；无记录返回 null。 */
+async function profileUpdatedAt(uid) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT updated_at FROM profiles WHERE user_id = $1', [uid]);
+    if (!r.rows[0] || !r.rows[0].updated_at) return null;
+    return new Date(r.rows[0].updated_at).toISOString();
+  }
+  const row = sqlite.prepare('SELECT updated_at FROM profiles WHERE user_id = ?').get(uid);
+  if (!row || !row.updated_at) return null;
+  /* SQLite datetime('now') 为 UTC "YYYY-MM-DD HH:MM:SS"，转成可被 Date.parse 的 ISO 串 */
+  return new Date(String(row.updated_at).replace(' ', 'T') + 'Z').toISOString();
+}
+
 async function profileSet(uid, dataStr) {
   if (USE_PG) {
     await pool.query(
@@ -394,4 +408,4 @@ async function favoriteIs(templateId, userId) {
   return !!sqlite.prepare(`SELECT 1 FROM favorites WHERE template_id=? AND user_id=?`).get(templateId, userId);
 }
 
-module.exports = { init, isConnected, userByName, createUser, profileGet, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, USE_PG };
+module.exports = { init, isConnected, userByName, createUser, profileGet, profileUpdatedAt, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, USE_PG };

@@ -173,6 +173,7 @@ function makeDocx(text) {
   r = await fetch(base + '/api/data', { headers: { cookie: cookie3 } });
   const got = await r.json();
   ok('GET 回显 rules 一致', got.rules.length === bag.rules.length);
+  ok('GET /api/data 带 X-Data-Updated 服务器时间戳头（多端同步权威时钟）', !!r.headers.get('x-data-updated'), 'header=' + r.headers.get('x-data-updated'));
   ok('GET 回显 daily 一致', JSON.stringify(got.daily) === JSON.stringify(bag.daily));
 
   // 文档解析：.txt
