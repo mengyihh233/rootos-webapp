@@ -4,13 +4,27 @@
  * 浏览器中作为普通 <script> 加载，函数挂到全局；node 中通过 module.exports 导出。
  * ============================================================ */
 
-/* HTML 转义：所有用户内容渲染前必须经过它，防 XSS */
+/* HTML 转义：所有用户内容渲染前必须经过它，防 XSS。
+ * 覆盖 & < > " ' 五类字符（含单引号——若漏转，用户内容进入
+ * onclick="fn('...')" 这类内联 JS 字符串时会被截断注入，构成存储型 XSS）。 */
 function esc(s) {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/* JS 字符串上下文转义：用于把用户内容拼进 onclick="fn('...')" 的内联 JS 字符串。
+ * 必须「先 JS 转义、再 HTML 转义」：
+ *   1) 反斜杠 → \\（防止用户输入 \' 反杀转义）；
+ *   2) 单引号 → \'（防止截断 JS 字符串）；
+ *   3) esc() 处理 & < > "（HTML 属性层；其中 &quot; 在 HTML 解析后还原为 "，
+ *      但它在 JS 单引号字符串内是普通字符，无害）。
+ * 最终经 HTML 解析还原为 \'，JS 解析为字符串内的单引号——两层都安全。 */
+function escJs(s) {
+  return esc(String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
 }
 
 /* 判断一份 JSON 是否为合法的 ROOT-OS 数据包（导入校验用） */
@@ -103,5 +117,5 @@ function mergeWithChoices(cur, tpl, choices) {
 
 /* 同时兼容浏览器(全局)与 node(模块)两种使用方式 */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { esc, isRootBag, linkify, mergeById, mergeReviews, diffById, mergeWithChoices };
+  module.exports = { esc, escJs, isRootBag, linkify, mergeById, mergeReviews, diffById, mergeWithChoices };
 }

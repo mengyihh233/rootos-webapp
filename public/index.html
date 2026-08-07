@@ -1349,7 +1349,7 @@ function editEvent(id){
   const e=events.find(x=>x.id===id); if(!e) return;
   editingEventId=id; $('#eventModalTitle').textContent='编辑事件';
   $('#m_evType').value=e.type;
-  $('#m_evRule').innerHTML='<option value="">-- 不关联 --</option>'+rules.map(r=>'<option value="'+r.id+'"'+(r.id===e.ruleId?' selected':'')+'>'+esc(r.t)+'</option>').join('');
+  $('#m_evRule').innerHTML='<option value="">-- 不关联 --</option>'+rules.map(r=>'<option value="'+esc(r.id)+'"'+(r.id===e.ruleId?' selected':'')+'>'+esc(r.t)+'</option>').join('');
   $('#m_evDesc').value=e.text||''; $('#m_evRetro').value=e.retro||'';
   $('#eventModal').classList.add('show');
 }
@@ -1577,8 +1577,8 @@ function renderResources(){
     const tags = (r.tags||[]).map(t=>'<span class="tagpill">'+esc(t)+'</span>').join(' ');
     return '<div class="past-review" style="border-left:3px solid var(--accent);padding-left:10px;margin:10px 0;">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;"><b>'+esc(r.title||'未命名')+'</b>'
-      +'<span><button class="x" title="编辑" onclick="editResource(\''+(r.id||'')+'\')">✎</button>'
-      +' <button class="x" title="删除" onclick="delResource(\''+(r.id||'')+'\')">×</button></span></div>'
+      +'<span><button class="x" title="编辑" onclick="editResource(\''+escJs(r.id||'')+'\')">✎</button>'
+      +' <button class="x" title="删除" onclick="delResource(\''+escJs(r.id||'')+'\')">×</button></span></div>'
       + (tags?'<div style="margin:4px 0;">'+tags+'</div>':'')
       +'<div style="white-space:pre-wrap;margin-top:4px;color:var(--txt);">'+linkify(r.body||'')+'</div>'
       +'<div style="margin-top:4px;color:var(--dim);font-size:12px;">🕓 '+(r.updatedAt||'')+'</div></div>';
@@ -1590,7 +1590,7 @@ function renderResTags(cnt){
   bar.innerHTML = chips.map(t=>{
     const active = (t==='全部' && !resActiveTag) || t===resActiveTag;
     const n = t==='全部' ? (resources?resources.length:0) : (cnt[t]||0);
-    return '<button class="tagchip'+(active?' active':'')+'" onclick="resSetTag(\''+esc(t)+'\')">'+esc(t)+' <small>'+n+'</small></button>';
+    return '<button class="tagchip'+(active?' active':'')+'" onclick="resSetTag(\''+escJs(t)+'\')">'+esc(t)+' <small>'+n+'</small></button>';
   }).join('');
 }
 function showResourceForm(preset){
@@ -1951,8 +1951,8 @@ async function renderTemplates(){
         +'<div style="font-size:.85em;color:var(--dim);margin-bottom:12px;">含 '+(c.rules||0)+' 条规则 · '+(c.phases||0)+' 个阶段 · '+(c.resources||0)+' 个资源 · '+(c.retros||0)+' 条复盘</div>'
         + social
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'
-        +'<button class="ok" onclick="askApplyMode(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">套用模板</button>'
-        +'<button class="ghost" onclick="downloadTemplate(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">下载 JSON</button>'
+        +'<button class="ok" onclick="askApplyMode(\''+escJs(t.file)+'\',\''+escJs(t.title)+'\')">套用模板</button>'
+        +'<button class="ghost" onclick="downloadTemplate(\''+escJs(t.file)+'\',\''+escJs(t.title)+'\')">下载 JSON</button>'
         +'</div></div>';
     }).join('');
   }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（/api/templates 接口异常？）</small>'; }

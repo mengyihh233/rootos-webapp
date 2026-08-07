@@ -23,6 +23,9 @@ function eq(name, a, b) { ok(name + ' (期望 ' + JSON.stringify(b) + ')', JSON.
 console.log('\n[单元测试] logic.js');
 const L = require('../public/logic.js');
 eq('esc 转义 < > & "', L.esc('<b>&"x'), '&lt;b&gt;&amp;&quot;x');
+ok('esc 转义单引号（防 JS 字符串注入）', L.esc("a'b") === 'a&#39;b', L.esc("a'b"));
+ok('escJs 转义反斜杠+单引号（onclick 内联 JS 字符串注入防护）', L.escJs("');alert(1);//") === "\\&#39;);alert(1);//", JSON.stringify(L.escJs("');alert(1);//")));
+ok('escJs 保留普通文本', L.escJs('cs_student.json') === 'cs_student.json', JSON.stringify(L.escJs('cs_student.json')));
 ok('isRootBag 合法包', L.isRootBag({ rules: [], cats: [], tags: [], phases: [], daily: {} }) === true);
 ok('isRootBag 缺 daily 判否', L.isRootBag({ rules: [], cats: [], tags: [], phases: [] }) === false);
 ok('isRootBag 缺 phases 判否', L.isRootBag({ rules: [], cats: [], tags: [], daily: {} }) === false);
