@@ -1,33 +1,20 @@
 /* =====================================================================
  * 底层创造者OS — 多用户版后端
- * Node + Express + SQLite(better-sqlite3) + express-session + bcryptjs
+ * Node + Express + SQLite/Postgres(better-sqlite3 或 pg) + express-session + bcryptjs
  * 每个注册用户拥有独立的 dashboard 数据包（云端存储，天然多端同步）
+ *
+ * 数据库引擎由环境变量 DATABASE_URL 决定（见 db.js）：
+ *   - 不设 → 本地 SQLite（data.db），适合开发 / 自托管 VPS
+ *   - 设了 Postgres 连接串（如 Neon）→ 使用 Postgres，适合免费云平台部署
  * ===================================================================== */
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
-const Database = require('better-sqlite3');
 const path = require('path');
+const db = require('./db');
 
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'rootos-dev-secret-change-me';
-
-/* ---------- 数据库 ---------- */
-const db = new Database(path.join(__dirname, 'data.db'));
-db.pragma('journal_mode = WAL');
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    username  TEXT UNIQUE NOT NULL,
-    pw_hash   TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE IF NOT EXISTS profiles (
-    user_id INTEGER PRIMARY KEY,
-    data    TEXT NOT NULL DEFAULT '{}',
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-`);
 
 /* ---------- 新用户默认数据包 ----------
  * 通用启动模板（已剔除医学 / 成人内容模块，完整保留坏习惯戒断链）。
@@ -114,95 +101,101 @@ function defaultBag() {
 }
 
 /* ---------- Express ---------- */
-const app = express();
-/* 部署在 Nginx / Caddy 反代之后时必须开启，
- * 否则 NODE_ENV=production 下 cookie 的 secure 标志会导致登录态无法建立 */
-app.set('trust proxy', 1);
-app.use(express.json({ limit: '5mb' }));
-app.use(session({
-  secret: SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }
-}));
+async function start() {
+  await db.init();
 
-const getUserStmt = db.prepare('SELECT * FROM users WHERE id = ?');
-const insUserStmt = db.prepare('INSERT INTO users (username, pw_hash) VALUES (?, ?)');
-const insProfileStmt = db.prepare('INSERT OR REPLACE INTO profiles (user_id, data, updated_at) VALUES (?, ?, datetime(\'now\'))');
-const getProfileStmt = db.prepare('SELECT data FROM profiles WHERE user_id = ?');
-const updProfileStmt = db.prepare('INSERT OR REPLACE INTO profiles (user_id, data, updated_at) VALUES (?, ?, datetime(\'now\'))');
+  const app = express();
+  /* 部署在 Nginx / Caddy / Render 反代之后时必须开启，
+   * 否则 NODE_ENV=production 下 cookie 的 secure 标志会导致登录态无法建立 */
+  app.set('trust proxy', 1);
+  app.use(express.json({ limit: '5mb' }));
+  app.use(session({
+    secret: SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }
+  }));
 
-function requireAuth(req, res, next) {
-  if (!req.session.userId) return res.status(401).json({ error: '未登录' });
-  next();
+  /* 把 async 路由的错误统一兜成 500，避免 Express 4 吞掉未捕获的 Promise reject */
+  const wrap = (fn) => (req, res) =>
+    Promise.resolve(fn(req, res)).catch((err) => {
+      console.error('❌ 路由错误：', err);
+      if (!res.headersSent) res.status(500).json({ error: '服务器内部错误' });
+    });
+
+  function requireAuth(req, res, next) {
+    if (!req.session.userId) return res.status(401).json({ error: '未登录' });
+    next();
+  }
+
+  /* 注册 */
+  app.post('/api/register', wrap(async (req, res) => {
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
+    if (username.length < 2) return res.status(400).json({ error: '用户名至少 2 个字符' });
+    if (password.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
+    const exists = await db.userByName(username);
+    if (exists) return res.status(409).json({ error: '用户名已被占用' });
+    const pw_hash = bcrypt.hashSync(password, 10);
+    const uid = await db.createUser(username, pw_hash);
+    await db.profileSet(uid, JSON.stringify(defaultBag()));
+    req.session.userId = uid;
+    req.session.username = username;
+    res.json({ ok: true, username });
+  }));
+
+  /* 登录 */
+  app.post('/api/login', wrap(async (req, res) => {
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
+    const u = await db.userByName(username);
+    if (!u || !bcrypt.compareSync(password, u.pw_hash)) {
+      return res.status(401).json({ error: '用户名或密码错误' });
+    }
+    req.session.userId = u.id;
+    req.session.username = u.username;
+    res.json({ ok: true, username: u.username });
+  }));
+
+  /* 登出 */
+  app.post('/api/logout', (req, res) => {
+    req.session.destroy(() => res.json({ ok: true }));
+  });
+
+  /* 当前用户 */
+  app.get('/api/me', (req, res) => {
+    if (!req.session.userId) return res.status(401).json({ error: '未登录' });
+    res.json({ username: req.session.username });
+  });
+
+  /* 读取数据 */
+  app.get('/api/data', requireAuth, wrap(async (req, res) => {
+    const raw = await db.profileGet(req.session.userId);
+    let data = {};
+    try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
+    if (!data || Object.keys(data).length === 0) {
+      data = defaultBag();
+      await db.profileSet(req.session.userId, JSON.stringify(data));
+    }
+    res.json(data);
+  }));
+
+  /* 保存数据（整包覆盖） */
+  app.put('/api/data', requireAuth, wrap(async (req, res) => {
+    if (!req.body || typeof req.body !== 'object') return res.status(400).json({ error: '数据格式错误' });
+    const clean = { ...defaultBag(), ...req.body };
+    /* 绝不接受任何令牌类字段（本项目无 GitHub 同步，留作安全护栏） */
+    if (clean.meta) delete clean.meta.ghToken;
+    await db.profileSet(req.session.userId, JSON.stringify(clean));
+    res.json({ ok: true });
+  }));
+
+  /* 静态前端 */
+  app.use(express.static(path.join(__dirname, 'public')));
+
+  app.listen(PORT, () => {
+    console.log(`✅ 底层创造者OS 多用户版运行中： http://localhost:${PORT}`);
+  });
 }
 
-/* 注册 */
-app.post('/api/register', (req, res) => {
-  const username = String(req.body.username || '').trim();
-  const password = String(req.body.password || '');
-  if (username.length < 2) return res.status(400).json({ error: '用户名至少 2 个字符' });
-  if (password.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
-  const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-  if (exists) return res.status(409).json({ error: '用户名已被占用' });
-  const pw_hash = bcrypt.hashSync(password, 10);
-  const info = insUserStmt.run(username, pw_hash);
-  const uid = info.lastInsertRowid;
-  insProfileStmt.run(uid, JSON.stringify(defaultBag()));
-  req.session.userId = uid;
-  req.session.username = username;
-  res.json({ ok: true, username });
-});
-
-/* 登录 */
-app.post('/api/login', (req, res) => {
-  const username = String(req.body.username || '').trim();
-  const password = String(req.body.password || '');
-  const u = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!u || !bcrypt.compareSync(password, u.pw_hash)) {
-    return res.status(401).json({ error: '用户名或密码错误' });
-  }
-  req.session.userId = u.id;
-  req.session.username = u.username;
-  res.json({ ok: true, username: u.username });
-});
-
-/* 登出 */
-app.post('/api/logout', (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
-});
-
-/* 当前用户 */
-app.get('/api/me', (req, res) => {
-  if (!req.session.userId) return res.status(401).json({ error: '未登录' });
-  res.json({ username: req.session.username });
-});
-
-/* 读取数据 */
-app.get('/api/data', requireAuth, (req, res) => {
-  const row = getProfileStmt.get(req.session.userId);
-  let data = {};
-  try { data = JSON.parse(row.data || '{}'); } catch (e) { data = {}; }
-  if (!data || Object.keys(data).length === 0) {
-    data = defaultBag();
-    updProfileStmt.run(req.session.userId, JSON.stringify(data));
-  }
-  res.json(data);
-});
-
-/* 保存数据（整包覆盖） */
-app.put('/api/data', requireAuth, (req, res) => {
-  if (!req.body || typeof req.body !== 'object') return res.status(400).json({ error: '数据格式错误' });
-  const clean = { ...defaultBag(), ...req.body };
-  /* 绝不接受任何令牌类字段（本项目无 GitHub 同步，留作安全护栏） */
-  if (clean.meta) delete clean.meta.ghToken;
-  updProfileStmt.run(req.session.userId, JSON.stringify(clean));
-  res.json({ ok: true });
-});
-
-/* 静态前端 */
-app.use(express.static(path.join(__dirname, 'public')));
-
-app.listen(PORT, () => {
-  console.log(`✅ 底层创造者OS 多用户版运行中： http://localhost:${PORT}`);
-});
+start();

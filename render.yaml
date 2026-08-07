@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: rootos-webapp
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      # 部署前请在 Render 控制台手动填入 Neon 的 Postgres 连接串（见 README 4.9 节）
+      - key: DATABASE_URL
+        sync: false

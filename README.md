@@ -6,7 +6,7 @@
 
 | | 单机版 | 多用户版（本项目） |
 |---|---|---|
-| 数据存放 | 浏览器 LocalStorage | 服务器 SQLite，每用户一份 |
+| 数据存放 | 浏览器 LocalStorage | 服务器数据库（SQLite / Postgres），每用户一份 |
 | 多端同步 | 手动填同步码 + GitHub API | 登录即同步，无需任何配置 |
 | 用户 | 只有你自己 | 任意多人，数据互相隔离 |
 | 模块 | 含医学 / 成人内容戒断 | **已移除**，保留通用「坏习惯戒断」链 |
@@ -55,7 +55,7 @@
 │  └ 防抖 1.5s     │  cookie  │  ├ GET  /api/data       │
 │     PUT /api/data│          │  └ PUT  /api/data       │
 └──────────────────┘          │         ↓               │
-                              │  SQLite (data.db, WAL)  │
+                              │  SQLite / Postgres(Neon)│
                               │   users / profiles      │
                               └─────────────────────────┘
 ```
@@ -130,7 +130,7 @@ git clone https://github.com/你的用户名/rootos-webapp.git
 cd rootos-webapp
 
 # 方式 B：本地直接 scp 上去
-# scp -r "D:/work workbuddy/rootos-webapp" root@你的IP:/opt/
+# scp -r "D:/git mengyi/rootos-webapp" root@你的IP:/opt/
 ```
 
 ```bash
@@ -259,20 +259,54 @@ pm2 restart rootos
 
 `data.db` 不在 git 里（见 `.gitignore`），更新不会动用户数据。
 
+### 4.9 免费平台部署（Render + Neon，零成本）★ 没有服务器的人看这里
+
+CloudStudio / 纯静态托管跑不了 Node 后端，但 **Render 的免费 Web 服务 + Neon 的免费 Postgres** 组合可以：Render 负责跑 Node，Neon 负责存数据（持久、永久免费、无需信用卡）。
+
+> 为什么不用 Render 自带的 SQLite？免费层**没有持久化磁盘**，每次重启数据库会被清空。Neon 把数据放在外部托管库，彻底解决。
+
+**代码侧准备（本仓库已完成）**：`server.js` 通过 `db.js` 抽象层支持双引擎——
+- 不设 `DATABASE_URL` → 本地 SQLite（开发 / 自托管 VPS 仍是这个）
+- 设了 Postgres 连接串 → 自动切到 Postgres
+
+**部署步骤**：
+
+1. **建数据库**：打开 https://neon.tech 注册（GitHub 登录即可，免信用卡），新建一个 project，复制它的 **Connection string**（形如 `postgresql://user:pass@...neon.tech/neondb?sslmode=require`）。
+2. **建应用**：打开 https://render.com 注册，New → Web Service → 关联 GitHub 仓库 `mengyihh233/rootos-webapp`。
+   - Environment: `Node`
+   - Build Command: `npm install`
+   - Start Command: `npm start`
+   - Instance Type: **Free**
+3. **设环境变量**（Render 控制台 → Environment）：
+   - `NODE_ENV` = `production`
+   - `DATABASE_URL` = 第 1 步复制的 Neon 连接串
+   - `SESSION_SECRET` = 任意随机长字符串（点 "Generate" 也行）
+4. **Deploy** → 等构建完成，Render 会给一个 `https://rootos-webapp-xxx.onrender.com` 域名，直接打开就能注册登录。
+
+> 仓库里的 `render.yaml` 已把 `NODE_ENV` / `SESSION_SECRET` / 构建命令都配好了，连上仓库后基本是自动部署，只需手动填 `DATABASE_URL`。
+
+**注意**：
+- Neon 免费层有「闲置自动休眠」，首次请求约 1 秒冷启动，正常。
+- Render 免费层闲置后也会休眠，唤醒同样有冷启动；对自用 / 作品集完全够用。
+- 想自定义域名？Render 免费层支持（DNS 加一条 CNAME）。
+
 ---
 
 ## 五、目录结构
 
 ```
 rootos-webapp/
-├── server.js              # 后端：Express + SQLite + 认证 + 数据 API
+├── server.js              # 后端入口：Express + 认证 + 数据 API（数据库走 db.js）
+├── db.js                  # 数据库适配层：SQLite（默认）/ Postgres（设了 DATABASE_URL）
 ├── package.json
+├── render.yaml            # 一键部署到 Render 的配置
+├── .env.example           # 环境变量样例（DATABASE_URL / SESSION_SECRET）
 ├── public/
 │   └── index.html         # 前端单文件（HTML+CSS+JS 全在里面）
 ├── tools/
 │   ├── check_frontend.js  # 前端静态检查
 │   └── e2e_test.js        # 多用户端到端测试
-├── data.db                # SQLite 数据库（自动生成，勿提交）
+├── data.db                # SQLite 数据库（自动生成，勿提交；用 Postgres 时无此文件）
 └── README.md
 ```
 
@@ -282,7 +316,7 @@ rootos-webapp/
 
 - **改默认模板**：同时改 `server.js` 的 `defaultBag()` 和 `public/index.html` 的 `SEED_*`，两边要一致（前者是服务器默认值，后者是离线兜底）。
 - **加字段**：在 `bagKeys` 数组里加键名，前后端都要加。整包存储，不用改表结构。
-- **换数据库**：`profiles.data` 是一整个 JSON 字符串，换 Postgres / MySQL 只需替换 `db.prepare(...)` 那几行。
+- **换数据库**：`profiles.data` 是一整个 JSON 字符串。现在数据库访问收敛在 `db.js`：不设 `DATABASE_URL` 用本地 SQLite，设了 Postgres 连接串自动切到 Postgres，换引擎不用改业务代码。
 - **加多端实时推送**：目前是「登录时拉一次 + 改动防抖上传」。要做实时同步可以加 WebSocket，或者简单点用 `setInterval` 轮询 `GET /api/data` 比对 `updated_at`。
 
 ---
