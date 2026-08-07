@@ -35,7 +35,7 @@ const SCHEMA_SQLITE = {
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       author     TEXT NOT NULL DEFAULT '',
       title      TEXT NOT NULL DEFAULT '',
-      desc       TEXT NOT NULL DEFAULT '',
+      "desc"     TEXT NOT NULL DEFAULT '',
       tags       TEXT NOT NULL DEFAULT '[]',
       counts     TEXT NOT NULL DEFAULT '{}',
       data       TEXT NOT NULL DEFAULT '{}',
@@ -87,7 +87,7 @@ const SCHEMA_PG = {
       id         SERIAL PRIMARY KEY,
       author     TEXT NOT NULL DEFAULT '',
       title      TEXT NOT NULL DEFAULT '',
-      desc       TEXT NOT NULL DEFAULT '',
+      "desc"     TEXT NOT NULL DEFAULT '',
       tags       TEXT NOT NULL DEFAULT '[]',
       counts     TEXT NOT NULL DEFAULT '{}',
       data       TEXT NOT NULL DEFAULT '{}',
@@ -270,21 +270,21 @@ async function templateAdd({ author, title, desc, tags, counts, data }) {
   const status = 'pending';
   if (USE_PG) {
     const r = await pool.query(
-      `INSERT INTO templates (author,title,desc,tags,counts,data,status,created_at)
+      `INSERT INTO templates (author,title,"desc",tags,counts,data,status,created_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()) RETURNING id`,
       [author, title, desc, JSON.stringify(tags || []), JSON.stringify(counts || {}), JSON.stringify(data), status]
     );
     return r.rows[0].id;
   }
   const info = sqlite.prepare(
-    `INSERT INTO templates (author,title,desc,tags,counts,data,status,created_at)
+    `INSERT INTO templates (author,title,"desc",tags,counts,data,status,created_at)
      VALUES (?,?,?,?,?,?,?,datetime('now'))`
   ).run(author, title, desc, JSON.stringify(tags || []), JSON.stringify(counts || {}), JSON.stringify(data), status);
   return info.lastInsertRowid;
 }
 
 async function templateListApproved() {
-  const sql = `SELECT id,author,title,desc,tags,counts FROM templates WHERE status='approved' ORDER BY id DESC`;
+  const sql = `SELECT id,author,title,"desc",tags,counts FROM templates WHERE status='approved' ORDER BY id DESC`;
   const rows = USE_PG ? (await pool.query(sql)).rows : sqlite.prepare(sql).all();
   return rows.map(r => ({
     id: r.id, author: r.author, title: r.title, desc: r.desc,
@@ -293,7 +293,7 @@ async function templateListApproved() {
 }
 
 async function templateListAll() {
-  const sql = `SELECT id,author,title,desc,tags,counts,status,created_at FROM templates ORDER BY id DESC`;
+  const sql = `SELECT id,author,title,"desc",tags,counts,status,created_at FROM templates ORDER BY id DESC`;
   const rows = USE_PG ? (await pool.query(sql)).rows : sqlite.prepare(sql).all();
   return rows.map(r => ({
     id: r.id, author: r.author, title: r.title, desc: r.desc,
