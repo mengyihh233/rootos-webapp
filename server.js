@@ -241,6 +241,51 @@ function computeFailureAnalysis(d0) {
 }
 
 /* ---------- Express ---------- */
+/* 自动备份：每天把全库数据快照上传到 CloudBase 云存储 backups/，保留最近 7 份。
+ * 云托管自动注入 TCB_ENV（同环境云资源免密钥访问）；本地/未配置时静默跳过。 */
+async function runAutoBackup() {
+  if (!db.isConnected()) return;
+  try {
+    const rows = await db.adminUsers();
+    const snapshot = {
+      at: new Date().toISOString(),
+      app: 'rootos-webapp',
+      users: rows.map(r => ({
+        id: r.id, username: r.username,
+        email: r.email || null, wechat: r.wechat || null, wx_openid: r.wx_openid || null,
+        created_at: r.created_at, updated_at: r.updated_at, data: (() => { try { return JSON.parse(r.data || '{}'); } catch (e) { return {}; } })()
+      }))
+    };
+    const cloudbase = require('@cloudbase/node-sdk');
+    const app = cloudbase.init({ env: process.env.TCB_ENV });
+    const storage = app.storage();
+    const date = new Date().toISOString().slice(0, 10);
+    await storage.uploadFile({
+      cloudPath: 'backups/rootos-' + date + '.json',
+      fileContent: Buffer.from(JSON.stringify(snapshot, null, 1))
+    });
+    /* 清理：保留最近 7 份备份 */
+    try {
+      const list = await storage.getFileList({ prefix: 'backups/', limit: 100 });
+      const files = (list.FileList || []).filter(f => /^backups\/rootos-\d{4}-\d{2}-\d{2}\.json$/.test(f.Key));
+      files.sort((a, b) => b.Key.localeCompare(a.Key));
+      for (const f of files.slice(7)) {
+        await storage.deleteFile({ fileList: [f.Key] });
+      }
+    } catch (e) { /* 清理失败不影响本次备份 */ }
+    console.log('✅ 自动备份完成：', date);
+  } catch (e) {
+    console.warn('⚠️ 自动备份跳过（云存储未配置/不可用）：', (e && e.message) || e);
+  }
+}
+function scheduleAutoBackup() {
+  runAutoBackup();
+  /* 每天 0 点执行（用服务器时区近似） */
+  const now = new Date();
+  const msToMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1, 0).getTime() - now.getTime();
+  setTimeout(() => { runAutoBackup(); setInterval(runAutoBackup, 24 * 3600 * 1000); }, Math.max(msToMidnight, 60000));
+}
+
 async function start() {
   /* 注意：数据库初始化不再阻塞启动、也不再因连接失败而退出进程。
    * 先起 HTTP 服务（让 Render 健康检查 / 通过），数据库由后台循环异步连接，
@@ -893,6 +938,8 @@ async function start() {
 
   /* 后台异步连接数据库：失败不退出，5s 后重试，直到 Neon 唤醒。 */
   connectDBLoop();
+  /* 每日自动备份（DB 就绪后执行；云存储不可用时静默跳过） */
+  scheduleAutoBackup();
 }
 
 function connectDBLoop() {
