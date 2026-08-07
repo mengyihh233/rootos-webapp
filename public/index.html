@@ -14,6 +14,8 @@
   --accent:#4fc1ff; --accent2:#007acc; --ok:#4ec9b0; --warn:#dcdcaa;
   --danger:#f44747; --txt:#d4d4d4; --dim:#808080;
   --mono:"Cascadia Code",Consolas,"JetBrains Mono",monospace;
+  /* 跨平台中文字体栈：macOS PingFang → Windows 雅黑 → Linux Noto Sans CJK */
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Noto Sans SC",sans-serif;
 }
 /* 规划·资源：标签筛选 + 可点击链接 */
 .restags { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
@@ -25,11 +27,11 @@
 #resList a { color:var(--accent); text-decoration:underline; word-break:break-all; }
 * { box-sizing:border-box; }
 body { margin:0; padding:44px 16px 60px; background:var(--bg); color:var(--txt);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; line-height:1.6; }
+  font-family:var(--font); line-height:1.6; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; text-rendering:optimizeLegibility; }
 .wrap { max-width:960px; margin:auto; }
-h1 { font-size:1.3rem; margin:18px 0 4px; font-family:var(--mono); color:var(--accent); }
-h2 { font-size:1.05rem; color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:8px; margin-top:0; }
-h3 { font-size:.95rem; color:var(--accent); }
+h1 { font-size:1.35rem; margin:18px 0 4px; font-family:var(--mono); color:var(--accent); }
+h2 { font-size:1.08rem; color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:8px; margin-top:0; }
+h3 { font-size:.97rem; color:var(--accent); }
 small { color:var(--dim); }
 .card { background:var(--card); border:1px solid var(--border); padding:18px;
   border-radius:14px; margin-bottom:16px; box-shadow:0 4px 14px rgba(0,0,0,.35); }
@@ -123,7 +125,8 @@ button.mini { padding:6px 12px; min-height:34px; font-size:.8rem; margin-top:0; 
 .chart-labels { display:flex; gap:4px; padding:0 8px; }
 .chart-labels span { flex:1; text-align:center; font-size:.65rem; color:var(--dim); font-family:var(--mono); }
 
-table.wk { width:100%; border-collapse:collapse; font-size:.85rem; }
+table.wk { width:100%; border-collapse:collapse; font-size:.85rem;
+  display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
 table.wk td,table.wk th { border-bottom:1px solid var(--border); padding:8px 6px; text-align:left; }
 table.wk th { color:var(--dim); font-weight:normal; font-size:.75rem; }
 .mono { font-family:var(--mono); }
@@ -189,13 +192,17 @@ details.chain-detail summary { cursor:pointer; font-size:.78rem; color:var(--dim
 details.chain-detail .path { font-size:.82rem; font-family:var(--mono); background:var(--bg2);
   border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; line-height:1.8; }
 @media (max-width:600px){
-  h1{font-size:1.1rem;}
+  h1{font-size:1.15rem;}
   .card{padding:14px;}
   .cal .day .pct{display:none;}
   /* 顶栏：窄屏隐藏「已保存」冗余文字、压缩间距，保留进度条+账号 */
   #savedTag{display:none;}
   #topbar .inner{gap:8px;font-size:.72rem;padding:0;}
   #progressPct{min-width:auto;}
+  /* 窄屏隐藏品牌文字，给进度条与账号/通知留空间（320px 宽也不挤压） */
+  #topbar .inner > span:first-child{display:none;}
+  /* 账号区：窄屏限宽省略号，防止长用户名把进度条挤出屏幕 */
+  #userBox{max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   /* Tab 改为横向滚动（不再等分挤压 7 个按钮，避免文字重叠） */
   .tab{margin:10px 0;padding-bottom:4px;}
   .tab button{flex:0 0 auto;padding:9px 13px;font-size:.82rem;}
@@ -208,6 +215,22 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   .subtab button{flex:1 1 calc(50% - 6px);}
   /* 资源搜索/表单输入框整行 */
   #resSearch,#resTitle,#resTagsInput,#resBody{width:100%;}
+  /* 弹窗：收窄内边距，避免 320px 屏幕内容拥挤 */
+  .modal{padding:18px 14px;}
+  /* 树嵌套：窄屏减少缩进，避免深层节点被挤成一条线 */
+  .tkids{margin-left:8px;padding-left:8px;}
+  /* 事件行：时间戳允许换行，不挤压事件文本 */
+  .ev .t{white-space:normal;}
+  /* 复盘历史字号略调，窄屏更易读 */
+  .past-review{font-size:.84rem;}
+  /* 统计卡：窄屏两列，数字不换行 */
+  .stat-grid{grid-template-columns:repeat(2,1fr);}
+}
+/* 桌面端：卡片呼吸感与标题留白（仅宽屏） */
+@media (min-width:601px){
+  .card{padding:20px;}
+  h1{margin:22px 0 6px;}
+  .stat-grid{grid-template-columns:repeat(auto-fit,minmax(120px,1fr));}
 }
 /* 合并冲突逐项选择 */
 .merge-rows{max-height:240px;overflow:auto;margin-top:8px;border:1px solid var(--dim);border-radius:8px;padding:8px 10px;}
@@ -1099,11 +1122,12 @@ function checkRule(id,val){
     }
   }
   dayRec().checks[id]=val; saveDaily(); updateProgress();
+  renderTodayRules();  /* 同步支链展开/降级灰显状态，避免勾选后 UI 与数据不一致 */
 }
 function microPass(){ const id=pendingMicro&&pendingMicro.id; closeModal('microModal'); pendingMicro=null;
-  if(id){ dayRec().checks[id]=true; saveDaily(); updateProgress(); } toast('✅ 侦测通过，已标记完成'); }
+  if(id){ dayRec().checks[id]=true; saveDaily(); updateProgress(); } renderTodayRules(); toast('✅ 侦测通过，已标记完成'); }
 function microFail(){ const id=pendingMicro&&pendingMicro.id; closeModal('microModal'); pendingMicro=null;
-  if(id) toast('🔀 暂不实，先重规划或换任务'); }
+  if(id) toast('🔀 暂不实，先重规划或换任务'); renderTodayRules(); /* 重置勾选框视觉，防止「看起来勾了、实际没勾」 */ }
 /* 【v9】当日"有效根部"集合：主链根部 + 已激活支链（父崩溃或支链已被勾选），未激活支链不计入分母 */
 function activeRoots(rec){
   return rules.filter(r=>r.lv===lv0id()&&r.on!==false)
