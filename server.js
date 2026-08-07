@@ -531,6 +531,37 @@ async function start() {
     res.json({ ok: true });
   }));
 
+  /* ---- 分享快照（v0.6：把规划生成链接，别人打开一键套用） ---- */
+
+  /* 创建分享：把当前用户的规划结构（不含打卡/事件）存为公开只读快照，返回短链接 */
+  app.post('/api/share/create', requireAuth, wrap(async (req, res) => {
+    const raw = await db.profileGet(req.session.userId);
+    let data = {};
+    try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
+    if (!Array.isArray(data.rules) || !data.rules.length) return res.status(400).json({ error: '当前没有可分享的规划' });
+    /* 只分享结构字段，不含运行数据（daily/events）与令牌类字段 */
+    const share = {
+      cats: data.cats || [], levels: data.levels || [], rules: data.rules,
+      tags: data.tags || [], phases: data.phases || [],
+      reviews: data.reviews || {}, retros: data.retros || [], resources: data.resources || [],
+      meta: Object.assign({}, data.meta || {}, { _share: true })
+    };
+    const title = String(req.body.title || '').trim().slice(0, 60)
+      || (data.phases && data.phases[0] && data.phases[0].name) || '我的规划';
+    const id = crypto.randomBytes(6).toString('hex');
+    await db.shareCreate(id, req.session.userId, title, JSON.stringify(share));
+    res.json({ ok: true, id, url: (req.get('origin') || '') + '/#share=' + id });
+  }));
+
+  /* 读取分享（公开，任何人可访问；用于"打开链接一键套用"） */
+  app.get('/api/share/:id', wrap(async (req, res) => {
+    const row = await db.shareGet(String(req.params.id || ''));
+    if (!row) return res.status(404).json({ error: '分享不存在或已失效' });
+    let data = {};
+    try { data = JSON.parse(row.data || '{}'); } catch (e) { data = {}; }
+    res.json({ id: row.id, title: row.title, owner: row.owner, data });
+  }));
+
   /* ---- 管理后台：业务数据看板 ---- */
   app.post('/api/admin/login', wrap(async (req, res) => {
     if (!ADMIN_TOKEN) return res.status(403).json({ error: '后台未启用（服务端未设置 ADMIN_TOKEN）' });

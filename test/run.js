@@ -304,6 +304,19 @@ function makeDocx(text) {
   r = await fetch(base + '/api/data', { headers:{ authorization:'Bearer invalid-token'} });
   ok('无效 Bearer token → 401', r.status === 401);
 
+  // ---- 分享快照 v0.6：创建（登录）→ 公开读取 → 数据只含结构不含打卡 ----
+  r = await fetch(base + '/api/share/create', { method:'POST', headers:hd });
+  ok('未登录创建分享 → 401', r.status === 401);
+  r = await fetch(base + '/api/share/create', { method:'POST', headers:{...hd,cookie:cookie3}, body: JSON.stringify({}) });
+  const shareJ = await r.json();
+  ok('登录创建分享 → 200 且返回短 id', r.status===200 && shareJ.ok && shareJ.id && /^[a-z0-9]+$/.test(shareJ.id), JSON.stringify(shareJ).slice(0,120));
+  r = await fetch(base + '/api/share/' + shareJ.id);
+  const shared = await r.json();
+  ok('公开读取分享 → 200 且含规则', r.status===200 && Array.isArray(shared.data.rules) && shared.data.rules.length>0);
+  ok('分享数据不含打卡/事件', shared.data.daily===undefined && shared.data.events===undefined, 'keys=' + Object.keys(shared.data).join(','));
+  r = await fetch(base + '/api/share/nonexistent');
+  ok('不存在分享 → 404', r.status === 404);
+
   // CSP 纵深：object-src none + base-uri self（frame-ancestors 未加，以兼容 WorkBuddy 预览跨域 iframe）
   // 注意：nonce 与 'unsafe-inline' 同现会被浏览器忽略 unsafe-inline，导致 style=""/onclick="" 全被拦，
   // 因此 CSP 不得再含 'nonce-（本站大量内联样式/事件，重构前只能保留 unsafe-inline）

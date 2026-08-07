@@ -69,6 +69,14 @@ const SCHEMA_SQLITE = {
       template_id INTEGER NOT NULL,
       user_id     INTEGER NOT NULL,
       UNIQUE (template_id, user_id)
+    )`,
+  shares: `
+    CREATE TABLE IF NOT EXISTS shares (
+      id         TEXT PRIMARY KEY,
+      owner      INTEGER NOT NULL DEFAULT 0,
+      title      TEXT NOT NULL DEFAULT '',
+      data       TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
 };
 
@@ -125,6 +133,14 @@ const SCHEMA_PG = {
       template_id INTEGER NOT NULL,
       user_id     INTEGER NOT NULL,
       UNIQUE (template_id, user_id)
+    )`,
+  shares: `
+    CREATE TABLE IF NOT EXISTS shares (
+      id         TEXT PRIMARY KEY,
+      owner      INTEGER NOT NULL DEFAULT 0,
+      title      TEXT NOT NULL DEFAULT '',
+      data       TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT NOW()
     )`
 };
 
@@ -162,6 +178,7 @@ async function init() {
       await pool.query(SCHEMA_PG.notifications);
       await pool.query(SCHEMA_PG.ratings);
       await pool.query(SCHEMA_PG.favorites);
+      await pool.query(SCHEMA_PG.shares);
       /* 既有库迁移：为旧 users 表补新列（幂等，已存在则跳过） */
       for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT']) {
         const name = col.split(' ')[0];
@@ -212,6 +229,7 @@ async function init() {
     if (!cols.includes('email_verified')) sqlite.exec(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
     if (!cols.includes('wechat')) sqlite.exec(`ALTER TABLE users ADD COLUMN wechat TEXT`);
     if (!cols.includes('wx_openid')) sqlite.exec(`ALTER TABLE users ADD COLUMN wx_openid TEXT`);
+    sqlite.exec(SCHEMA_SQLITE.shares);
     connected = true;
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
   }
@@ -492,4 +510,25 @@ async function userSetPassword(uid, pw_hash) {
   sqlite.prepare('UPDATE users SET pw_hash = ? WHERE id = ?').run(pw_hash, uid);
 }
 
-module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, profileGet, profileUpdatedAt, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, USE_PG };
+/* ---------- 分享快照（v0.6：规划生成链接一键套用） ---------- */
+async function shareCreate(id, owner, title, dataStr) {
+  if (USE_PG) {
+    await pool.query(
+      `INSERT INTO shares (id, owner, title, data, created_at) VALUES ($1,$2,$3,$4,NOW()) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data`,
+      [id, owner, title, dataStr]
+    );
+    return;
+  }
+  sqlite.prepare(
+    `INSERT OR REPLACE INTO shares (id, owner, title, data, created_at) VALUES (?,?,?,?,datetime('now'))`
+  ).run(id, owner, title, dataStr);
+}
+async function shareGet(id) {
+  if (USE_PG) {
+    const r = await pool.query(`SELECT id,owner,title,data FROM shares WHERE id=$1`, [id]);
+    return r.rows[0];
+  }
+  return sqlite.prepare(`SELECT id,owner,title,data FROM shares WHERE id=?`).get(id);
+}
+
+module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, profileGet, profileUpdatedAt, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, USE_PG };

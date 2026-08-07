@@ -615,6 +615,9 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <h2>📦 数据与迭代</h2>
     <h3>周报（喂给 AI 迭代用）</h3>
     <button class="ok" onclick="exportWeekly()">📤 导出本周文本报告</button>
+    <h3 style="margin-top:20px;">🔗 分享我的规划（生成链接，别人打开即可一键套用）</h3>
+    <p><small>分享的是你的规则/阶段/资源/笔记结构，<b>不含</b>打卡记录与账号信息。适合分享给想用同一套规划的朋友。</small></p>
+    <button onclick="shareMyPlan()">📤 生成分享链接</button>
     <h3 style="margin-top:20px;">📉 我的失败模式分析</h3>
     <p><small>只有你自己能看到这份数据——它来自你记录的崩溃 / 支链事件，帮你定位最该改的定式。<b>管理后台不再独占</b>，每个账号都能看自己的。</small></p>
     <div id="myFailure"><small>加载中…</small></div>
@@ -2039,14 +2042,33 @@ function startFuse(){ startTimer(25*60,'📺 视频熔断倒计时','25 分钟�
   ()=>alert('⛔ 熔断触发！立即关闭视频网页。')); }
 
 /* ================= 周报 ================= */
-function exportWeekly(){
+async function exportWeekly(){
   const days=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); days.push(d.toLocaleDateString('sv')); }
-  const L=['===== 底层创造者OS 周报 =====','区间: '+days[0]+' ~ '+days[6],''];
-  L.push('【规则树版本】（🔀=支链）');
+  const L=['===== ROOT-OS 周报 · AI 分析版 =====','区间: '+days[0]+' ~ '+days[6],''];
+  /* 概览：完成率序列 / 崩溃 / 睡眠 / 失败分析 */
+  let fa=null;
+  try{ fa=await (await fetch('/api/me/failure-analysis')).json(); }catch(e){}
+  const rates=[]; let crashCnt=0; const sleeps=[];
+  days.forEach(d=>{ const rec=daily[d];
+    if(rec){ const roots=activeRoots(rec); const done=roots.filter(r=>rec.checks&&rec.checks[r.id]).length;
+      rates.push(roots.length?Math.round(done/roots.length*100):0);
+      if(rec.sleep!=null) sleeps.push(rec.sleep);
+      crashCnt+=Object.keys(rec.broken||{}).length; } });
+  const avgR=rates.length?Math.round(rates.reduce((a,b)=>a+b,0)/rates.length):0;
+  const avgS=sleeps.length?(sleeps.reduce((a,b)=>a+b,0)/sleeps.length).toFixed(1):'—';
+  L.push('【一、数据概览】');
+  L.push('· 7 天根部完成率: '+(rates.join(' / ')||'无记录')+'（均值 '+avgR+'%）');
+  L.push('· 本周崩溃节点: '+crashCnt+' 次'+(fa?'（崩溃后支链恢复率 '+fa.branchRate+'%）':''));
+  L.push('· 睡眠均值: '+avgS+' h');
+  if(fa&&fa.topCrashed&&fa.topCrashed.length){
+    L.push('','【二、崩溃最多的定式 Top'+(Math.min(fa.topCrashed.length,5))+'】');
+    fa.topCrashed.slice(0,5).forEach(x=>L.push('· '+x.rule+'（'+x.count+' 次'+(x.recovered?'，走支链恢复 '+x.recovered+' 次':'')+'）'));
+  }
+  L.push('','【三、规则树版本】（🔀=支链）');
   cats.forEach(c=>{ L.push('◆ '+c.name);
     levels.forEach(l=>{ rules.filter(r=>r.cat===c.id&&r.lv===l.id)
       .forEach(r=>L.push('  '+(r.on!==false?'[启用]':'[停用]')+' '+l.name+' · '+(r.parent?'🔀':'')+r.t)); }); });
-  L.push('','【'+levels[0].name+'完成】（含已激活支链；💥=主链节点崩溃）');
+  L.push('','【四、每日明细】（💥=主链节点崩溃）');
   days.forEach(d=>{ const rec=daily[d];
     if(rec){ const roots=activeRoots(rec);
       const done=roots.filter(r=>rec.checks&&rec.checks[r.id]).length;
@@ -2054,16 +2076,22 @@ function exportWeekly(){
       const br=Object.keys(rec.broken||{}).map(id=>{const r=ruleOf(id);return r?r.t:null;}).filter(Boolean).join('、');
       L.push(d+'  '+done+'/'+roots.length+(tg?'  ['+tg+']':'')+(rec.sleep!=null?'  睡眠'+rec.sleep+'h':'')+(br?'  💥'+br:'')); }
     else L.push(d+'  无记录'); });
-  L.push('','【本周事件】');
+  L.push('','【五、本周事件】');
   const we=events.filter(e=>{const d=e.day||e.ts.slice(0,10);return d>=days[0]&&d<=days[6];});
-  if(we.length) we.forEach(e=>L.push('· '+e.ts+' '+EVT[e.type]+' '+(e.text||'')+(e.retro?' ↳'+e.retro:'')));
+  if(we.length){ const cnt={}; we.forEach(e=>{ cnt[e.type]=(cnt[e.type]||0)+1; });
+    L.push('· 统计: '+(Object.keys(cnt).map(k=>EVT[k]+'×'+cnt[k]).join('  ')||'（无）'));
+    we.forEach(e=>L.push('  '+e.ts+' '+EVT[e.type]+' '+(e.text||'')+(e.retro?' ↳'+e.retro:''))); }
   else L.push('（无）');
   const wk=weekKeyOf(today);
-  if(reviews.week[wk]) L.push('','【本周复盘】'+reviews.week[wk]);
+  if(reviews.week[wk]) L.push('','【六、本周复盘】'+reviews.week[wk]);
   const recentDayReviews=days.filter(d=>reviews.day[d]);
-  if(recentDayReviews.length){ L.push('','【日复盘】'); recentDayReviews.forEach(d=>L.push(d+': '+reviews.day[d])); }
+  if(recentDayReviews.length){ L.push('','【七、日复盘】'); recentDayReviews.forEach(d=>L.push(d+': '+reviews.day[d])); }
   const act=phases.filter(isPhaseNow);
-  L.push('','【进行中阶段】'+(act.length?act.map(p=>p.name).join(' / '):'无'));
+  L.push('','【八、进行中阶段】'+(act.length?act.map(p=>p.name).join(' / '):'无'));
+  L.push('','【九、给 AI 的分析指令】','请基于以上数据回答：',
+    '1. 本周执行质量如何？哪条链最稳、哪条链最崩？',
+    '2. 最该修改哪条规则？（改小 / 降级 / 拆支链）',
+    '3. 下周最重要的 1-3 个行动建议。');
   L.push('============================');
   const text=L.join('\n');
   console.log(text);
@@ -2072,6 +2100,46 @@ function exportWeekly(){
 }
 function copyReport(){ $('#reportText').select();
   navigator.clipboard.writeText($('#reportText').value).then(()=>alert('📋 已复制')).catch(()=>document.execCommand('copy')); }
+
+/* ================= 分享规划（v0.6） ================= */
+async function shareMyPlan(){
+  const r=await fetch('/api/share/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  const j=await r.json();
+  if(!j.ok) return alert(j.error||'分享失败');
+  const url=location.origin+'/#share='+j.id;
+  navigator.clipboard.writeText(url).then(()=>{
+    alert('✅ 分享链接已复制：\n'+url+'\n\n别人打开这个链接，即可一键套用你的规划结构（不含打卡数据）。');
+  }).catch(()=>prompt('复制分享链接：',url));
+}
+/* 打开含 #share=xxx 的链接：拉取分享数据，确认后一键套用（保留当前打卡/事件/设置） */
+function handleShareHash(){
+  const m=/#share=([A-Za-z0-9]+)/.exec(location.hash);
+  if(!m) return;
+  fetch('/api/share/'+m[1]).then(r=>r.json()).then(j=>{
+    if(j.error) return alert('分享无效：'+j.error);
+    if(!j.data || !Array.isArray(j.data.rules)) return alert('分享数据无效');
+    if(!confirm('📥 检测到一份分享的规划：「'+j.title+'」\n\n套用后将替换你的 规则/阶段/资源/笔记（保留打卡记录与账号设置）。\n确定套用吗？')) return;
+    applySharedBag(j.data);
+    toast('✅ 已套用分享：「'+j.title+'」');
+  }).catch(()=>{});
+  try{ history.replaceState(null,'',location.pathname); }catch(e){}
+}
+function applySharedBag(d){
+  suppressSave=true;
+  if(Array.isArray(d.cats)) cats=d.cats;
+  if(Array.isArray(d.levels)) levels=d.levels;
+  if(Array.isArray(d.rules)) rules=d.rules;
+  if(Array.isArray(d.tags)) tags=d.tags;
+  if(Array.isArray(d.phases)) phases=d.phases;
+  if(d.reviews) reviews=d.reviews;
+  if(Array.isArray(d.retros)) retros=d.retros;
+  if(Array.isArray(d.resources)) resources=d.resources;
+  suppressSave=false;
+  const m={cats,levels,rules,tags,phases,reviews,retros,resources};
+  ['cats','levels','rules','tags','phases','reviews','retros','resources'].forEach(k=>store.set(k, m[k]));
+  if(SESSION) pushToServer();
+  renderTodayRules(); updateProgress(); renderPhases(); renderRulePage();
+}
 
 /* ================= JSON 备份 ================= */
 function exportJSON(){
@@ -2652,6 +2720,7 @@ function bootApp(){
 }
 window.onload=()=>{
   loadLocal();   /* 【新增】先把本地镜像载入内存，作为多端同步基线 */
+  handleShareHash();  /* 【v0.6】检测 #share= 链接，弹一键套用 */
   fetch('/api/me').then(r=>r.json()).then(j=>{
     if(j.username){ afterLogin(); } else { showAuth(); }
   }).catch(()=>showAuth());
