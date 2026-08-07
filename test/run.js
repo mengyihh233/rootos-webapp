@@ -1,0 +1,190 @@
+/* ============================================================
+ * test/run.js — 最小测试套件（纯 Node，无第三方依赖）
+ * 用法：node test/run.js   （或 npm test）
+ * 覆盖：
+ *   1) 单元测试：logic.js 的 esc / isRootBag / linkify
+ *   2) 集成测试：起一个独立 SQLite 实例的 server，跑通
+ *      注册 / 登录 / 登出 / 限流429 / 失败模式分析 / 文档解析 / 导入回显
+ * ============================================================ */
+const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const zlib = require('zlib');
+
+let pass = 0, fail = 0;
+function ok(name, cond, extra) {
+  if (cond) { pass++; console.log('  ✅ ' + name); }
+  else { fail++; console.log('  ❌ ' + name + (extra ? '  → ' + extra : '')); }
+}
+function eq(name, a, b) { ok(name + ' (期望 ' + JSON.stringify(b) + ')', JSON.stringify(a) === JSON.stringify(b), '实际 ' + JSON.stringify(a)); }
+
+/* ---------- 单元测试：logic.js ---------- */
+console.log('\n[单元测试] logic.js');
+const L = require('../public/logic.js');
+eq('esc 转义 < > & "', L.esc('<b>&"x'), '&lt;b&gt;&amp;&quot;x');
+ok('isRootBag 合法包', L.isRootBag({ rules: [], cats: [], tags: [], phases: [], daily: {} }) === true);
+ok('isRootBag 缺 daily 判否', L.isRootBag({ rules: [], cats: [], tags: [], phases: [] }) === false);
+ok('isRootBag 缺 phases 判否', L.isRootBag({ rules: [], cats: [], tags: [], daily: {} }) === false);
+ok('isRootBag 非对象判否', L.isRootBag(null) === false);
+
+const linkCases = [
+  ['cs50.harvard.edu/x', true, '裸域名应链'],
+  ['ielts.neea.cn', true, '裸域名应链'],
+  ['https://cs229.stanford.edu/', true, 'http(s)应链'],
+  ['看 CS61A(cs61a.org) 与 6.042J', true, '括号内域名应链'],
+  ['课程 6.S081 与 18.06 不是网址', false, '课程号不误链'],
+  ['邮箱 user@harvard.edu 不应被链', false, '邮箱不误链'],
+  ['teachyourselfcs.com 很好', true, '裸域名应链'],
+  ['正文 http://a.com 尾点。', true, '尾点不应入链接']
+];
+linkCases.forEach(([inp, shouldLink, desc]) => {
+  const out = L.linkify(inp);
+  const hasAnchor = out.includes('<a href=');
+  ok('linkify: ' + desc, hasAnchor === shouldLink, out);
+});
+
+/* ---------- 集成测试：起 server ---------- */
+console.log('\n[集成测试] 后端 API');
+const PORT = 4399;
+const TMP_DB = path.join(os.tmpdir(), 'rootos_test_' + Date.now() + '.db');
+process.env.PORT = PORT;
+process.env.SESSION_SECRET = 'test-secret';
+process.env.SQLITE_PATH = TMP_DB;
+process.env.NODE_ENV = 'test';
+
+const child = spawn('node', ['server.js'], { cwd: path.join(__dirname, '..'), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+child.stderr.on('data', d => process.stderr.write('[srv] ' + d));
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function waitUp() { for (let i = 0; i < 60; i++) { try { await fetch(`http://localhost:${PORT}/api/me`); return true; } catch (e) { await sleep(200); } } return false; }
+
+/* 极简 ZIP（store 无压缩）生成，造一个最小 .docx 给 /api/parse-doc 用 */
+function crc32(buf) {
+  let t = crc32.t; if (!t) { t = crc32.t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } }
+  let crc = 0xFFFFFFFF; for (let i = 0; i < buf.length; i++) crc = (crc >>> 8) ^ t[(crc ^ buf[i]) & 0xFF];
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function makeDocx(text) {
+  const enc = s => Buffer.from(s, 'utf8');
+  const doc = '<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>' + text + '</w:t></w:r></w:p></w:body></w:document>';
+  const ct = '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>';
+  const files = { '[Content_Types].xml': ct, 'word/document.xml': doc };
+  const local = [], central = []; let offset = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const data = enc(content), nameBuf = enc(name), crc = crc32(data);
+    const lh = Buffer.alloc(30);
+    lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(20, 4); lh.writeUInt16LE(0, 6);
+    lh.writeUInt16LE(0, 8); lh.writeUInt16LE(0, 10); lh.writeUInt16LE(0, 12);
+    lh.writeUInt32LE(crc, 14); lh.writeUInt32LE(data.length, 18); lh.writeUInt32LE(data.length, 22);
+    lh.writeUInt16LE(nameBuf.length, 26); lh.writeUInt16LE(0, 28);
+    local.push(lh, nameBuf, data);
+    const cen = Buffer.alloc(46);
+    cen.writeUInt32LE(0x02014b50, 0); cen.writeUInt16LE(20, 4); cen.writeUInt16LE(20, 6);
+    cen.writeUInt16LE(0, 8); cen.writeUInt16LE(0, 10); cen.writeUInt16LE(0, 12); cen.writeUInt16LE(0, 14);
+    cen.writeUInt32LE(crc, 16); cen.writeUInt32LE(data.length, 20); cen.writeUInt32LE(data.length, 24);
+    cen.writeUInt16LE(nameBuf.length, 28); cen.writeUInt16LE(0, 30); cen.writeUInt16LE(0, 32);
+    cen.writeUInt16LE(0, 34); cen.writeUInt16LE(0, 36); cen.writeUInt16LE(0, 38);
+    cen.writeUInt32LE(offset, 42);
+    central.push(cen, nameBuf);
+    offset += lh.length + nameBuf.length + data.length;
+  }
+  const locBuf = Buffer.concat(local), cenBuf = Buffer.concat(central), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(0, 4); end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(2, 8); end.writeUInt16LE(2, 10); end.writeUInt32LE(cenBuf.length, 12); end.writeUInt32LE(locBuf.length, 16); end.writeUInt16LE(0, 20);
+  return Buffer.concat([locBuf, cenBuf, end]);
+}
+
+(async () => {
+  const up = await waitUp();
+  ok('server 启动', up);
+  if (!up) { child.kill(); process.exit(1); }
+  const base = `http://localhost:${PORT}`;
+  const hd = { 'Content-Type': 'application/json' };
+  const uname = 'tester_' + Date.now();
+
+  // 注册
+  let r = await fetch(base + '/api/register', { method: 'POST', headers: hd, body: JSON.stringify({ username: uname, password: 'pass123456' }) });
+  ok('注册成功 200', r.status === 200);
+  const cookie = r.headers.get('set-cookie').split(';')[0];
+
+  // 登录 / 登出 / 未登录 401
+  r = await fetch(base + '/api/login', { method: 'POST', headers: hd, body: JSON.stringify({ username: uname, password: 'pass123456' }) });
+  ok('登录成功 200', r.status === 200);
+  r = await fetch(base + '/api/logout', { method: 'POST', headers: { cookie } });
+  ok('登出 200', r.status === 200);
+  r = await fetch(base + '/api/me', { headers: { cookie } });
+  ok('登出后再访问 /api/me → 401', r.status === 401);
+  // 重新登录拿 cookie
+  r = await fetch(base + '/api/login', { method: 'POST', headers: hd, body: JSON.stringify({ username: uname, password: 'pass123456' }) });
+  const cookie2 = r.headers.get('set-cookie').split(';')[0];
+
+  // 限流：连续错 20 次 → 第 20 次后 429
+  let first429 = -1;
+  for (let i = 0; i < 22; i++) {
+    const rr = await fetch(base + '/api/login', { method: 'POST', headers: hd, body: JSON.stringify({ username: uname, password: 'WRONG' }) });
+    if (rr.status === 429 && first429 === -1) first429 = i + 1;
+  }
+  ok('登录限流：错误过多返回 429', first429 > 0);
+  // 正确密码在限流后仍可登录（不误伤）
+  r = await fetch(base + '/api/login', { method: 'POST', headers: hd, body: JSON.stringify({ username: uname, password: 'pass123456' }) });
+  ok('限流后正确密码仍能登录', r.status === 200, 'status=' + r.status);
+  const cookie3 = r.headers.get('set-cookie').split(';')[0];
+
+  // 失败模式分析：种子一个崩溃事件 + 支链勾选
+  const bag = {
+    rules: [
+      { id: 'r1', cat: 'c_study', lv: 'lv0', t: '主线', on: true, parent: null },
+      { id: 'r1b', cat: 'c_study', lv: 'lv0', t: '崩溃后改做', on: true, parent: 'r1' }
+    ],
+    cats: [{ id: 'c_study', name: '学习' }], levels: [{ id: 'lv0', name: 'L0' }], tags: [],
+    phases: [], daily: { '2026-08-07': { checks: { r1b: true } } },
+    events: [{ id: 'e1', type: 'crash', ruleId: 'r1', day: '2026-08-07', ts: Date.now() }]
+  };
+  r = await fetch(base + '/api/data', { method: 'PUT', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify(bag) });
+  ok('PUT 数据 200', r.status === 200);
+  r = await fetch(base + '/api/me/failure-analysis', { headers: { cookie: cookie3 } });
+  const fa = await r.json();
+  ok('失败分析 totalCrashes=1', fa.totalCrashes === 1, JSON.stringify(fa));
+  ok('失败分析 branchRate=100', fa.branchRate === 100);
+  ok('失败分析 topCrashed 含「主线」', Array.isArray(fa.topCrashed) && fa.topCrashed.some(x => x.rule === '主线'));
+
+  // 未登录访问失败分析 → 401
+  r = await fetch(base + '/api/me/failure-analysis');
+  ok('未登录失败分析 → 401', r.status === 401);
+
+  // 导入回显：PUT 再 GET，字段一致
+  r = await fetch(base + '/api/data', { headers: { cookie: cookie3 } });
+  const got = await r.json();
+  ok('GET 回显 rules 一致', got.rules.length === bag.rules.length);
+  ok('GET 回显 daily 一致', JSON.stringify(got.daily) === JSON.stringify(bag.daily));
+
+  // 文档解析：.txt
+  const txtB64 = Buffer.from('hello 规划 资源 测试').toString('base64');
+  r = await fetch(base + '/api/parse-doc', { method: 'POST', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify({ filename: 'a.txt', data: txtB64 }) });
+  const txtRes = await r.json();
+  ok('parse-doc .txt 抽取正确', txtRes.text === 'hello 规划 资源 测试', JSON.stringify(txtRes));
+
+  // 文档解析：.docx（用极简 ZIP 造一个）
+  const docxB64 = makeDocx('专升本 与 转专业 的三年规划').toString('base64');
+  r = await fetch(base + '/api/parse-doc', { method: 'POST', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify({ filename: 'p.docx', data: docxB64 }) });
+  const docxRes = await r.json();
+  ok('parse-doc .docx 抽取含关键词', (docxRes.text || '').includes('专升本') && (docxRes.text || '').includes('转专业'), JSON.stringify(docxRes).slice(0, 120));
+
+  // 未登录解析 → 401
+  r = await fetch(base + '/api/parse-doc', { method: 'POST', headers: hd, body: JSON.stringify({ filename: 'a.txt', data: txtB64 }) });
+  ok('未登录解析文档 → 401', r.status === 401);
+
+  // 安全头：CSP 存在
+  r = await fetch(base + '/');
+  ok('响应带 Content-Security-Policy', !!r.headers.get('content-security-policy'));
+  ok('响应带 X-Content-Type-Options', r.headers.get('x-content-type-options') === 'nosniff');
+
+  child.kill();
+  try { fs.unlinkSync(TMP_DB); fs.unlinkSync(TMP_DB + '-wal'); fs.unlinkSync(TMP_DB + '-shm'); } catch (e) {}
+
+  console.log('\n========================================');
+  console.log(`结果：通过 ${pass} / 失败 ${fail}`);
+  console.log('========================================');
+  process.exit(fail ? 1 : 0);
+})();

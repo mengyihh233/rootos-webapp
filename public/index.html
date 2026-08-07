@@ -186,7 +186,27 @@ details.chain-detail { margin-top:8px; }
 details.chain-detail summary { cursor:pointer; font-size:.78rem; color:var(--dim); font-family:var(--mono); }
 details.chain-detail .path { font-size:.82rem; font-family:var(--mono); background:var(--bg2);
   border:1px solid var(--border); border-radius:8px; padding:8px 10px; margin-top:6px; line-height:1.8; }
-@media (max-width:600px){ h1{font-size:1.1rem;} .card{padding:14px;} .cal .day .pct{display:none;} }
+@media (max-width:600px){
+  h1{font-size:1.1rem;}
+  .card{padding:14px;}
+  .cal .day .pct{display:none;}
+  /* 顶栏：窄屏隐藏「已保存」冗余文字、压缩间距，保留进度条+账号 */
+  #savedTag{display:none;}
+  #topbar .inner{gap:8px;font-size:.72rem;padding:0;}
+  #progressPct{min-width:auto;}
+  /* Tab 改为横向滚动（不再等分挤压 7 个按钮，避免文字重叠） */
+  .tab{margin:10px 0;padding-bottom:4px;}
+  .tab button{flex:0 0 auto;padding:9px 13px;font-size:.82rem;}
+  /* 数据页行动按钮整行显示，避免拥挤误触 */
+  #data .card > button{width:100%;display:block;margin:8px 0;text-align:center;}
+  /* 表单行允许换行（移动端堆叠更友好） */
+  .row{flex-wrap:wrap;}
+  .row > *{flex:1 1 100%;}
+  /* 子标签：每行两个，避免溢出 */
+  .subtab button{flex:1 1 calc(50% - 6px);}
+  /* 资源搜索/表单输入框整行 */
+  #resSearch,#resTitle,#resTagsInput,#resBody{width:100%;}
+}
 </style>
 </head>
 <body>
@@ -630,6 +650,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   </div>
 </div>
 
+<script src="/logic.js"></script>
 <script>
 /* ============================================================
    数据层 v8.0
@@ -1451,23 +1472,6 @@ function delRetro(id){
 }
 
 /* ================= 规划·资源 ================= */
-function linkify(txt){
-  let s = esc(txt||'');
-  const re = /(https?:\/\/[^\s<>"']+)|(?<![.\w@])([a-z0-9-]*[a-z][a-z0-9-]*\.[a-z]{2,6})([^\s<>"'()\[\]{}]*)?/gi;
-  return s.replace(re, (m, http, dom, path)=>{
-    if(http){
-      let u = http.replace(/[.,;:]+$/,'');
-      return '<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>';
-    }
-    if(dom){
-      let p = path||'';
-      while(/[.,;:]$/.test(p)) p = p.slice(0,-1);
-      const url = 'https://'+dom+p;
-      return '<a href="'+url+'" target="_blank" rel="noopener">'+dom+p+'</a>';
-    }
-    return m;
-  });
-}
 let resActiveTag = '';
 function resSetTag(t){
   resActiveTag = (t==='全部') ? '' : t;
@@ -1807,16 +1811,12 @@ function copyReport(){ $('#reportText').select();
 
 /* ================= JSON 备份 ================= */
 function exportJSON(){
-  const data={cats,levels,rules,tags,daily,events,phases,reviews,meta,_ver:'8.0',_at:new Date().toLocaleString('sv')};
+  /* 用 bagFromLocal() 收集全部 11 个字段（cats/levels/rules/tags/daily/events/phases/reviews/retros/resources/meta），
+     与导入 applyBag()、bagKeys 完全对称，避免备份漏掉「复盘记录」和「资源」导致还原丢数据 */
+  const data=Object.assign({_ver:'8.0',_at:new Date().toLocaleString('sv')}, bagFromLocal());
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='root-os-backup-'+today+'.json'; a.click();
-}
-function isRootBag(d){
-  if(!d || typeof d!=='object') return false;
-  if(!Array.isArray(d.rules) || !Array.isArray(d.cats) || !Array.isArray(d.tags) || !Array.isArray(d.phases)) return false;
-  if(typeof d.daily!=='object' || d.daily===null) return false;
-  return true;
 }
 function importJSON(ev){
   const f=ev.target.files[0]; if(!f) return;
@@ -1852,7 +1852,6 @@ function checkNight(){
   $('#nightBar').style.display=(h>=22||h<6)?'block':'none';
 }
 
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function syncEventIds(){ events.forEach(e=>{ if(!e.id) e.id='e'+Date.now().toString(36)+Math.random().toString(36).slice(2,6); }); }
 
 /* ================= 多用户版：登录态 + 服务器端数据同步 ================= */

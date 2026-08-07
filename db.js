@@ -59,7 +59,7 @@ async function init() {
     console.log('✅ 数据库：已连接 Postgres（DATABASE_URL）');
   } else {
     const Database = require('better-sqlite3');
-    sqlite = new Database(path.join(__dirname, 'data.db'));
+    sqlite = new Database(process.env.SQLITE_PATH || path.join(__dirname, 'data.db'));
     sqlite.pragma('journal_mode = WAL');
     sqlite.exec(SCHEMA_SQLITE.users);
     sqlite.exec(SCHEMA_SQLITE.profiles);

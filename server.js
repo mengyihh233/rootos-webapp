@@ -151,6 +151,20 @@ async function start() {
   /* 部署在 Nginx / Caddy / Render 反代之后时必须开启，
    * 否则 NODE_ENV=production 下 cookie 的 secure 标志会导致登录态无法建立 */
   app.set('trust proxy', 1);
+
+  /* 安全响应头：纵深防御 XSS / MIME 嗅探 / Referrer 泄露。
+   * 不限制 frame-ancestors、不加 X-Frame-Options，以免破坏 WorkBuddy 预览的跨域 iframe；
+   * 应用无外部资源，故 default-src 收紧到 'self' 即可挡掉外部脚本/样式注入。 */
+  app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy',
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+      "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; " +
+      "base-uri 'self'; form-action 'self'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+  });
+
   app.use(express.json({ limit: '5mb' }));
   app.use(session({
     secret: SESSION_SECRET,
