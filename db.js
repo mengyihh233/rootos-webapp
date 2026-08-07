@@ -14,6 +14,7 @@ const USE_PG = !!process.env.DATABASE_URL;
 
 let sqlite = null;   // better-sqlite3 实例
 let pool = null;     // pg Pool 实例
+let connected = false; // 是否已成功初始化（供 server 判断 DB 就绪状态）
 
 const SCHEMA_SQLITE = {
   users: `
@@ -120,6 +121,8 @@ const SCHEMA_PG = {
 };
 
 async function init() {
+  /* 已连接则直接返回（支持 server 后台反复重试时幂等，避免重复建池） */
+  if (connected) return;
   if (USE_PG) {
     const { Pool } = require('pg');
     pool = new Pool({
@@ -130,7 +133,9 @@ async function init() {
       idleTimeoutMillis: 30000
     });
     /* Neon 免费层会在闲置后休眠，首次连接常返回「database is paused」类错误。
-     * 这里做有限次重试（带退避），等 Neon 唤醒，避免进程因一次连接失败而退出（status 1）。 */
+     * 这里做有限次重试（带退避），等 Neon 唤醒。
+     * 注意：本函数只负责「尝试一次连接 + 建表」，失败由调用方（server 后台循环）决定何时再试，
+     * 因此这里即便 10 次都失败也只是 throw，不再自行 process.exit，避免部署因瞬时 DB 不可用而 status 1。 */
     const setup = async () => {
       await pool.query(SCHEMA_PG.users);
       await pool.query(SCHEMA_PG.profiles);
@@ -139,19 +144,23 @@ async function init() {
       await pool.query(SCHEMA_PG.ratings);
       await pool.query(SCHEMA_PG.favorites);
     };
-    let connected = false;
-    for (let attempt = 1; attempt <= 10 && !connected; attempt++) {
+    let ok = false;
+    for (let attempt = 1; attempt <= 10 && !ok; attempt++) {
       try {
         await setup();
-        connected = true;
+        ok = true;
       } catch (e) {
         console.warn(`⚠️ Postgres 连接第 ${attempt}/10 次失败，3s 后重试：${(e && e.message) || e}`);
         if (attempt < 10) await new Promise(r => setTimeout(r, 3000));
       }
     }
-    if (!connected) {
+    if (!ok) {
+      /* 清理半初始化的 pool，便于下次重试重新建池 */
+      try { await pool.end(); } catch (_) { /* ignore */ }
+      pool = null;
       throw new Error('无法连接 Postgres：请检查 DATABASE_URL（Neon 是否已暂停 / 连接串是否正确）');
     }
+    connected = true;
     console.log('✅ 数据库：已连接 Postgres（DATABASE_URL）');
   } else {
     const Database = require('better-sqlite3');
@@ -168,9 +177,13 @@ async function init() {
     sqlite.exec(SCHEMA_SQLITE.notifications);
     sqlite.exec(SCHEMA_SQLITE.ratings);
     sqlite.exec(SCHEMA_SQLITE.favorites);
+    connected = true;
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
   }
 }
+
+/* 供 server 读取：数据库是否已就绪（未就绪时 /api 返回 503 而非 500 崩溃） */
+function isConnected() { return connected; }
 
 async function userByName(username) {
   if (USE_PG) {
@@ -365,4 +378,4 @@ async function favoriteIs(templateId, userId) {
   return !!sqlite.prepare(`SELECT 1 FROM favorites WHERE template_id=? AND user_id=?`).get(templateId, userId);
 }
 
-module.exports = { init, userByName, createUser, profileGet, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, USE_PG };
+module.exports = { init, isConnected, userByName, createUser, profileGet, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, USE_PG };

@@ -146,8 +146,9 @@ function computeFailureAnalysis(d0) {
 
 /* ---------- Express ---------- */
 async function start() {
-  await db.init();
-
+  /* 注意：数据库初始化不再阻塞启动、也不再因连接失败而退出进程。
+   * 先起 HTTP 服务（让 Render 健康检查 / 通过），数据库由后台循环异步连接，
+   * Neon 免费层冷启动时连不上只会持续重试并打日志，不会触发 status 1 部署失败。 */
   const app = express();
   /* 部署在 Nginx / Caddy / Render 反代之后时必须开启，
    * 否则 NODE_ENV=production 下 cookie 的 secure 标志会导致登录态无法建立 */
@@ -180,6 +181,15 @@ async function start() {
     saveUninitialized: false,
     cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }
   }));
+
+  /* DB 未就绪时，/api 请求返回 503（而非 500 崩溃），避免未连接状态下的异常扩散。
+   * 必须在所有 /api 路由之前注册。静态首页 / 管理页不依赖 DB，始终可访问。 */
+  app.use((req, res, next) => {
+    if (!db.isConnected() && req.path.startsWith('/api/')) {
+      return res.status(503).json({ error: '数据库正在连接中，请稍候重试' });
+    }
+    next();
+  });
 
   /* 把 async 路由的错误统一兜成 500，避免 Express 4 吞掉未捕获的 Promise reject */
   const wrap = (fn) => (req, res) =>
@@ -518,6 +528,18 @@ async function start() {
   app.listen(PORT, () => {
     console.log(`✅ 底层创造者OS 多用户版运行中： http://localhost:${PORT}`);
   });
+
+  /* 后台异步连接数据库：失败不退出，5s 后重试，直到 Neon 唤醒。 */
+  connectDBLoop();
+}
+
+function connectDBLoop() {
+  db.init()
+    .then(() => console.log('✅ 数据库已就绪（后台连接成功）'))
+    .catch((e) => {
+      console.warn('⚠️ 数据库暂未就绪，5s 后后台重试：', (e && e.message) || e);
+      setTimeout(connectDBLoop, 5000);
+    });
 }
 
 /* 启动兜底：任何未捕获的异常 / Promise 拒绝都打印清楚日志，
@@ -526,8 +548,9 @@ process.on('unhandledRejection', (reason) => {
   console.error('❌ 未捕获的 Promise 拒绝：', reason);
 });
 process.on('uncaughtException', (err) => {
-  console.error('❌ 未捕获异常：', err);
-  process.exit(1);
+  /* Render 免费层下，偶发的异常不应直接杀死进程导致部署 status 1；
+   * 仅记录日志，保留服务存活。 */
+  console.error('❌ 未捕获异常（已记录，进程继续运行）：', err);
 });
 start().catch((err) => {
   console.error('❌ 应用启动失败：', err);
