@@ -448,7 +448,18 @@ async function start() {
     if (!openid) return res.status(400).json({ error: '未获取到 openid' });
     const u = await db.userFindByOpenid(openid);
     if (u) return res.json({ ok: true, token: issueWxToken(u.id), username: u.username, bound: true });
-    res.json({ ok: true, bound: false, openid }); /* 未绑定：前端引导用 web 账号密码绑定 */
+    /* 未绑定：自动注册一个新账号（微信一键登录直达，无需先有网页账号）。
+     * 用户名取 wx_ + openid 片段（冲突时加序号）；密码随机不可知——用户之后可在设置页设密码，
+     * 或通过「绑定网页账号」把 openid 关联到已有网页账号。 */
+    let uname = 'wx_' + openid.slice(0, 10);
+    let seq = 2;
+    while (await db.userByName(uname)) uname = 'wx_' + openid.slice(0, 10) + '_' + (seq++);
+    const randPw = crypto.randomBytes(16).toString('hex');
+    const uid = await db.createUser(uname, bcrypt.hashSync(randPw, 10));
+    await db.userBindOpenid(uid, openid);
+    await db.profileSet(uid, JSON.stringify(defaultBag()));
+    console.log('✅ 微信自动注册新账号：', uname);
+    res.json({ ok: true, token: issueWxToken(uid), username: uname, bound: true, auto_registered: true });
   }));
 
   /* ⑥b 小程序绑定 web 账号：openid + 网页账号密码 → 关联并签发 token */
