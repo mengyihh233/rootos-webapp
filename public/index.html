@@ -15,6 +15,14 @@
   --danger:#f44747; --txt:#d4d4d4; --dim:#808080;
   --mono:"Cascadia Code",Consolas,"JetBrains Mono",monospace;
 }
+/* 规划·资源：标签筛选 + 可点击链接 */
+.restags { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+.tagchip { background:#2d2d30; color:var(--txt); border:1px solid var(--border); border-radius:14px; padding:4px 12px; font-size:.82rem; cursor:pointer; }
+.tagchip.active { background:var(--accent2); color:#fff; border-color:var(--accent2); }
+.tagchip small { color:var(--dim); margin-left:4px; }
+.tagchip.active small { color:#cfe8ff; }
+.tagpill { display:inline-block; background:#0e3a4a; color:var(--accent); border-radius:10px; padding:2px 8px; font-size:.72rem; margin-right:4px; }
+#resList a { color:var(--accent); text-decoration:underline; word-break:break-all; }
 * { box-sizing:border-box; }
 body { margin:0; padding:44px 16px 60px; background:var(--bg); color:var(--txt);
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; line-height:1.6; }
@@ -477,14 +485,19 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 <div id="resources" class="section">
   <div class="card doc">
     <h2>📚 规划 · 资源 <small>（收录你的规划、策略、资料；可写文字，也可导入 Word / 文档）</small></h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
       <button class="ok" onclick="showResourceForm()">＋ 添加收录</button>
       <button class="ghost" onclick="document.getElementById('resFile').click()">📥 导入文档（Word / txt）</button>
       <input type="file" id="resFile" accept=".docx,.txt,.md" style="display:none" onchange="importResourceDoc(event)">
     </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <input type="text" id="resSearch" placeholder="🔍 搜索标题 / 内容…" style="flex:1;min-width:180px;" oninput="renderResources()">
+    </div>
+    <div id="resTags" class="restags"></div>
     <div id="resForm" style="display:none;" class="review-box">
       <input type="text" id="resTitle" placeholder="标题（如：专升本备考策略）" style="width:100%;margin-bottom:8px;">
-      <textarea id="resBody" rows="6" placeholder="写在这里，或先「导入文档」把内容填进来…（自动保存）"></textarea>
+      <textarea id="resBody" rows="6" placeholder="写在这里，或先「导入文档」把内容填进来…（网址会自动变成可点击链接；自动保存）"></textarea>
+      <input type="text" id="resTagsInput" placeholder="标签（逗号分隔，如：雅思,留学,书单）" style="width:100%;margin:8px 0;">
       <div style="margin-top:8px;display:flex;gap:8px;">
         <button class="ok" onclick="saveResource()">保存</button>
         <button class="ghost" onclick="hideResourceForm()">取消</button>
@@ -1408,19 +1421,68 @@ function delRetro(id){
 }
 
 /* ================= 规划·资源 ================= */
+function linkify(txt){
+  let s = esc(txt||'');
+  const re = /(https?:\/\/[^\s<>"']+)|(?<![.\w@])([a-z0-9-]*[a-z][a-z0-9-]*\.[a-z]{2,6})([^\s<>"'()\[\]{}]*)?/gi;
+  return s.replace(re, (m, http, dom, path)=>{
+    if(http){
+      let u = http.replace(/[.,;:]+$/,'');
+      return '<a href="'+u+'" target="_blank" rel="noopener">'+u+'</a>';
+    }
+    if(dom){
+      let p = path||'';
+      while(/[.,;:]$/.test(p)) p = p.slice(0,-1);
+      const url = 'https://'+dom+p;
+      return '<a href="'+url+'" target="_blank" rel="noopener">'+dom+p+'</a>';
+    }
+    return m;
+  });
+}
+let resActiveTag = '';
+function resSetTag(t){
+  resActiveTag = (t==='全部') ? '' : t;
+  const sb = document.getElementById('resSearch'); if(sb) sb.value='';
+  renderResources();
+}
 function renderResources(){
   const list = $('#resList'); if(!list) return;
   if(!resources || !resources.length){
     list.innerHTML = '<p><small>还没有收藏。点「添加收录」写一条，或「导入文档」把 Word / txt 内容收进来。</small></p>';
+    renderResTags({});
     return;
   }
-  list.innerHTML = resources.map(r=>
-    '<div class="past-review" style="border-left:3px solid var(--accent);padding-left:10px;margin:10px 0;">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;"><b>'+esc(r.title||'未命名')+'</b>'
-    +'<span><button class="x" title="编辑" onclick="editResource(\''+(r.id||'')+'\')">✎</button>'
-    +' <button class="x" title="删除" onclick="delResource(\''+(r.id||'')+'\')">×</button></span></div>'
-    +'<div style="white-space:pre-wrap;margin-top:4px;color:var(--txt);">'+esc(r.body||'')+'</div></div>'
-  ).join('');
+  const q = (($('#resSearch').value)||'').trim().toLowerCase();
+  // 标签聚合
+  const cnt = {};
+  resources.forEach(r=>(r.tags||[]).forEach(t=>cnt[t]=(cnt[t]||0)+1));
+  renderResTags(cnt);
+  // 过滤
+  let items = resources.slice();
+  if(resActiveTag) items = items.filter(r=>(r.tags||[]).includes(resActiveTag));
+  if(q) items = items.filter(r=>(r.title||'').toLowerCase().includes(q) || (r.body||'').toLowerCase().includes(q));
+  if(!items.length){
+    list.innerHTML = '<p><small>'+(resources&&resources.length?'没有匹配的资源。':'还没有收藏。')+'</small></p>';
+    return;
+  }
+  list.innerHTML = items.map(r=>{
+    const tags = (r.tags||[]).map(t=>'<span class="tagpill">'+esc(t)+'</span>').join(' ');
+    return '<div class="past-review" style="border-left:3px solid var(--accent);padding-left:10px;margin:10px 0;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;"><b>'+esc(r.title||'未命名')+'</b>'
+      +'<span><button class="x" title="编辑" onclick="editResource(\''+(r.id||'')+'\')">✎</button>'
+      +' <button class="x" title="删除" onclick="delResource(\''+(r.id||'')+'\')">×</button></span></div>'
+      + (tags?'<div style="margin:4px 0;">'+tags+'</div>':'')
+      +'<div style="white-space:pre-wrap;margin-top:4px;color:var(--txt);">'+linkify(r.body||'')+'</div>'
+      +'<div style="margin-top:4px;color:var(--dim);font-size:12px;">🕓 '+(r.updatedAt||'')+'</div></div>';
+  }).join('');
+}
+function renderResTags(cnt){
+  const bar = $('#resTags'); if(!bar) return;
+  const chips = ['全部'].concat(Object.keys(cnt).sort());
+  bar.innerHTML = chips.map(t=>{
+    const active = (t==='全部' && !resActiveTag) || t===resActiveTag;
+    const n = t==='全部' ? (resources?resources.length:0) : (cnt[t]||0);
+    return '<button class="tagchip'+(active?' active':'')+'" onclick="resSetTag(\''+esc(t)+'\')">'+esc(t)+' <small>'+n+'</small></button>';
+  }).join('');
 }
 function showResourceForm(preset){
   preset = preset||{};
@@ -1430,6 +1492,7 @@ function showResourceForm(preset){
   document.getElementById('resEditingId').value = preset.id||'';
   $('#resTitle').value = preset.title||'';
   $('#resBody').value = preset.body||'';
+  $('#resTagsInput').value = preset.tags||'';
   $('#resForm').style.display='block';
   $('#resBody').focus();
 }
@@ -1437,14 +1500,15 @@ function hideResourceForm(){ $('#resForm').style.display='none'; }
 function saveResource(){
   const title = $('#resTitle').value.trim();
   const body = $('#resBody').value;
+  const tags = ($('#resTagsInput').value||'').split(',').map(s=>s.trim()).filter(Boolean);
   if(!title && !body.trim()){ hideResourceForm(); return; }
   if(!resources) resources=[];
   const edId = document.getElementById('resEditingId') ? document.getElementById('resEditingId').value : '';
   if(edId){
     const r = resources.find(x=>x.id===edId);
-    if(r){ r.title=title||'未命名'; r.body=body; r.updatedAt=new Date().toLocaleString('sv'); }
+    if(r){ r.title=title||'未命名'; r.body=body; r.tags=tags; r.updatedAt=new Date().toLocaleString('sv'); }
   } else {
-    resources.unshift({ id:'res'+Date.now(), title:title||'未命名', body, updatedAt:new Date().toLocaleString('sv') });
+    resources.unshift({ id:'res'+Date.now(), title:title||'未命名', body, tags, updatedAt:new Date().toLocaleString('sv') });
   }
   store.set('resources', resources); scheduleServerSave();
   hideResourceForm(); renderResources();
@@ -1452,7 +1516,7 @@ function saveResource(){
 }
 function editResource(id){
   const r = (resources||[]).find(x=>x.id===id); if(!r) return;
-  showResourceForm({ id:r.id, title:r.title, body:r.body });
+  showResourceForm({ id:r.id, title:r.title, body:r.body, tags:(r.tags||[]).join(', ') });
   $('#resForm').scrollIntoView({behavior:'smooth'});
 }
 function delResource(id){
