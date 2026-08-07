@@ -263,16 +263,32 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 </style>
 </head>
 <body>
-<!-- ================= 登录 / 注册 ================= -->
+<!-- ================= 登录 / 注册 / 找回密码 ================= -->
 <div id="auth" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);">
   <div class="card" style="width:340px;max-width:92vw;">
-    <h2 style="margin-top:0;">🧠 ROOT-OS 个人操作系统</h2>
-    <p><small>把「想变好」变成一套可运行、可迭代的系统。注册即用，数据存云端。</small></p>
-    <input id="auUser" type="text" placeholder="账号（邮箱或用户名，≥2 字符）" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
-    <input id="auPass" type="password" placeholder="密码（≥6 位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
-    <button class="ok" style="width:100%;" onclick="doLogin()">登录</button>
-    <button class="ghost" style="width:100%;margin-top:8px;" onclick="doRegister()">注册新账号</button>
-    <p id="authMsg" style="color:var(--danger);min-height:1.2em;"></p>
+    <!-- 登录 / 注册 -->
+    <div id="authLogin">
+      <h2 style="margin-top:0;">🧠 ROOT-OS 个人操作系统</h2>
+      <p><small>把「想变好」变成一套可运行、可迭代的系统。注册即用，数据存云端。</small></p>
+      <input id="auUser" type="text" placeholder="账号（邮箱或用户名，≥2 字符）" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+      <input id="auPass" type="password" placeholder="密码（≥6 位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+      <button class="ok" style="width:100%;" onclick="doLogin()">登录</button>
+      <button class="ghost" style="width:100%;margin-top:8px;" onclick="doRegister()">注册新账号</button>
+      <p id="authMsg" style="color:var(--danger);min-height:1.2em;"></p>
+      <p style="text-align:center;margin:6px 0 0;"><a href="javascript:void(0)" onclick="showForgot()" style="color:var(--accent);font-size:.8rem;">忘记密码？用邮箱找回</a></p>
+    </div>
+    <!-- 找回密码（依赖 SMTP，未配置时会提示） -->
+    <div id="authForgot" style="display:none;">
+      <h2 style="margin-top:0;">🔑 找回密码</h2>
+      <p><small>输入绑定邮箱 → 收验证码 → 重设密码。</small></p>
+      <input id="fgEmail" type="email" placeholder="绑定邮箱" style="width:100%;margin-bottom:10px;box-sizing:border-box;" onkeydown="if(event.key==='Enter')doForgotSend()">
+      <button class="ghost" style="width:100%;margin-bottom:10px;" onclick="doForgotSend()">📮 发送验证码</button>
+      <input id="fgCode" type="text" placeholder="6 位验证码" style="width:100%;margin-bottom:10px;box-sizing:border-box;" onkeydown="if(event.key==='Enter')doForgotReset()">
+      <input id="fgPass" type="password" placeholder="新密码（≥6 位）" style="width:100%;margin-bottom:10px;box-sizing:border-box;" onkeydown="if(event.key==='Enter')doForgotReset()">
+      <button class="ok" style="width:100%;" onclick="doForgotReset()">重置密码</button>
+      <p id="forgotMsg" style="min-height:1.2em;font-size:.85rem;"></p>
+      <p style="text-align:center;margin:6px 0 0;"><a href="javascript:void(0)" onclick="backToLogin()" style="color:var(--dim);font-size:.8rem;">← 返回登录</a></p>
+    </div>
   </div>
 </div>
 
@@ -361,20 +377,15 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   </div>
 
   <div class="card">
-    <h2>⚡ 快速事件 <small>（只记事实，不评判）</small>
+    <h2>⚡ 快速事件 · 应急 <small>（只记事实，不评判；冲动来袭用下方冷却）</small>
       <button class="mini ghost" style="float:right;" onclick="manageQuickEvents()">⚙ 自定义</button></h2>
     <div id="quickEventBtns" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
     <input type="text" id="quickEvText" placeholder="事件备注（可空）" style="margin-top:8px;">
-    <p><small>针对某条定式的崩溃/恢复/迭代，去「回溯」页的定式迭代台。</small></p>
-  </div>
-
-  <div class="card">
-    <h2>🛡️ 应急协议 <small>（坏习惯冲动来袭时点这里）</small></h2>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-      <button class="ghost" onclick="startCooldown()">🧊 冲动冷却 · 15分钟</button>
-      <button class="ghost" onclick="startFuse()">⏱️ 视频熔断 · 25分钟</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
+      <button class="ghost mini" onclick="startCooldown()">🧊 冲动冷却 · 15分钟</button>
+      <button class="ghost mini" onclick="startFuse()">⏱️ 视频熔断 · 25分钟</button>
     </div>
-    <p><small>冷却不是靠意志力硬扛，是用<b>时延</b>把冲动的峰值熬过去。熬过去后回来打卡「健康」门类的规则。</small></p>
+    <p><small>冷却用时延熬过冲动峰值；针对某条定式的崩溃/恢复/迭代，去「回溯」页的定式迭代台。</small></p>
   </div>
 
   <div class="card">
@@ -2608,6 +2619,29 @@ async function doLogin(){
   const j=await apiPost('/api/login',{username:u,password:p});
   if(j.ok){ await afterLogin(); } else { showAuth(j.error||'登录失败'); }
 }
+/* ================= 找回密码（v1.3：登录页闭环） ================= */
+function showForgot(){ $('#authLogin').style.display='none'; $('#authForgot').style.display='block'; $('#forgotMsg').textContent=''; }
+function backToLogin(){ $('#authForgot').style.display='none'; $('#authLogin').style.display='block'; }
+async function doForgotSend(){
+  const email=document.getElementById('fgEmail').value.trim();
+  const msg=document.getElementById('forgotMsg');
+  if(!email) return msg.textContent='请输入绑定邮箱';
+  msg.style.color='var(--dim)'; msg.textContent='发送中…';
+  const j=await apiPost('/api/forgot/send-code',{email});
+  msg.style.color=j.error?'var(--danger)':'var(--ok)';
+  msg.textContent=j.error||j.msg||'';
+}
+async function doForgotReset(){
+  const email=document.getElementById('fgEmail').value.trim();
+  const code=document.getElementById('fgCode').value.trim();
+  const password=document.getElementById('fgPass').value;
+  const msg=document.getElementById('forgotMsg');
+  if(!email||!code||password.length<6){ msg.style.color='var(--danger)'; msg.textContent='请完整填写邮箱、验证码和新密码（≥6 位）'; return; }
+  msg.style.color='var(--dim)'; msg.textContent='提交中…';
+  const j=await apiPost('/api/forgot/reset',{email,code,password});
+  if(j.ok){ msg.style.color='var(--ok)'; msg.textContent='✅ 密码已重置，正在返回登录页…'; setTimeout(backToLogin, 1500); }
+  else { msg.style.color='var(--danger)'; msg.textContent=j.error||'重置失败'; }
+}
 /* ================= 设置页（v1.2：账号绑定 / 偏好） ================= */
 async function renderSettings(){
   const box=document.getElementById('acctBox'); if(!box) return;
@@ -2640,6 +2674,7 @@ async function renderSettings(){
     +'<div class="row" style="margin-top:6px;"><input type="password" id="setOldPw" placeholder="当前密码" style="flex:1;min-width:100px;">'
     +'<input type="password" id="setNewPw" placeholder="新密码（≥6 位）" style="flex:1;min-width:100px;">'
     +'<button class="ok mini" onclick="changePassword()">修改</button></div></div>'
+    +'<div><small style="color:var(--dim);">忘记密码？登录页点「忘记密码」用绑定邮箱找回；邮箱需先在本页验证绑定。</small></div>'
     +'<div><button class="ghost" onclick="doLogout()">退出登录</button></div>'
     +'</div>';
 }
