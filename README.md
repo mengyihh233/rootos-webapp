@@ -290,6 +290,43 @@ CloudStudio / 纯静态托管跑不了 Node 后端，但 **Render 的免费 Web 
 - Render 免费层闲置后也会休眠，唤醒同样有冷启动；对自用 / 作品集完全够用。
 - 想自定义域名？Render 免费层支持（DNS 加一条 CNAME）。
 
+### 4.10 微信云托管（CloudBase Run，国内直连推荐）★ 网页+小程序都在腾讯生态
+
+> 如果目标是**小程序 + 网页都跑在腾讯云、境内速度快、免备案**，用微信云托管替代 Render：
+> 云托管 = 常驻容器跑 `server.js`（网页 + API 一个服务），自带 HTTPS 域名（`xxx.run.tcloudbase.com`），
+> **小程序 request 合法域名天然白名单、免备案**；数据库建议腾讯云 PostgreSQL（db.js 的 PG 引擎直接复用）。
+
+**① 准备镜像文件**（本仓库已包含）：
+- `Dockerfile`：node:20-slim + npm 国内镜像 + `PORT=80`，启动 `node server.js`
+- `.dockerignore`：排除 node_modules / data.db / .git / tools 等
+
+**② 创建腾讯云 PostgreSQL 实例**：
+1. 腾讯云控制台 → 云数据库 PostgreSQL → 新建实例（选最低配 / 按量付费）
+2. 建一个库和账号（记下连接串：`postgresql://user:pass@pg-xxx.sql.tencentcdb.com:5432/dbname`）
+3. 安全组放行 5432（本机迁移用），云托管所在网络如默认不通则同 VPC 部署
+
+**③ 数据迁移（Neon → 腾讯云 PG）**：
+```bash
+node tools/migrate_pg.js "<Neon连接串>" "<腾讯云连接串>"
+```
+> 脚本会清空目标表再按主键重插（幂等可重跑），覆盖 users/profiles/templates/notifications/ratings/favorites。
+
+**④ 开通云托管并部署**：
+1. 微信开发者工具 → 云开发 → 左侧 **云托管**（或 tcb.cloud.tencent.com 开通）
+2. 新建服务 → 选 **本地代码/ Git 仓库** 上传（把 `rootos-webapp` 目录打包 zip 上传，排除 node_modules）
+3. 构建配置：**Dockerfile 构建**（仓库自带），**端口填 80**
+4. 环境变量（云托管控制台 → 服务 → 设置）：
+   `NODE_ENV=production`、`SESSION_SECRET=<随机串>`、`ADMIN_TOKEN=<随机串>`、
+   `DATABASE_URL=<腾讯云PG连接串>`、`WX_APPID=wx5ff3c051acb0c76`、`WX_SECRET=<AppSecret>`、SMTP 变量（可选）
+5. 部署成功 → 访问 `https://<服务名>-<id>.ap-xxx.run.tcloudbase.com/` 即网页
+
+**⑤ 小程序切换直连**：
+- `rootos-miniprogram/config.js`：`USE_CLOUD: false`，`BASE_URL` 改为云托管域名
+- 云托管域名在小程序后台 request 合法域名里**无需手动配置**（微信云托管域名自动白名单）
+- 此时云函数 `rootosProxy` 可退休（也可保留作 fallback）
+
+**⑥ 网页端**：直接用云托管域名访问，无冷启动、国内秒开。
+
 ---
 
 ## 五、目录结构
