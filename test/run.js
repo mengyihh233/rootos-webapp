@@ -258,10 +258,12 @@ function makeDocx(text) {
   r = await fetch(base + '/api/notifications', { headers:{cookie:cookie3} });
   ok('标记已读后 unread=0', (await r.json()).unread===0);
 
-  // CSP 纵深：含一次性 nonce + object-src none + base-uri self（frame-ancestors 未加，以兼容 WorkBuddy 预览跨域 iframe）
+  // CSP 纵深：object-src none + base-uri self（frame-ancestors 未加，以兼容 WorkBuddy 预览跨域 iframe）
+  // 注意：nonce 与 'unsafe-inline' 同现会被浏览器忽略 unsafe-inline，导致 style=""/onclick="" 全被拦，
+  // 因此 CSP 不得再含 'nonce-（本站大量内联样式/事件，重构前只能保留 unsafe-inline）
   r = await fetch(base + '/');
   const csp = r.headers.get('content-security-policy') || '';
-  ok('CSP 含一次性 nonce', csp.includes("'nonce-"));
+  ok('CSP 不再混用 nonce（防止 unsafe-inline 被浏览器忽略）', !csp.includes("'nonce-"));
   ok('CSP 含 object-src none', csp.includes("object-src 'none'"));
   ok('CSP 含 base-uri self', csp.includes("base-uri 'self'"));
 

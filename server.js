@@ -155,18 +155,17 @@ async function start() {
   app.set('trust proxy', 1);
 
   /* 安全响应头：纵深防御 XSS / MIME 嗅探 / Referrer 泄露。
-   * 每请求生成一次性 nonce，注入到 <script>/<style> 标签（script-src/style-src 同时声明 nonce 作为纵深）；
-   * 因全站使用 inline event handler（onclick="..."），script-src 仍需保留 'unsafe-inline'
-   * —— 要彻底移除需把事件绑定改为 addEventListener（重构级，列为后续可选）。
+   * 重要教训：CSP 中 'unsafe-inline' 与 'nonce-' 同现时，现代浏览器会【忽略 unsafe-inline】，
+   * 而 nonce 只对 <script>/<style> 元素有效、覆盖不了 style="..." 属性与 onclick="..." 事件属性
+   * —— 本站在线内联样式/事件较多，曾被此规则全量拦截（登录遮罩失去 position:fixed 等），
+   * 故在事件绑定重构为 addEventListener 之前，CSP 只保留 'unsafe-inline'、不使用 nonce。
    * 收紧 object-src='none'（禁用插件/嵌套浏览上下文）、base-uri/form-action 已限 'self'。
    * 注意：frame-ancestors 故意不限制，以免破坏 WorkBuddy 预览的跨域 iframe（沿用既有决策）。 */
   app.use((req, res, next) => {
-    const nonce = crypto.randomBytes(16).toString('base64');
-    req.nonce = nonce;
     res.setHeader('Content-Security-Policy',
       "default-src 'self'; " +
-      "script-src 'self' 'unsafe-inline' 'nonce-" + nonce + "'; " +
-      "style-src 'self' 'unsafe-inline' 'nonce-" + nonce + "'; " +
+      "script-src 'self' 'unsafe-inline'; " +
+      "style-src 'self' 'unsafe-inline'; " +
       "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; " +
       "base-uri 'self'; form-action 'self'; object-src 'none'");
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -504,17 +503,12 @@ async function start() {
     res.json({ ok: true });
   }));
 
-  /* 首页 / 管理页：读取 HTML 并把一次性 nonce 注入到 <script>/<style> 标签，
-   * 与 CSP 的 'nonce-xxx' 指令配套（纵深防御注入的脚本/样式）。 */
+  /* 首页 / 管理页：直接读取 HTML 返回（CSP 已不再使用 nonce，无需注入） */
   function serveHtml(file) {
     return (req, res) => {
       try {
         const fs = require('fs');
-        let html = fs.readFileSync(path.join(__dirname, 'public', file), 'utf8');
-        const n = req.nonce || '';
-        html = html
-          .replace(/<script(\s|>)/g, '<script nonce="' + n + '"$1')
-          .replace(/<style(\s|>)/g, '<style nonce="' + n + '"$1');
+        const html = fs.readFileSync(path.join(__dirname, 'public', file), 'utf8');
         res.type('html').send(html);
       } catch (e) { res.status(500).send('load error'); }
     };
