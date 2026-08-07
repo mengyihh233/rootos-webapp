@@ -1342,10 +1342,12 @@ function exportJSON(){
 function importJSON(ev){
   const f=ev.target.files[0]; if(!f) return;
   const rd=new FileReader();
-  rd.onload=()=>{ try{
+  rd.onload=async ()=>{ try{
       const d=JSON.parse(rd.result);
       if(!d.rules||!d.daily) throw 0;
       applyBag(d);
+      /* 登录态下把导入结果先落盘到服务器，否则刷新时 loadFromServer 会用旧数据覆盖本地 */
+      if(SESSION) await pushToServer();
       alert('📥 导入成功'); location.reload();
     }catch(e){ alert('文件格式不对，导入失败'); } };
   rd.readAsText(f);
