@@ -20,6 +20,8 @@ const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
 /* 微信小程序登录（code2session）：AppID 公开，AppSecret 私密，只从环境变量读、绝不进代码 */
 const WX_APPID = process.env.WX_APPID || '';
 const WX_SECRET = process.env.WX_SECRET || '';
+/* 启动诊断：打印 WX 配置状态（隐去敏感位），部署后在日志确认环境变量是否生效 */
+console.log(`🔎 微信登录配置：WX_APPID=${WX_APPID ? WX_APPID.slice(0, 6) + '…' + WX_APPID.slice(-4) + '（共' + WX_APPID.length + '位）' : '⚠️未配置'} | WX_SECRET=${WX_SECRET ? '✅已配置（' + WX_SECRET.length + '位）' : '⚠️未配置'}`);
 
 /* 小程序无 cookie，用 Bearer token 维持登录态（进程内存；单实例够用）。
  * token = 24 字节随机 hex，有效期 30 天，登录/绑定后签发。 */
