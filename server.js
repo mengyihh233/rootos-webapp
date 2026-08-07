@@ -376,9 +376,8 @@ async function start() {
     req.session.destroy(() => res.json({ ok: true }));
   });
 
-  /* 当前用户（含邮箱/微信绑定状态，供设置页渲染） */
-  app.get('/api/me', wrap(async (req, res) => {
-    if (!req.session.userId) return res.status(401).json({ error: '未登录' });
+  /* 当前用户（含邮箱/微信绑定状态，供设置页渲染；requireAuth 兼容网页 cookie 与小程序 Bearer token） */
+  app.get('/api/me', requireAuth, wrap(async (req, res) => {
     const u = await db.userById(req.session.userId);
     res.json({
       username: u ? u.username : req.session.username,
