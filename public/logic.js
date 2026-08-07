@@ -80,7 +80,28 @@ function diffById(cur, tpl) {
   return res;
 }
 
+/* 选择性合并（按 id 去重 + 逐条决策）：
+ * - tpl 中不存在于 cur 的 id → 一律追加（新增）
+ * - tpl 与 cur 同 id 的项 → 由 choices[id] 决定：
+ *     choices[id] === false  → 保留当前版本（用户勾选「保留我的」）
+ *     其余（含未指定）       → 用模板版本（默认）
+ * choices 为可选，缺省时等价于 mergeById（全用模板）。
+ * 用于「套用模板·合并」的逐项冲突解决。 */
+function mergeWithChoices(cur, tpl, choices) {
+  const cmap = new Map();
+  (cur || []).forEach(x => { if (x && x.id != null) cmap.set(x.id, x); });
+  const out = Array.from(cmap.values());
+  (tpl || []).forEach(t => {
+    if (!t || t.id == null) return;
+    if (!cmap.has(t.id)) { out.push(t); return; }            /* 新增：始终加 */
+    if (choices && choices[t.id] === false) return;          /* 用户选择保留当前：不动 */
+    const i = out.findIndex(x => x.id === t.id);
+    if (i >= 0) out[i] = t;                                  /* 用模板版本 */
+  });
+  return out;
+}
+
 /* 同时兼容浏览器(全局)与 node(模块)两种使用方式 */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { esc, isRootBag, linkify, mergeById, mergeReviews, diffById };
+  module.exports = { esc, isRootBag, linkify, mergeById, mergeReviews, diffById, mergeWithChoices };
 }

@@ -207,6 +207,11 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   /* 资源搜索/表单输入框整行 */
   #resSearch,#resTitle,#resTagsInput,#resBody{width:100%;}
 }
+/* 合并冲突逐项选择 */
+.merge-rows{max-height:240px;overflow:auto;margin-top:8px;border:1px solid var(--dim);border-radius:8px;padding:8px 10px;}
+.merge-row{display:block;margin:5px 0;font-size:.88rem;cursor:pointer;}
+.merge-row input{margin-right:6px;vertical-align:middle;}
+@media (max-width:600px){ .merge-rows{max-height:200px;} }
 </style>
 </head>
 <body>
@@ -1932,12 +1937,12 @@ async function renderTemplates(){
     }).join('');
   }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（/api/templates 接口异常？）</small>'; }
 }
-async function applyTemplate(file,title,mode){
+async function applyTemplate(file,title,mode,choices){
   try{
     const d=await fetchTemplateData(file);
     if(mode==='append') appendBag(d);
-    else if(mode==='merge') mergeBag(d);
-    else applyBag(d);   /* append=仅追加阶段资源 / merge=合并 / 其余=覆盖 */
+    else if(mode==='merge') mergeBag(d,choices);
+    else applyBag(d);   /* append=仅追加阶段资源 / merge=合并(可逐项选) / 其余=覆盖 */
     meta.onboarded=true; store.set('meta',meta);   /* 套用模板者非新手，跳过引导 */
     if(SESSION){ try{ await pushToServer(); }catch(e){ console.warn('套用后落盘失败',e); } }
     const label = mode==='append' ? '仅追加(阶段/资源)' : (mode==='merge' ? '合并' : '覆盖');
@@ -1953,17 +1958,18 @@ async function fetchTemplateData(file){
   return d;
 }
 
-/* 合并模式：保留当前用户数据，仅追加/更新模板中不存在或同 id 的内容。
+/* 合并模式：保留当前用户数据，仅追加/更新模板内容。
+ * choices: 可选 {id:false} 表示「该项保留当前版本、不用模板版」，实现逐项冲突解决。
  * daily 为运行时状态不合并（保留当前用户的当日进度）；meta 以当前用户为主、模板补缺失默认。 */
-function mergeBag(d){
-  cats=mergeById(cats, d.cats||SEED_CATS);
-  levels=mergeById(levels, d.levels||SEED_LEVELS);
-  rules=mergeById(rules, d.rules);
-  tags=mergeById(tags, d.tags||SEED_TAGS);
-  events=mergeById(events, d.events||[]);
-  phases=mergeById(phases, d.phases||[]);
-  retros=mergeById(retros, d.retros||[]);
-  resources=mergeById(resources, d.resources||[]);
+function mergeBag(d, choices){
+  cats=mergeWithChoices(cats, d.cats||SEED_CATS, choices);
+  levels=mergeWithChoices(levels, d.levels||SEED_LEVELS, choices);
+  rules=mergeWithChoices(rules, d.rules, choices);
+  tags=mergeWithChoices(tags, d.tags||SEED_TAGS, choices);
+  events=mergeWithChoices(events, d.events||[], choices);
+  phases=mergeWithChoices(phases, d.phases||[], choices);
+  retros=mergeWithChoices(retros, d.retros||[], choices);
+  resources=mergeWithChoices(resources, d.resources||[], choices);
   reviews=mergeReviews(reviews, d.reviews);
   meta=Object.assign({}, d.meta||{}, meta);   /* 当前 meta 优先，模板只补缺失默认 */
   const bag={cats,levels,rules,tags,daily,events,phases,reviews,retros,resources,meta};
@@ -2005,23 +2011,39 @@ async function previewMerge(file,title){
       {k:'tags',label:'标签',name:'name'},
       {k:'levels',label:'层级',name:'name'}
     ];
-    let added=0,updated=0,unchanged=0; const conflicts=[];
+    let added=0,updated=0,unchanged=0; const rows=[];
     fields.forEach(f=>{
       const diff=diffById(cur[f.k]||[], d[f.k]||[]);
       added+=diff.added.length; updated+=diff.updated.length; unchanged+=diff.unchanged.length;
       const tmap=new Map((d[f.k]||[]).map(x=>[x.id,x]));
-      diff.updated.forEach(id=>{ const item=tmap.get(id); conflicts.push(f.label+'：'+(item&&item[f.name]||id)); });
+      diff.updated.forEach(id=>{
+        const item=tmap.get(id);
+        const nm=(item&&item[f.name])||id;
+        rows.push('<label class="merge-row"><input type="checkbox" data-mid="'+esc(id)+'" checked> <span>'+esc(f.label)+'：<b>'+esc(nm)+'</b></span></label>');
+      });
     });
     const box=document.getElementById('tplMergeDetail');
-    box.innerHTML='模板将向你当前数据：<b style="color:var(--ok)">新增 '+added+' 项</b>、<b style="color:var(--warn)">更新 '+updated+' 项</b>、与你相同的 '+unchanged+' 项。'
-      + (conflicts.length
-          ? '<div style="margin-top:10px;color:var(--warn);font-size:.85rem;">将被模板覆盖/更新的内容（共 '+conflicts.length+' 项，最多显示 25）：<br>'+conflicts.slice(0,25).map(x=>'· '+esc(x)).join('<br>')+'</div>'
-          : '<div style="margin-top:10px;color:var(--dim);font-size:.85rem;">（无冲突，模板内容均为新增）</div>');
+    let html='模板将向你当前数据：<b style="color:var(--ok)">新增 '+added+' 项</b>、<b style="color:var(--warn)">更新 '+updated+' 项（可逐项选择保留哪版）</b>、与你相同的 '+unchanged+' 项。';
+    if(rows.length){
+      html+='<div style="margin-top:10px;font-size:.82rem;color:var(--dim);">已勾选 = 用<strong>模板版</strong>；取消勾选 = 保留<strong>你的版本</strong>：</div>'
+           +'<div class="merge-rows">'+rows.slice(0,40).join('')+'</div>'
+           + (rows.length>40 ? '<div style="color:var(--dim);font-size:.78rem;">…另有 '+(rows.length-40)+' 项未显示，均默认用模板版</div>' : '');
+    }else{
+      html+='<div style="margin-top:10px;color:var(--dim);font-size:.85rem;">（无冲突，模板内容均为新增，直接确认即可）</div>';
+    }
+    box.innerHTML=html;
     document.getElementById('tplMergeName').textContent=title||'';
     document.getElementById('tplMergeModal').style.display='flex';
   }catch(e){ alert('预览失败：'+(e&&e.message||e)); }
 }
-function confirmMergeApply(){ closeMergeModal(); applyTemplate(applyTplFile,applyTplTitle,'merge'); }
+function confirmMergeApply(){
+  const choices={};
+  document.querySelectorAll('#tplMergeDetail input[data-mid]').forEach(cb=>{
+    if(!cb.checked) choices[cb.getAttribute('data-mid')]=false;  /* 取消=保留当前版本 */
+  });
+  closeMergeModal();
+  applyTemplate(applyTplFile,applyTplTitle,'merge',choices);
+}
 /* 分享我的模板：把当前规划提交到社区（待审核） */
 async function uploadTemplate(){
   const title=document.getElementById('tplUpTitle').value.trim();
