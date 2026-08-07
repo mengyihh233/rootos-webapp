@@ -55,5 +55,25 @@
       "resources": 10,
       "retros": 5
     }
+  },
+  {
+    "id": "huberman",
+    "file": "huberman.json",
+    "title": "Huberman 脑科学系统 · 30 天",
+    "author": "ROOT-OS 官方",
+    "desc": "Andrew Huberman 的脑科学自律方案：睡眠节律/多巴胺管理/意志力/欲望冲动/专注/身体六大主题，40 条带标签分类的科学建议 + 30 天分周执行阶段 + 7 篇主题方法论笔记。基于神经科学，非玄学。",
+    "tags": [
+      "脑科学",
+      "Huberman",
+      "自律",
+      "睡眠",
+      "多巴胺"
+    ],
+    "counts": {
+      "rules": 23,
+      "phases": 10,
+      "resources": 40,
+      "retros": 7
+    }
   }
 ]
