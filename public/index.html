@@ -2481,6 +2481,51 @@ async function apiPost(url, body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   return r.json();
 }
+/* 【v0.5】静默同步：每 60s 检查服务器是否有其他端（小程序/另一台设备）写的新数据。
+ * 规则：
+ *  - 用户正在输入（焦点在 input/textarea）→ 不打扰
+ *  - 本地有待推送改动（pos_pendingPush）→ 等本地推完再说
+ *  - 服务器时间戳 <= 本地 → 无更新，跳过
+ *  - 服务器较新 → 静默应用数据（suppressSave 防回推）+ 轻量重渲染当前视图 + toast 提示 */
+async function silentSync(){
+  if(!SESSION || suppressSave) return;
+  const el=document.activeElement;
+  if(el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
+  try{
+    const r=await fetch('/api/data'); if(!r.ok) return;
+    const serverTs=Number(new Date(r.headers.get('X-Data-Updated')||0))||0;
+    const localTs=Number(localStorage.getItem('pos_savedAt'))||0;
+    if(serverTs<=localTs) return;
+    if(localStorage.getItem('pos_pendingPush')) return;
+    const data=await r.json();
+    suppressSave=true;
+    cats=data.cats||SEED_CATS; levels=data.levels||SEED_LEVELS;
+    rules=data.rules||SEED_RULES.map(x=>({...x})); tags=data.tags||SEED_TAGS.map(x=>({...x}));
+    daily=data.daily||{}; events=data.events||[]; syncEventIds();
+    phases=data.phases||SEED_PHASES.map(x=>({...x}));
+    reviews=data.reviews||{day:{},week:{},month:{}}; retros=data.retros||[]; resources=data.resources||[];
+    meta=data.meta||{};
+    store.set('cats',cats); store.set('levels',levels); store.set('rules',rules);
+    store.set('tags',tags); store.set('daily',daily); store.set('events',events);
+    store.set('phases',phases); store.set('reviews',reviews); store.set('retros',retros);
+    store.set('resources',resources); store.set('meta',meta);
+    suppressSave=false;
+    localSavedAt=serverTs||Date.now();
+    try{ localStorage.setItem('pos_savedAt',String(localSavedAt)); }catch(e){}
+    /* 轻量重渲染当前视图 */
+    const cur=document.querySelector('.section.active');
+    const id=cur?cur.id:'today';
+    if(id==='review'){ renderIterSel(); renderDayView(); }
+    else if(id==='phase') renderPhases();
+    else if(id==='rules') renderRulePage();
+    else if(id==='data') renderMyFailure();
+    else if(id==='resources') renderResources();
+    else if(id==='templates') renderTemplates();
+    else if(id==='today'){ renderTodayTags(); renderTodayRules(); updateProgress(); }
+    else if(id==='settings') renderSettings();
+    toast('📡 已同步其他设备的最新数据');
+  }catch(e){ /* 静默失败不打扰 */ }
+}
 function showApp(){ const a=document.getElementById('auth'); if(a) a.style.display='none'; }
 function showAuth(msg){ const a=document.getElementById('auth'); if(a){ a.style.display='flex'; if(msg) document.getElementById('authMsg').textContent=msg; } }
 async function doRegister(){
@@ -2586,6 +2631,7 @@ function bootApp(){
   renderTodayTags(); renderTodayRules(); updateProgress(); updatePhasePill();
   renderQuickEvents();
   checkNight(); setInterval(checkNight,60000);
+  setInterval(silentSync,60000);  /* 【v0.5】60s 静默同步：其他端（小程序）的改动自动出现在本页 */
   $('#todayTask').addEventListener('input',()=>{ dayRec().task=$('#todayTask').value; saveDaily(); });
   $('#dayNote').addEventListener('input',()=>{ dayRec().note=$('#dayNote').value; saveDaily(); });
   $('#sleepHr').addEventListener('input',()=>{ const v=$('#sleepHr').value; dayRec().sleep = v===''?null:+v; saveDaily(); });
