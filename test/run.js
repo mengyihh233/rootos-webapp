@@ -335,6 +335,19 @@ function makeDocx(text) {
   r = await fetch(base + '/api/account/merge-web', { method:'POST', headers:{...hd, authorization: mwxAuth}, body: JSON.stringify({ username: mergeWebUser, password: 'wrongpass' }) });
   ok('merge-web：密码错误 → 401', r.status === 401);
 
+  // ---- bind-openid：openid 被 wx_ 自动注册账号占用时允许合并转移（登录页绑定场景）----
+  const wxTemp = 'wx_' + Date.now().toString(36).slice(0, 10);
+  const bindWebUser = 'bindweb_' + Date.now();
+  await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: wxTemp, password: 'pass123456' }) });
+  await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: bindWebUser, password: 'pass123456' }) });
+  /* 模拟：openid 先被 wx_ 临时账号占用（微信自动注册） */
+  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ openid:'openid_bind_1', username: wxTemp, password: 'pass123456' }) });
+  ok('前置：openid 绑定到 wx_ 临时账号 → 200', r.status === 200);
+  /* 网页账号绑定同一 openid → 应自动合并转移（不再 409） */
+  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ openid:'openid_bind_1', username: bindWebUser, password: 'pass123456' }) });
+  const bindJ = await r.json();
+  ok('bind-openid：wx_ 占用时可合并转移 → 200 且返回目标账号 token', r.status===200 && bindJ.ok && bindJ.token, JSON.stringify(bindJ).slice(0,120));
+
   // CSP 纵深：object-src none + base-uri self（frame-ancestors 未加，以兼容 WorkBuddy 预览跨域 iframe）
   // 注意：nonce 与 'unsafe-inline' 同现会被浏览器忽略 unsafe-inline，导致 style=""/onclick="" 全被拦，
   // 因此 CSP 不得再含 'nonce-（本站大量内联样式/事件，重构前只能保留 unsafe-inline）

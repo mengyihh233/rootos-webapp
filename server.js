@@ -505,7 +505,22 @@ async function start() {
     }
     authOk(ip);
     const holder = await db.userFindByOpenid(openid);
-    if (holder && holder.id !== u.id) return res.status(409).json({ error: '该微信已绑定其他账号' });
+    if (holder && holder.id !== u.id) {
+      /* openid 已被其他账号占用：仅当占用者是「微信自动注册的临时账号」（wx_ 前缀）时，
+       * 视为可合并——把临时账号的数据并入目标账号、openid 转移，否则才是真冲突 */
+      if (!/^wx_/.test(String(holder.username || ''))) return res.status(409).json({ error: '该微信已绑定其他账号' });
+      const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
+      const hData = parse(await db.profileGet(holder.id));
+      const tData = parse(await db.profileGet(u.id));
+      ['cats', 'levels', 'rules', 'tags', 'phases', 'reviews', 'retros', 'resources'].forEach(k => {
+        const v = tData[k];
+        if (!v || (Array.isArray(v) && !v.length)) tData[k] = hData[k];
+      });
+      tData.daily = Object.assign({}, hData.daily || {}, tData.daily || {});
+      tData.events = [...(hData.events || []), ...(tData.events || [])];
+      await db.profileSet(u.id, JSON.stringify(tData));
+      await db.userBindOpenid(holder.id, null);
+    }
     await db.userBindOpenid(u.id, openid);
     res.json({ ok: true, token: issueWxToken(u.id), username: u.username, bound: true });
   }));
