@@ -266,12 +266,25 @@ async function start() {
   });
 
   app.use(express.json({ limit: '5mb' }));
-  app.use(session({
+  /* 会话持久化：配置了 DATABASE_URL（Neon）时把 session 存数据库——
+   * 云托管实例重启/闲置回收后网页登录态不丢（不用每次刷新重新登录）。
+   * 本地 SQLite 开发模式仍用内存 store。 */
+  const sessConf = {
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
-    cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' }
-  }));
+    cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 30 * 24 * 3600 * 1000 }
+  };
+  if (process.env.DATABASE_URL) {
+    const { Pool } = require('pg');
+    const PgSession = require('connect-pg-simple')(session);
+    sessConf.store = new PgSession({
+      pool: new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 3 }),
+      tableName: 'session',
+      createTableIfMissing: true
+    });
+  }
+  app.use(session(sessConf));
 
   /* DB 未就绪时，/api 请求返回 503（而非 500 崩溃），避免未连接状态下的异常扩散。
    * 必须在所有 /api 路由之前注册。静态首页 / 管理页不依赖 DB，始终可访问。 */
