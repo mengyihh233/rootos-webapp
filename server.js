@@ -97,6 +97,9 @@ function defaultBag() {
         goal: '把学到的东西做成一个能拿出手的作品，完成「输入 → 输出」闭环' }
     ],
     reviews: { day: {}, week: {}, month: {} },
+    /* 通用复盘随笔（不绑定日/周/月结构，随手记）与「规划·资源」收藏 */
+    retros: [],
+    resources: [],
     meta: { version: 'webapp-1.0' }
   };
 }
@@ -220,6 +223,29 @@ async function start() {
     let data = {};
     try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
     res.json(computeFailureAnalysis(data));
+  }));
+
+  /* 解析上传的文档（.docx/.txt/.md）→ 返回纯文本，供「规划·资源」导入收藏
+   * 前端把文件读成 base64 传上来（避免 multipart 依赖），服务端解码后用 mammoth 抽 docx 文本 */
+  app.post('/api/parse-doc', requireAuth, wrap(async (req, res) => {
+    const filename = String(req.body.filename || '');
+    const b64 = String(req.body.data || '');
+    if (!b64) return res.status(400).json({ error: '文件内容为空' });
+    let buf;
+    try { buf = Buffer.from(b64, 'base64'); } catch (e) { return res.status(400).json({ error: '文件解码失败' }); }
+    const lower = filename.toLowerCase();
+    if (lower.endsWith('.docx')) {
+      try {
+        const mammoth = require('mammoth');
+        const out = await mammoth.extractRawText({ buffer: buf });
+        res.json({ text: out.value || '' });
+      } catch (e) {
+        res.status(500).json({ error: 'Word 解析失败：' + e.message });
+      }
+    } else {
+      /* .txt / .md / 其它：按 UTF-8 文本处理 */
+      res.json({ text: buf.toString('utf8') });
+    }
   }));
 
   /* 读取数据 */

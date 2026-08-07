@@ -12,6 +12,7 @@
     "better-sqlite3": "^11.3.0",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
+    "mammoth": "^1.12.0",
     "pg": "^8.22.0"
   }
 }
