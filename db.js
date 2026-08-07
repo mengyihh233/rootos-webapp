@@ -40,6 +40,30 @@ const SCHEMA_SQLITE = {
       data       TEXT NOT NULL DEFAULT '{}',
       status     TEXT NOT NULL DEFAULT 'pending',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  notifications: `
+    CREATE TABLE IF NOT EXISTS notifications (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL,
+      type       TEXT NOT NULL DEFAULT '',
+      payload    TEXT NOT NULL DEFAULT '{}',
+      is_read    INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  ratings: `
+    CREATE TABLE IF NOT EXISTS ratings (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_id INTEGER NOT NULL,
+      user_id     INTEGER NOT NULL,
+      score       INTEGER NOT NULL,
+      UNIQUE (template_id, user_id)
+    )`,
+  favorites: `
+    CREATE TABLE IF NOT EXISTS favorites (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_id INTEGER NOT NULL,
+      user_id     INTEGER NOT NULL,
+      UNIQUE (template_id, user_id)
     )`
 };
 
@@ -68,6 +92,30 @@ const SCHEMA_PG = {
       data       TEXT NOT NULL DEFAULT '{}',
       status     TEXT NOT NULL DEFAULT 'pending',
       created_at TEXT NOT NULL DEFAULT NOW()
+    )`,
+  notifications: `
+    CREATE TABLE IF NOT EXISTS notifications (
+      id         SERIAL PRIMARY KEY,
+      user_id    INTEGER NOT NULL,
+      type       TEXT NOT NULL DEFAULT '',
+      payload    TEXT NOT NULL DEFAULT '{}',
+      is_read    INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT NOW()
+    )`,
+  ratings: `
+    CREATE TABLE IF NOT EXISTS ratings (
+      id          SERIAL PRIMARY KEY,
+      template_id INTEGER NOT NULL,
+      user_id     INTEGER NOT NULL,
+      score       INTEGER NOT NULL,
+      UNIQUE (template_id, user_id)
+    )`,
+  favorites: `
+    CREATE TABLE IF NOT EXISTS favorites (
+      id          SERIAL PRIMARY KEY,
+      template_id INTEGER NOT NULL,
+      user_id     INTEGER NOT NULL,
+      UNIQUE (template_id, user_id)
     )`
 };
 
@@ -81,6 +129,9 @@ async function init() {
     await pool.query(SCHEMA_PG.users);
     await pool.query(SCHEMA_PG.profiles);
     await pool.query(SCHEMA_PG.templates);
+    await pool.query(SCHEMA_PG.notifications);
+    await pool.query(SCHEMA_PG.ratings);
+    await pool.query(SCHEMA_PG.favorites);
     console.log('✅ 数据库：已连接 Postgres（DATABASE_URL）');
   } else {
     const Database = require('better-sqlite3');
@@ -89,6 +140,9 @@ async function init() {
     sqlite.exec(SCHEMA_SQLITE.users);
     sqlite.exec(SCHEMA_SQLITE.profiles);
     sqlite.exec(SCHEMA_SQLITE.templates);
+    sqlite.exec(SCHEMA_SQLITE.notifications);
+    sqlite.exec(SCHEMA_SQLITE.ratings);
+    sqlite.exec(SCHEMA_SQLITE.favorites);
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
   }
 }
@@ -212,4 +266,78 @@ async function templateReject(id) {
   sqlite.prepare(`UPDATE templates SET status='rejected' WHERE id=?`).run(id);
 }
 
-module.exports = { init, userByName, createUser, profileGet, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, USE_PG };
+/* ---------- 通知（模板审核结果推送给作者） ---------- */
+async function notify(userId, type, payload) {
+  if (USE_PG) {
+    await pool.query(
+      `INSERT INTO notifications (user_id, type, payload, created_at) VALUES ($1,$2,$3,NOW())`,
+      [userId, type, JSON.stringify(payload || {})]
+    );
+    return;
+  }
+  sqlite.prepare(
+    `INSERT INTO notifications (user_id, type, payload, created_at) VALUES (?,?,?,datetime('now'))`
+  ).run(userId, type, JSON.stringify(payload || {}));
+}
+async function notificationList(userId) {
+  const sql = `SELECT id,type,payload,is_read,created_at FROM notifications WHERE user_id=$uid ORDER BY id DESC LIMIT 50`;
+  const map = r => ({ id: r.id, type: r.type, payload: JSON.parse(r.payload || '{}'), is_read: !!r.is_read, created_at: r.created_at });
+  if (USE_PG) {
+    const r = await pool.query(sql.replace('$uid', '$1'), [userId]);
+    return r.rows.map(map);
+  }
+  return sqlite.prepare(sql.replace('$uid', '?')).all(userId).map(map);
+}
+async function notificationUnreadCount(userId) {
+  const sql = `SELECT COUNT(*) AS n FROM notifications WHERE user_id=$uid AND is_read=0`;
+  if (USE_PG) { const r = await pool.query(sql.replace('$uid', '$1'), [userId]); return Number(r.rows[0].n); }
+  const row = sqlite.prepare(sql.replace('$uid', '?')).get(userId);
+  return Number(row.n);
+}
+async function notificationMarkRead(userId) {
+  if (USE_PG) { await pool.query(`UPDATE notifications SET is_read=1 WHERE user_id=$1`, [userId]); return; }
+  sqlite.prepare(`UPDATE notifications SET is_read=1 WHERE user_id=?`).run(userId);
+}
+
+/* ---------- 模板评分（1-5 星，每用户一条，upsert） ---------- */
+async function ratingUpsert(templateId, userId, score) {
+  const s = Math.max(1, Math.min(5, Math.round(Number(score) || 1)));
+  if (USE_PG) {
+    await pool.query(
+      `INSERT INTO ratings (template_id,user_id,score) VALUES ($1,$2,$3)
+       ON CONFLICT (template_id,user_id) DO UPDATE SET score=EXCLUDED.score`,
+      [templateId, userId, s]
+    );
+    return;
+  }
+  sqlite.prepare(
+    `INSERT INTO ratings (template_id,user_id,score) VALUES (?,?,?)
+     ON CONFLICT (template_id,user_id) DO UPDATE SET score=excluded.score`
+  ).run(templateId, userId, s);
+}
+async function ratingStats(templateId) {
+  const sql = `SELECT COALESCE(AVG(score),0) AS avg, COUNT(*) AS cnt FROM ratings WHERE template_id=$tid`;
+  if (USE_PG) { const r = await pool.query(sql.replace('$tid', '$1'), [templateId]); return { avg: Number(r.rows[0].avg), count: Number(r.rows[0].cnt) }; }
+  const row = sqlite.prepare(sql.replace('$tid', '?')).get(templateId);
+  return { avg: Number(row.avg), count: Number(row.cnt) };
+}
+
+/* ---------- 模板收藏（toggle） ---------- */
+async function favoriteToggle(templateId, userId) {
+  if (USE_PG) {
+    const ex = await pool.query(`SELECT 1 FROM favorites WHERE template_id=$1 AND user_id=$2`, [templateId, userId]);
+    if (ex.rows.length) { await pool.query(`DELETE FROM favorites WHERE template_id=$1 AND user_id=$2`, [templateId, userId]); return false; }
+    await pool.query(`INSERT INTO favorites (template_id,user_id) VALUES ($1,$2)`, [templateId, userId]);
+    return true;
+  }
+  const row = sqlite.prepare(`SELECT 1 FROM favorites WHERE template_id=? AND user_id=?`).get(templateId, userId);
+  if (row) { sqlite.prepare(`DELETE FROM favorites WHERE template_id=? AND user_id=?`).run(templateId, userId); return false; }
+  sqlite.prepare(`INSERT INTO favorites (template_id,user_id) VALUES (?,?)`).run(templateId, userId);
+  return true;
+}
+async function favoriteIs(templateId, userId) {
+  if (USE_PG) { const r = await pool.query(`SELECT 1 FROM favorites WHERE template_id=$1 AND user_id=$2`, [templateId, userId]); return r.rows.length > 0; }
+  return !!sqlite.prepare(`SELECT 1 FROM favorites WHERE template_id=? AND user_id=?`).get(templateId, userId);
+}
+
+module.exports = { init, userByName, createUser, profileGet, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, USE_PG };

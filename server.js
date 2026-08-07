@@ -11,6 +11,7 @@ const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const path = require('path');
+const crypto = require('crypto');
 const db = require('./db');
 
 const PORT = process.env.PORT || 3000;
@@ -153,13 +154,20 @@ async function start() {
   app.set('trust proxy', 1);
 
   /* 安全响应头：纵深防御 XSS / MIME 嗅探 / Referrer 泄露。
-   * 不限制 frame-ancestors、不加 X-Frame-Options，以免破坏 WorkBuddy 预览的跨域 iframe；
-   * 应用无外部资源，故 default-src 收紧到 'self' 即可挡掉外部脚本/样式注入。 */
+   * 每请求生成一次性 nonce，注入到 <script>/<style> 标签（script-src/style-src 同时声明 nonce 作为纵深）；
+   * 因全站使用 inline event handler（onclick="..."），script-src 仍需保留 'unsafe-inline'
+   * —— 要彻底移除需把事件绑定改为 addEventListener（重构级，列为后续可选）。
+   * 收紧 object-src='none'（禁用插件/嵌套浏览上下文）、base-uri/form-action 已限 'self'。
+   * 注意：frame-ancestors 故意不限制，以免破坏 WorkBuddy 预览的跨域 iframe（沿用既有决策）。 */
   app.use((req, res, next) => {
+    const nonce = crypto.randomBytes(16).toString('base64');
+    req.nonce = nonce;
     res.setHeader('Content-Security-Policy',
-      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+      "default-src 'self'; " +
+      "script-src 'self' 'unsafe-inline' 'nonce-" + nonce + "'; " +
+      "style-src 'self' 'unsafe-inline' 'nonce-" + nonce + "'; " +
       "img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; " +
-      "base-uri 'self'; form-action 'self'");
+      "base-uri 'self'; form-action 'self'; object-src 'none'");
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     next();
@@ -380,12 +388,19 @@ async function start() {
       if (fs.existsSync(idxPath)) builtin = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
     } catch (e) { builtin = []; }
     const community = await db.templateListApproved();
-    const list = [
-      ...builtin.map(t => ({ ...t, source: 'builtin' })),
-      ...community.map(t => ({
+    const uid = req.session.userId || null;
+    const enriched = await Promise.all(community.map(async t => {
+      const rating = await db.ratingStats(t.id);
+      const favorited = uid ? await db.favoriteIs(t.id, uid) : false;
+      return {
         id: t.id, title: t.title, author: t.author, desc: t.desc,
-        tags: t.tags, counts: t.counts, file: 'community:' + t.id, source: 'community'
-      }))
+        tags: t.tags, counts: t.counts, file: 'community:' + t.id, source: 'community',
+        rating, favorited
+      };
+    }));
+    const list = [
+      ...builtin.map(t => ({ ...t, source: 'builtin', rating: { avg: 0, count: 0 }, favorited: false })),
+      ...enriched
     ];
     res.json(list);
   }));
@@ -431,16 +446,73 @@ async function start() {
   }));
 
   app.post('/api/admin/templates/:id/approve', requireAdmin, wrap(async (req, res) => {
-    await db.templateApprove(Number(req.params.id));
+    const id = Number(req.params.id);
+    const row = await db.templateGet(id);
+    await db.templateApprove(id);
+    if (row && row.author) {
+      const u = await db.userByName(row.author);
+      if (u) await db.notify(u.id, 'template_approved', { template_id: id, title: row.title });
+    }
     res.json({ ok: true });
   }));
 
   app.post('/api/admin/templates/:id/reject', requireAdmin, wrap(async (req, res) => {
-    await db.templateReject(Number(req.params.id));
+    const id = Number(req.params.id);
+    const row = await db.templateGet(id);
+    await db.templateReject(id);
+    if (row && row.author) {
+      const u = await db.userByName(row.author);
+      if (u) await db.notify(u.id, 'template_rejected', { template_id: id, title: row.title });
+    }
     res.json({ ok: true });
   }));
 
-  /* 静态前端 */
+  /* ---- 模板评分（登录用户 1-5 星） ---- */
+  app.post('/api/templates/:id/rate', requireAuth, wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    const score = Number(req.body && req.body.score);
+    if (!(score >= 1 && score <= 5)) return res.status(400).json({ error: '评分需在 1-5 之间' });
+    await db.ratingUpsert(id, req.session.userId, score);
+    res.json({ ok: true, rating: await db.ratingStats(id) });
+  }));
+
+  /* ---- 模板收藏（切换） ---- */
+  app.post('/api/templates/:id/favorite', requireAuth, wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    const favorited = await db.favoriteToggle(id, req.session.userId);
+    res.json({ ok: true, favorited });
+  }));
+
+  /* ---- 站内通知（审核结果推送给作者） ---- */
+  app.get('/api/notifications', requireAuth, wrap(async (req, res) => {
+    const list = await db.notificationList(req.session.userId);
+    const unread = await db.notificationUnreadCount(req.session.userId);
+    res.json({ list, unread });
+  }));
+  app.post('/api/notifications/read', requireAuth, wrap(async (req, res) => {
+    await db.notificationMarkRead(req.session.userId);
+    res.json({ ok: true });
+  }));
+
+  /* 首页 / 管理页：读取 HTML 并把一次性 nonce 注入到 <script>/<style> 标签，
+   * 与 CSP 的 'nonce-xxx' 指令配套（纵深防御注入的脚本/样式）。 */
+  function serveHtml(file) {
+    return (req, res) => {
+      try {
+        const fs = require('fs');
+        let html = fs.readFileSync(path.join(__dirname, 'public', file), 'utf8');
+        const n = req.nonce || '';
+        html = html
+          .replace(/<script(\s|>)/g, '<script nonce="' + n + '"$1')
+          .replace(/<style(\s|>)/g, '<style nonce="' + n + '"$1');
+        res.type('html').send(html);
+      } catch (e) { res.status(500).send('load error'); }
+    };
+  }
+  app.get('/', serveHtml('index.html'));
+  app.get('/admin.html', serveHtml('admin.html'));
+
+  /* 静态前端（除首页/管理页外的资源：css/js/templates 等） */
   app.use(express.static(path.join(__dirname, 'public')));
 
   app.listen(PORT, () => {

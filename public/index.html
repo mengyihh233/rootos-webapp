@@ -235,6 +235,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <span id="progressPct">0%</span>
     <span id="savedTag"></span>
     <button class="mini ghost" onclick="startOnboarding()" style="margin-left:10px;" title="新手引导">❓ 引导</button>
+    <button class="mini ghost" onclick="openNotifications()" title="通知" style="margin-left:10px;position:relative;">🔔<span id="notifDot" style="display:none;position:absolute;top:-6px;right:-6px;background:var(--accent);color:#fff;border-radius:10px;font-size:.65rem;padding:0 4px;min-width:14px;height:14px;line-height:14px;text-align:center;"></span></button>
     <span id="userBox" style="margin-left:auto;"></span>
   </div>
 </div>
@@ -640,6 +641,15 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <button class="ok" onclick="confirmMergeApply()">确认合并</button>
       <button class="ghost" onclick="closeMergeModal()">取消</button>
     </div>
+  </div>
+</div>
+
+<!-- 站内通知 -->
+<div class="modal-mask" id="notifModal" style="display:none;z-index:230;" onclick="if(event.target===this)closeNotif()">
+  <div class="modal" style="max-width:480px;text-align:left;">
+    <h3 style="margin:0 0 12px;">🔔 通知</h3>
+    <div id="notifList" style="max-height:60vh;overflow:auto;"></div>
+    <div style="text-align:right;margin-top:14px;"><button class="ghost" onclick="closeNotif()">关闭</button></div>
   </div>
 </div>
 
@@ -1922,6 +1932,13 @@ async function renderTemplates(){
       const src = t.source==='community'
         ? '<span class="chip" style="border-color:var(--ok);color:var(--ok);">社区</span>'
         : '<span class="chip" style="border-color:var(--accent);color:var(--accent);">官方</span>';
+      const social = t.source === 'community'
+        ? '<div class="tpl-meta" style="margin:10px 0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+          +'<span class="stars" data-id="'+t.id+'">'+buildStars(t.id, t.rating)+'</span>'
+          +'<small id="rateInfo-'+t.id+'" style="color:var(--dim);">'+rateInfo(t.rating)+'</small>'
+          +'<button class="ghost" id="fav-'+t.id+'" onclick="toggleFav('+t.id+',this)">'+(t.favorited?'♥ 已收藏':'♡ 收藏')+'</button>'
+        +'</div>'
+        : '';
       return '<div class="card tpl-card">'
         +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;">'
         +'<h3 style="margin:0;">'+esc(t.title)+'</h3>'
@@ -1930,6 +1947,7 @@ async function renderTemplates(){
         +'<p style="margin:8px 0;opacity:.9;">'+esc(t.desc||'')+'</p>'
         +'<div style="margin-bottom:10px;">'+(t.tags||[]).map(x=>'<span class="chip" style="border-color:var(--dim);color:var(--dim);">'+esc(x)+'</span>').join(' ')+'</div>'
         +'<div style="font-size:.85em;color:var(--dim);margin-bottom:12px;">含 '+(c.rules||0)+' 条规则 · '+(c.phases||0)+' 个阶段 · '+(c.resources||0)+' 个资源 · '+(c.retros||0)+' 条复盘</div>'
+        + social
         +'<div style="display:flex;gap:8px;flex-wrap:wrap;">'
         +'<button class="ok" onclick="askApplyMode(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">套用模板</button>'
         +'<button class="ghost" onclick="downloadTemplate(\''+esc(t.file)+'\',\''+esc(t.title)+'\')">下载 JSON</button>'
@@ -1937,6 +1955,75 @@ async function renderTemplates(){
     }).join('');
   }catch(e){ box.innerHTML='<small style="color:#f44747;">模板列表加载失败（/api/templates 接口异常？）</small>'; }
 }
+
+/* 模板卡片星级评分 / 平均分 */
+function buildStars(id, rt){
+  const avg = (rt && rt.avg) ? Number(rt.avg) : 0;
+  let s = '';
+  for (let i = 1; i <= 5; i++) {
+    const on = i <= Math.round(avg);
+    s += '<span class="star" style="cursor:pointer;color:' + (on ? 'var(--warn)' : 'var(--dim)') + ';" onclick="rateTpl(' + id + ',' + i + ')">★</span>';
+  }
+  return s;
+}
+function rateInfo(rt){
+  const avg = (rt && rt.avg) ? Number(rt.avg) : 0;
+  const cnt = (rt && rt.count) || 0;
+  return '平均 ' + (avg ? avg.toFixed(1) : '0.0') + ' (' + cnt + ' 人评)';
+}
+async function rateTpl(id, score){
+  try {
+    const r = await fetch('/api/templates/' + id + '/rate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ score }) });
+    if (!r.ok) throw new Error('rate');
+    const d = await r.json();
+    const stars = document.querySelector('.stars[data-id="' + id + '"]');
+    if (stars) stars.innerHTML = buildStars(id, d.rating);
+    const info = document.getElementById('rateInfo-' + id);
+    if (info) info.textContent = rateInfo(d.rating);
+  } catch (e) { alert('评分失败'); }
+}
+async function toggleFav(id, btn){
+  try {
+    const r = await fetch('/api/templates/' + id + '/favorite', { method: 'POST' });
+    if (!r.ok) throw new Error('fav');
+    const d = await r.json();
+    btn.textContent = d.favorited ? '♥ 已收藏' : '♡ 收藏';
+  } catch (e) { alert('操作失败'); }
+}
+
+/* 站内通知（审核结果） */
+async function updateNotifDot(unread){
+  const dot = document.getElementById('notifDot'); if (!dot) return;
+  if (unread === undefined) {
+    try { const r = await fetch('/api/notifications'); const d = await r.json(); unread = d.unread; } catch (e) { return; }
+  }
+  dot.style.display = (unread > 0) ? 'inline-block' : 'none';
+  if (unread > 0) dot.textContent = unread;
+}
+async function openNotifications(){
+  const modal = document.getElementById('notifModal'); if (!modal) return;
+  const box = document.getElementById('notifList'); if (box) box.innerHTML = '加载中…';
+  try {
+    const r = await fetch('/api/notifications'); if (!r.ok) throw 0;
+    const d = await r.json();
+    if (box) box.innerHTML = !d.list.length
+      ? '<small style="color:var(--dim)">暂无通知</small>'
+      : d.list.map(n => {
+          const title = (n.payload && n.payload.title) || '';
+          const txt = n.type === 'template_approved'
+            ? '🎉 你的模板《' + title + '》已通过审核，现已在模板市场公开！'
+            : n.type === 'template_rejected'
+            ? '📝 你的模板《' + title + '》未通过审核。'
+            : '你有新的通知';
+          return '<div class="card" style="margin:8px 0;padding:12px;' + (n.is_read ? 'opacity:.6;' : 'border-left:3px solid var(--accent);') + '">' + esc(txt) + '</div>';
+        }).join('');
+    await fetch('/api/notifications/read', { method: 'POST' });
+    updateNotifDot(0);
+  } catch (e) { if (box) box.innerHTML = '加载失败'; }
+  modal.style.display = 'flex';
+}
+function closeNotif(){ const m = document.getElementById('notifModal'); if (m) m.style.display = 'none'; }
+
 async function applyTemplate(file,title,mode,choices){
   try{
     const d=await fetchTemplateData(file);
@@ -2200,6 +2287,8 @@ function bootApp(){
   }).catch(()=>{});
   /* 新手引导：仅首次（meta.onboarded 未置位）自动弹出 */
   if(!meta || !meta.onboarded){ setTimeout(startOnboarding, 350); }
+  /* 登录态刷新通知红点 */
+  if(SESSION) updateNotifDot();
 }
 window.onload=()=>{
   loadLocal();   /* 【新增】先把本地镜像载入内存，作为多端同步基线 */

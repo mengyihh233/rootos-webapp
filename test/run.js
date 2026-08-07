@@ -209,7 +209,7 @@ function makeDocx(text) {
     daily:{}, events:[], reviews:{day:{},week:{},month:{}}, retros:[], resources:[], meta:{} };
   r = await fetch(base + '/api/templates', { method:'POST', headers: hd, body: JSON.stringify({ title:'T1', data: tplData }) });
   ok('未登录上传模板 → 401', r.status === 401);
-  r = await fetch(base + '/api/templates', { method:'POST', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify({ title:'我的模板', author:'tester', tags:['cs'], data: tplData }) });
+  r = await fetch(base + '/api/templates', { method:'POST', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify({ title:'我的模板', tags:['cs'], data: tplData }) });
   ok('登录上传模板 → 201', r.status === 201);
   r = await fetch(base + '/api/templates');
   ok('公开列表默认不含待审模板', !(await r.json()).some(x => x.title === '我的模板'));
@@ -233,6 +233,37 @@ function makeDocx(text) {
   await fetch(base + '/api/admin/templates/' + tid2 + '/reject', { method:'POST', headers: { cookie: adminCookie }, body: JSON.stringify({}) });
   r = await fetch(base + '/api/templates');
   ok('拒绝后公开列表不含该模板', !(await r.json()).some(x => x.title === '待拒模板'));
+
+  // 评分 + 收藏（针对已审核的社区模板 tid）
+  r = await fetch(base + '/api/templates/' + tid + '/rate', { method:'POST', headers:{...hd,cookie:cookie3}, body: JSON.stringify({score:5}) });
+  const rateRes = await r.json();
+  ok('登录评分模板 → 200 且 avg=5', r.status===200 && rateRes.rating && rateRes.rating.avg===5, JSON.stringify(rateRes));
+  r = await fetch(base + '/api/templates/' + tid + '/favorite', { method:'POST', headers:{...hd,cookie:cookie3} });
+  let favRes = await r.json();
+  ok('收藏模板 → favorited=true', r.status===200 && favRes.favorited===true);
+  r = await fetch(base + '/api/templates/' + tid + '/favorite', { method:'POST', headers:{...hd,cookie:cookie3} });
+  favRes = await r.json();
+  ok('再次收藏 → favorited=false（toggle）', r.status===200 && favRes.favorited===false);
+  r = await fetch(base + '/api/templates');
+  const pubList = await r.json();
+  const tplEntry = pubList.find(x => x.id === tid);
+  ok('公开列表模板携带 rating 字段', tplEntry && typeof tplEntry.rating === 'object' && tplEntry.rating.avg === 5);
+
+  // 站内通知：作者（上传者）在审批通过后应收到通知
+  r = await fetch(base + '/api/notifications', { headers:{cookie:cookie3} });
+  const notif = await r.json();
+  ok('作者收到审批通过通知（unread>=1 且含 template_approved）', r.status===200 && notif.unread>=1 && Array.isArray(notif.list) && notif.list.some(n=>n.type==='template_approved'), JSON.stringify(notif).slice(0,160));
+  r = await fetch(base + '/api/notifications/read', { method:'POST', headers:{cookie:cookie3} });
+  ok('标记通知已读 → 200', r.status===200);
+  r = await fetch(base + '/api/notifications', { headers:{cookie:cookie3} });
+  ok('标记已读后 unread=0', (await r.json()).unread===0);
+
+  // CSP 纵深：含一次性 nonce + object-src none + base-uri self（frame-ancestors 未加，以兼容 WorkBuddy 预览跨域 iframe）
+  r = await fetch(base + '/');
+  const csp = r.headers.get('content-security-policy') || '';
+  ok('CSP 含一次性 nonce', csp.includes("'nonce-"));
+  ok('CSP 含 object-src none', csp.includes("object-src 'none'"));
+  ok('CSP 含 base-uri self', csp.includes("base-uri 'self'"));
 
   child.kill();
   try { fs.unlinkSync(TMP_DB); fs.unlinkSync(TMP_DB + '-wal'); fs.unlinkSync(TMP_DB + '-shm'); } catch (e) {}
