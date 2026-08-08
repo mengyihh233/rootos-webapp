@@ -85,6 +85,8 @@ button.mini { padding:6px 12px; min-height:34px; font-size:.8rem; margin-top:0; 
 .tree { font-size:.92rem; }
 .tnode { margin:2px 0; }
 .trow { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; }
+.trow .fold { background:none; border:none; color:var(--dim); cursor:pointer; font-size:.65rem; padding:2px 4px; flex-shrink:0; }
+.trow .fold:hover { color:var(--accent); }
 .trow:hover { background:#2d2d30; }
 .trow.sel { background:#0e639c44; outline:1px solid var(--accent2); }
 .trow .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
@@ -1413,25 +1415,51 @@ function renderRulePage(){
   if(v==='tree') renderTree(); else renderRuleList(v);
   renderCatLvList();
 }
+/* 规则树折叠状态（网页端）：key = cat:{id} / lv:{cat}:{lv} / branch:{cat}，默认全展开 */
+let ruleCollapsed = new Set();
+function ruleToggle(key){
+  if(ruleCollapsed.has(key)) ruleCollapsed.delete(key); else ruleCollapsed.add(key);
+  renderRulePage();
+}
 function renderTree(){
   let html='';
   cats.forEach(c=>{
     const crs=rules.filter(r=>r.cat===c.id);
+    const catColl=ruleCollapsed.has('cat:'+c.id);
     html+='<div class="tnode"><div class="trow" data-nid="cat:'+c.id+'" onclick="selectNode(this,\'cat\',\''+c.id+'\',null,null)">'
+      +'<button class="fold" title="折叠" onclick="event.stopPropagation();ruleToggle(\'cat:'+c.id+'\')">'+(catColl?'▶':'▼')+'</button>'
       +'<span class="dot" style="background:'+c.color+';"></span><span class="tname"><b>'+esc(c.name)+'</b></span>'
-      +'<span class="cnt">'+crs.filter(r=>r.on!==false).length+' 规则</span></div><div class="tkids">';
-    levels.forEach((l,i)=>{
-      const lrs=crs.filter(r=>r.lv===l.id);
-      html+='<div class="tnode"><div class="trow" data-nid="lv:'+c.id+':'+l.id+'" onclick="selectNode(this,\'lv\',\''+c.id+'\',\''+l.id+'\',null)">'
-        +'<span class="lv-badge lv'+Math.min(i,3)+'">'+esc(l.name)+'</span>'
-        +'<span class="cnt">'+lrs.length+'</span></div><div class="tkids">';
-      /* 【v9】主链节点按 seq 排列，支链节点嵌套显示在父节点下（🔀） */
-      lrs.filter(r=>!r.parent).sort((a,b)=>(a.seq||0)-(b.seq||0)).forEach(r=>{
-        html+=ruleNodeHTML(r,c,l);
+      +'<span class="cnt">'+crs.filter(r=>r.on!==false).length+' 规则</span></div>'
+      +(catColl?'':'<div class="tkids">');
+    if(!catColl){
+      levels.forEach((l,i)=>{
+        const lrs=crs.filter(r=>r.lv===l.id);
+        const lvColl=ruleCollapsed.has('lv:'+c.id+':'+l.id);
+        html+='<div class="tnode"><div class="trow" data-nid="lv:'+c.id+':'+l.id+'" onclick="selectNode(this,\'lv\',\''+c.id+'\',\''+l.id+'\',null)">'
+          +'<button class="fold" title="折叠" onclick="event.stopPropagation();ruleToggle(\'lv:'+c.id+':'+l.id+'\')">'+(lvColl?'▶':'▼')+'</button>'
+          +'<span class="lv-badge lv'+Math.min(i,3)+'">'+esc(l.name)+'</span>'
+          +'<span class="cnt">'+lrs.length+'</span></div>'
+          +(lvColl?'':'<div class="tkids">');
+        if(!lvColl){
+          /* 【v9】主链节点按 seq 排列，支链节点嵌套显示在父节点下（🔀） */
+          lrs.filter(r=>!r.parent).sort((a,b)=>(a.seq||0)-(b.seq||0)).forEach(r=>{
+            html+=ruleNodeHTML(r,c,l);
+          });
+        }
+        html+=lvColl?'':'</div></div>';
       });
-      html+='</div></div>';
-    });
-    html+='</div></div>';
+      /* 无父级的支链（独立支链）归类到支链区 */
+      const orphanKids = crs.filter(r=>r.parent && !rules.some(x=>x.id===r.parent));
+      if(orphanKids.length){
+        const brColl=ruleCollapsed.has('branch:'+c.id);
+        html+='<div class="tnode"><div class="trow" style="color:var(--warn);" onclick="ruleToggle(\'branch:'+c.id+'\')">'
+          +'<button class="fold" onclick="event.stopPropagation();ruleToggle(\'branch:'+c.id+'\')">'+(brColl?'▶':'▼')+'</button>'
+          +'<span class="lv-badge" style="border-color:#e8912d;color:#e8912d;">支链</span><span class="cnt">'+orphanKids.length+'</span></div>'
+          +(brColl?'':'<div class="tkids">'+orphanKids.sort((a,b)=>(a.seq||0)-(b.seq||0)).map(r=>ruleNodeHTML(r,c,{id:null})).join('')+'</div>')
+          +'</div>';
+      }
+    }
+    html+=catColl?'':'</div></div>';
   });
   $('#ruleTree').innerHTML=html;
 }
@@ -1566,7 +1594,27 @@ function renderRuleList(v){
   $('#rmList').innerHTML=html;
 }
 function toggleRuleOn(id,on){ const r=ruleOf(id); if(r){ r.on=on; store.set('rules',rules); renderTodayRules(); } }
-function delRuleDirect(id){ if(confirm('删除这条规则？')){ rules=rules.filter(x=>x.id!==id); store.set('rules',rules); renderRulePage(); renderTodayRules(); toast('已删除规则'); } }
+function delRuleDirect(id){
+  const r=ruleOf(id);
+  const kidsN=rules.filter(k=>k.parent===id).length;
+  /* 自定义确认弹层（微信内置浏览器会把 confirm 替换为「关闭网页」，统一走自定义 modal） */
+  const old=document.getElementById('confirmModal'); if(old) old.remove();
+  const el=document.createElement('div'); el.id='confirmModal'; el.className='modal-mask';
+  el.style.cssText='display:flex;z-index:280;';
+  el.innerHTML='<div class="modal" style="max-width:360px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:20px 22px;">'
+    +'<div style="font-size:1.05rem;color:var(--text);margin-bottom:8px;">🗑 删除这条规则？</div>'
+    +'<div style="color:var(--dim);font-size:.9rem;line-height:1.6;margin-bottom:16px;">'+esc(r?r.t:'')+(kidsN?'<br><b style="color:var(--amber);">含 '+kidsN+' 个支链节点将一并删除</b>':'')+'</div>'
+    +'<div style="display:flex;gap:10px;justify-content:flex-end;"><button class="ghost" id="cfCancel">取消</button><button class="danger" id="cfOk">确定</button></div></div>';
+  document.body.appendChild(el);
+  const close=()=>el.remove();
+  el.querySelector('#cfCancel').onclick=close;
+  el.onclick=(e)=>{ if(e.target===el) close(); };
+  el.querySelector('#cfOk').onclick=()=>{
+    rules=rules.filter(x=>x.id!==id && x.parent!==id);
+    store.set('rules',rules); renderRulePage(); renderTodayRules(); toast('已删除规则');
+    close();
+  };
+}
 
 /* ---------- 门类 & 层级设置 ---------- */
 function renderCatLvList(){
