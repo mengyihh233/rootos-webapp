@@ -1,20 +1,58 @@
 /* =====================================================================
  * db.js — 数据库适配层
  * ---------------------------------------------------------------------
- * 默认：SQLite（本地开发 / 自托管 VPS，单文件 data.db）
- * 若设置环境变量 DATABASE_URL（Postgres 连接串，如 Neon），
- * 则自动切换到 Postgres，便于部署到无持久化磁盘的免费 Node 平台。
+ * 三种引擎（按优先级）：
+ * 1. CLOUD_STORAGE=1 + TCB_ENV（云托管环境）→ **profile 大 JSON 存云存储**（省 PG 常驻资源点），
+ *    users 等小表仍走 PG（DATABASE_URL 指向 PG 或 SQLite）
+ * 2. DATABASE_URL（Postgres 连接串，如 Neon/腾讯云）→ 全表 Postgres
+ * 3. 默认 → SQLite（本地开发 / 自托管 VPS，单文件 data.db）
  *
- * 两套实现暴露完全一致的异步接口，server.js 的业务代码无需关心底层引擎。
- * 新增字段 / 改模板都不用动这里（数据整包存成 JSON 字符串）。
+ * profile 三函数（Get/Set/UpdatedAt）在云存储引擎下读写
+ * `profiles/<uid>.json`（内容 { data: JSON字符串, updatedAt: ISO }），
+ * 其余表照常走底层数据库。server.js 业务代码无需关心引擎差异。
  * ===================================================================== */
 const path = require('path');
 
 const USE_PG = !!process.env.DATABASE_URL;
+const USE_CLOUD_STORAGE = process.env.CLOUD_STORAGE === '1' && !!(process.env.TCB_ENV);
+let _cloudApp = null; /* @cloudbase/node-sdk app 实例（惰性初始化） */
 
 let sqlite = null;   // better-sqlite3 实例
 let pool = null;     // pg Pool 实例
 let connected = false; // 是否已成功初始化（供 server 判断 DB 就绪状态）
+
+/* 云存储 profile 读写：文件不存在返回 null */
+function cloudApp() {
+  if (!_cloudApp) {
+    const cloudbase = require('@cloudbase/node-sdk');
+    _cloudApp = cloudbase.init({ env: process.env.TCB_ENV });
+  }
+  return _cloudApp;
+}
+async function cloudProfileGet(uid) {
+  try {
+    const r = await cloudApp().downloadFile({ fileList: ['profiles/' + uid + '.json'] });
+    const list = (r && r.fileList) || [];
+    if (!list[0] || list[0].code !== 0) return null;
+    const buf = list[0].fileContent;
+    const j = JSON.parse(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf));
+    return j && j.data ? j.data : null;
+  } catch (e) { return null; }
+}
+async function cloudProfileUpdatedAt(uid) {
+  try {
+    const r = await cloudApp().downloadFile({ fileList: ['profiles/' + uid + '.json'] });
+    const list = (r && r.fileList) || [];
+    if (!list[0] || list[0].code !== 0) return null;
+    const buf = list[0].fileContent;
+    const j = JSON.parse(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf));
+    return j && j.updatedAt ? j.updatedAt : null;
+  } catch (e) { return null; }
+}
+async function cloudProfileSet(uid, dataStr) {
+  const obj = JSON.stringify({ data: dataStr, updatedAt: new Date().toISOString() });
+  await cloudApp().uploadFile({ cloudPath: 'profiles/' + uid + '.json', fileContent: Buffer.from(obj, 'utf8') });
+}
 
 const SCHEMA_SQLITE = {
   users: `
@@ -312,6 +350,7 @@ async function createUser(username, pw_hash) {
 
 async function profileGet(uid) {
   if (globalThis.__incUsageDbRead) globalThis.__incUsageDbRead();
+  if (USE_CLOUD_STORAGE) return cloudProfileGet(uid);
   if (USE_PG) {
     const r = await pool.query('SELECT data FROM profiles WHERE user_id = $1', [uid]);
     return r.rows[0] ? r.rows[0].data : null;
@@ -324,6 +363,7 @@ async function profileGet(uid) {
  * 返回 ISO 字符串；无记录返回 null。 */
 async function profileUpdatedAt(uid) {
   if (globalThis.__incUsageDbRead) globalThis.__incUsageDbRead();
+  if (USE_CLOUD_STORAGE) return cloudProfileUpdatedAt(uid);
   if (USE_PG) {
     const r = await pool.query('SELECT updated_at FROM profiles WHERE user_id = $1', [uid]);
     if (!r.rows[0] || !r.rows[0].updated_at) return null;
@@ -337,6 +377,7 @@ async function profileUpdatedAt(uid) {
 
 async function profileSet(uid, dataStr) {
   if (globalThis.__incUsageDbWrite) globalThis.__incUsageDbWrite();
+  if (USE_CLOUD_STORAGE) return cloudProfileSet(uid, dataStr);
   if (USE_PG) {
     await pool.query(
       `INSERT INTO profiles (user_id, data, updated_at)
@@ -356,17 +397,26 @@ async function adminUsers() {
   const sql = `SELECT u.id, u.username, u.is_dev, u.created_at, p.updated_at, p.data
                FROM users u LEFT JOIN profiles p ON p.user_id = u.id
                ORDER BY u.id`;
+  let rows;
   if (USE_PG) {
     const r = await pool.query(sql);
-    return r.rows.map(row => ({
-      id: row.id, username: row.username, is_dev: Number(row.is_dev) === 1 ? 1 : 0,
-      created_at: row.created_at, updated_at: row.updated_at, data: row.data
-    }));
+    rows = r.rows;
+  } else {
+    rows = sqlite.prepare(sql).all();
   }
-  return sqlite.prepare(sql).all().map(row => ({
+  const out = rows.map(row => ({
     id: row.id, username: row.username, is_dev: Number(row.is_dev) === 1 ? 1 : 0,
     created_at: row.created_at, updated_at: row.updated_at, data: row.data
   }));
+  /* 云存储模式：profiles 表为空，逐个从云存储补 data/updated_at */
+  if (USE_CLOUD_STORAGE) {
+    for (const u of out) {
+      const data = await cloudProfileGet(u.id);
+      const ts = await cloudProfileUpdatedAt(u.id);
+      if (data !== null) { u.data = data; u.updated_at = ts || u.updated_at; }
+    }
+  }
+  return out;
 }
 
 /* 存储用量统计：数据库总大小 + 用户数据总大小 + 用户数（供看板展示容量） */
@@ -723,7 +773,7 @@ async function userDelete(uid, username) {
   }
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG, USE_CLOUD_STORAGE };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {
