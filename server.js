@@ -1161,6 +1161,7 @@ async function start() {
   /* ⑧b 网页端接入微信账号（反向合并）：网页账号当前登录 → 输入 wx_ 账号 + 密码 → 微信数据并入网页账号。
    * 场景：用户网页端用邮箱注册，之前在小程序用过 wx_ 账号（设过密码），现在想把两边数据合在一起。 */
   app.post('/api/account/attach-wx', requireAuth, wrap(async (req, res) => {
+    try {
     /* 🔴 用户期望的逻辑：网页端输入【微信号 + 密码】接入小程序端 wx_ 账号
      * 微信号是 wx_ 账号在「我的」里设置的友好登录标识（替代 wx_xxx 不友好的系统账号） */
     const wechat = String((req.body || {}).wechat || '').trim();
@@ -1211,6 +1212,10 @@ async function start() {
     await db.orphanWxAccount(wx.id);
     console.log('✅ 网页接入微信：', wx.username, '→', target.username);
     res.json({ ok: true, token: issueWxToken(target.id), username: target.username, display_name: (await db.userById(target.id)).display_name || '', msg: '已接入并合并数据' });
+    } catch (e) {
+      console.error('❌ attach-wx 详细错误：', e && e.stack || e);
+      if (!res.headersSent) res.status(500).json({ error: '服务器内部错误', detail: (e && e.message) || String(e) });
+    }
   }));
 
   /* 当前用户自己的失败模式分析（崩溃最多的定式 + 支链恢复率），人人可见，仅看自己 */
