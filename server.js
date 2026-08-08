@@ -746,6 +746,40 @@ async function start() {
     const list = await db.backupList(5);
     res.json({ ok: true, list });
   }));
+  /* 【方案3迁移】一键把 PG profiles 表 → 云存储（幂等，可重复执行）。
+   * 仅 CLOUD_STORAGE=1 且 DATABASE_URL 可用时提供。迁移后 profiles 表数据保留作备份。 */
+  app.post('/api/admin/migrate-profiles', requireAdmin, wrap(async (req, res) => {
+    if (!db.USE_CLOUD_STORAGE) return res.status(400).json({ error: '未启用云存储引擎（CLOUD_STORAGE=1 + TCB_ENV）' });
+    if (!process.env.DATABASE_URL) return res.status(400).json({ error: '无 DATABASE_URL（旧 PG 连接串），无法读取待迁移数据' });
+    const { Pool } = require('pg');
+    const pg = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 3 });
+    try {
+      const r = await pg.query('SELECT user_id, data, updated_at FROM profiles ORDER BY user_id');
+      const rows = r.rows;
+      let ok = 0, fail = 0, firstErr = '';
+      const cloudbase = require('@cloudbase/node-sdk');
+      const app0 = cloudbase.init({ env: process.env.TCB_ENV });
+      for (const row of rows) {
+        try {
+          const updatedAt = row.updated_at
+            ? (row.updated_at instanceof Date ? row.updated_at.toISOString()
+              : new Date(String(row.updated_at).replace(' ', 'T') + 'Z').toISOString())
+            : new Date().toISOString();
+          await app0.uploadFile({
+            cloudPath: 'profiles/' + row.user_id + '.json',
+            fileContent: Buffer.from(JSON.stringify({ data: row.data, updatedAt }), 'utf8')
+          });
+          ok++;
+        } catch (e) {
+          fail++;
+          if (!firstErr) firstErr = e.message;
+        }
+      }
+      res.json({ ok: true, migrated: ok, failed: fail, firstErr: firstErr || null });
+    } finally {
+      await pg.end();
+    }
+  }));
   /* 下载某份备份（完整 JSON，含所有用户数据） */
   app.get('/api/admin/backups/:id', requireAdmin, wrap(async (req, res) => {
     const id = Number(req.params.id);

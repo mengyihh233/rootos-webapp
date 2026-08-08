@@ -225,6 +225,11 @@ function render() {
       </div>
       <div id="backupList" style="margin-top:10px;font-size:.85rem;"></div>
       <p style="color:var(--dim);font-size:.8rem;">每天 0 点自动全库快照（含所有用户数据），自动保留最近 7 份。点击列表中的「下载」可备份到本地。</p>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);">
+        <button class="ok" onclick="migrateProfiles()">🚀 一键迁移 profile 到云存储</button>
+        <span id="migrateMsg" style="color:var(--green);font-size:.85rem;margin-left:8px;"></span>
+        <p style="color:var(--dim);font-size:.8rem;margin-top:6px;">方案3：把用户大 JSON 从 PG 搬进云存储，PG 只剩 users 小表 → 省掉 PG 常驻资源点（每月省约 6 万点）。幂等可重复执行，原 PG 数据保留作备份。</p>
+      </div>
     </div>
 
     <div class="section">
@@ -547,6 +552,27 @@ async function runBackupNow() {
   const r = await api('/api/admin/backup', { method: 'POST', body: '{}' });
   document.getElementById('backupMsg').textContent = r.ok ? '✅ 已备份' : '❌ ' + ((r.body && r.body.error) || '失败');
   loadBackups();
+}
+/* 方案3：一键迁移 profile 到云存储 */
+async function migrateProfiles() {
+  const btn = document.querySelector('button[onclick="migrateProfiles()"]');
+  const msg = document.getElementById('migrateMsg');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 迁移中…'; }
+  msg.textContent = '';
+  try {
+    const r = await api('/api/admin/migrate-profiles', { method: 'POST', body: '{}' });
+    if (r.ok && r.body && r.body.ok) {
+      msg.textContent = '✅ 迁移完成：成功 ' + r.body.migrated + '，失败 ' + r.body.failed + (r.body.firstErr ? '（' + r.body.firstErr + '）' : '');
+    } else {
+      msg.style.color = 'var(--red)';
+      msg.textContent = '❌ ' + ((r.body && r.body.error) || '迁移失败');
+    }
+  } catch (e) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = '❌ 请求失败';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 一键迁移 profile 到云存储'; }
+  }
 }
 function fmtBytes(b) { return b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : (b/1024).toFixed(1)+' KB'; }
 /* 注入规划数据（需要 ADMIN_TOKEN，弹窗输入一次） */
