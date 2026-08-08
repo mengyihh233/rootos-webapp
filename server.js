@@ -763,10 +763,17 @@ async function start() {
       const app0 = cloudbase.init({ env: CLOUD_ENV });
       for (const row of rows) {
         try {
-          const updatedAt = row.updated_at
-            ? (row.updated_at instanceof Date ? row.updated_at.toISOString()
-              : new Date(String(row.updated_at).replace(' ', 'T') + 'Z').toISOString())
-            : new Date().toISOString();
+          /* 健壮日期解析：兼容 Date 对象 / ISO 串 / 'YYYY-MM-DD HH:MM:SS'（pg 各版本返回格式不同），失败兜底用当前时间 */
+          let updatedAt = new Date().toISOString();
+          if (row.updated_at) {
+            const dv = row.updated_at instanceof Date ? row.updated_at : new Date(row.updated_at);
+            if (!isNaN(dv.getTime())) updatedAt = dv.toISOString();
+            else {
+              const s = String(row.updated_at).replace(' ', 'T');
+              const d2 = new Date(/Z$/.test(s) ? s : s + 'Z');
+              if (!isNaN(d2.getTime())) updatedAt = d2.toISOString();
+            }
+          }
           await app0.uploadFile({
             cloudPath: 'profiles/' + row.user_id + '.json',
             fileContent: Buffer.from(JSON.stringify({ data: row.data, updatedAt }), 'utf8')
