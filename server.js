@@ -130,6 +130,14 @@ function dayOff(n) {
   return d.toLocaleDateString('sv');
 }
 
+/* 注册默认显示名：用户名清洗（@ 前部分 + 白名单字符 + 截16位），清洗后不足 2 位用「用户+id」 */
+function defaultDisplayName(username, uid) {
+  let base = String(username || '').split('@')[0];
+  base = base.replace(/[^\u4e00-\u9fa5A-Za-z0-9_-]/g, '').slice(0, 16);
+  if (base.length < 2) base = '用户' + (uid || Math.floor(Math.random() * 10000));
+  return base;
+}
+
 function defaultBag() {
   /* 轻量引导版：新用户 3 天学会系统，不劝退。
    * 原完整版（5 门类 27 规则）已迁移为官方模板 classic.json，需要可在模板市场套用。
@@ -470,8 +478,10 @@ async function start() {
     /* 注册名若为邮箱格式（老用户习惯把邮箱当用户名），自动写入 email 字段（未验证），
      * 这样不绑定也能用该邮箱走「找回密码」流程 */
     if (EMAIL_RE.test(username)) await db.userBindEmail(uid, username.toLowerCase());
-    /* 注册时可选直接取名（与 /api/me/name 同一套校验）；不填则登录后强制取名 */
-    let needName = true;
+    /* 注册时可选直接取名（与 /api/me/name 同一套校验）；
+     * 🔴 修复：不填时自动用【用户名清洗后的默认名】，不再登录后强制取名——同一用户微信端已取过名，网页端注册不应重复取。
+     * 规则：取用户名 @ 前部分，过滤非法字符（仅留 中文/字母/数字/_/-），截 16 位；若清洗后仍 <2 位则用「用户+id」。 */
+    let needName = false;
     const dn = String(req.body.display_name || '').trim();
     if (dn) {
       if (dn.length >= 2 && dn.length <= 16 && /^[\u4e00-\u9fa5A-Za-z0-9_-]+$/.test(dn)) {
@@ -479,8 +489,11 @@ async function start() {
         if (holder && String(holder.display_name).toLowerCase() === dn.toLowerCase()) return res.status(409).json({ error: '该名字已被使用' });
         if (await db.userSetDisplayName(uid, dn)) needName = false;
       } else {
-        /* 非法名字不阻断注册，登录后强制取名时再提示 */
+        /* 非法名字不阻断注册，自动回落默认名 */
+        await db.userSetDisplayName(uid, defaultDisplayName(username, uid));
       }
+    } else {
+      await db.userSetDisplayName(uid, defaultDisplayName(username, uid));
     }
     await db.profileSet(uid, JSON.stringify(defaultBag()));
     req.session.userId = uid;
@@ -704,7 +717,12 @@ async function start() {
       await db.userBindOpenid(holder.id, null);
     }
     await db.userBindOpenid(u.id, openid);
-    res.json({ ok: true, token: issueWxToken(u.id), username: u.username, bound: true });
+    /* 🔴 修复：显示名继承——微信账号已有名字而网页账号空时，把名字带给网页账号（同一人不应重复取名） */
+    if (holder && holder.display_name) {
+      const tgt = await db.userById(u.id);
+      if (tgt && !tgt.display_name) await db.userSetDisplayName(u.id, holder.display_name);
+    }
+    res.json({ ok: true, token: issueWxToken(u.id), username: u.username, display_name: (await db.userById(u.id)).display_name || '', need_name: !(await db.userById(u.id)).display_name, bound: true });
   }));
 
   /* ⑥c 保存订阅消息状态（小程序点击"开启每日提醒"后） */
@@ -1111,8 +1129,10 @@ async function start() {
     /* openid 转给目标账号；当前 wx_ 账号解除（下次微信登录直接进目标账号） */
     await db.userBindOpenid(target.id, cur.wx_openid);
     await db.userBindOpenid(req.session.userId, null);
+    /* 🔴 修复：显示名继承——微信账号有名字而网页账号空时，把名字带给网页账号（同一人不应重复取名） */
+    if (cur.display_name && !target.display_name) await db.userSetDisplayName(target.id, cur.display_name);
     console.log('✅ 账号合并：', cur.username, '→', target.username);
-    res.json({ ok: true, token: issueWxToken(target.id), username: target.username, msg: '已绑定并合并数据' });
+    res.json({ ok: true, token: issueWxToken(target.id), username: target.username, display_name: (await db.userById(target.id)).display_name || '', need_name: !(await db.userById(target.id)).display_name, msg: '已绑定并合并数据' });
   }));
 
   /* 当前用户自己的失败模式分析（崩溃最多的定式 + 支链恢复率），人人可见，仅看自己 */
