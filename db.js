@@ -702,6 +702,23 @@ async function userSetDisplayName(uid, name) {
   } catch (e) { return false; }
 }
 
+/* 🔴 注册默认名（带冲突重试）：用户名清洗后若被占用，自动追加序号（名2、名3…），最多试 20 次。
+ * 防：两个用户名同前缀（lsy080511@126.com / lsy080511@163.com）→ 默认名冲突 → 用户无名字却不提示。 */
+async function setDisplayNameWithRetry(uid, username) {
+  let base = String(username || '').split('@')[0].replace(/[^\u4e00-\u9fa5A-Za-z0-9_-]/g, '').slice(0, 16);
+  if (base.length < 2) base = '用户' + (uid || Math.floor(Math.random() * 10000));
+  for (let i = 0; i < 20; i++) {
+    let name = i === 0 ? base : base + (i + 1);
+    if (name.length > 16) name = name.slice(0, 16);
+    /* 🔴 应用层唯一性检查（SQLite ALTER 加列无 UNIQUE 约束，不能依赖 DB 报错） */
+    const holder = await userByDisplayName(name, uid);
+    if (!holder || String(holder.display_name).toLowerCase() !== name.toLowerCase()) {
+      if (await userSetDisplayName(uid, name)) return true;
+    }
+  }
+  return false;
+}
+
 /* 解锁：设置 unlock_until（ISO 时间串；null/空 = 未解锁） */
 async function userUnlock(uid, untilISO) {
   if (USE_PG) {
@@ -928,7 +945,7 @@ async function wipeAllUsers() {
   return deleted;
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userSetDisplayName, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {

@@ -490,10 +490,10 @@ async function start() {
         if (await db.userSetDisplayName(uid, dn)) needName = false;
       } else {
         /* 非法名字不阻断注册，自动回落默认名 */
-        await db.userSetDisplayName(uid, defaultDisplayName(username, uid));
+        if (!(await db.setDisplayNameWithRetry(uid, username))) needName = true;
       }
     } else {
-      await db.userSetDisplayName(uid, defaultDisplayName(username, uid));
+      if (!(await db.setDisplayNameWithRetry(uid, username))) needName = true;
     }
     await db.profileSet(uid, JSON.stringify(defaultBag()));
     req.session.userId = uid;
