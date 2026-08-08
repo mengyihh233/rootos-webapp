@@ -840,12 +840,56 @@ async function start() {
   }));
 
   /* 保存数据（整包覆盖） */
+  /* ---- 滥用防护：保存接口限流（防疯狂上传/包体炸弹） ---- */
+  const _saveBuckets = new Map(); // userId -> { n, reset }
+  const SAVE_PER_MIN = Number(process.env.SAVE_PER_MIN) || 30;
+  const MAX_RULES_PER_USER = Number(process.env.MAX_RULES_PER_USER) || 500;
+  const MAX_TAGS = 30, MAX_CATS = 30, MAX_LEVELS = 12, MAX_PHASES = 60;
+  const MAX_RULE_TEXT = 200, MAX_CAT_NAME = 30, MAX_TAG_NAME = 20, MAX_PHASE_NAME = 60, MAX_RESOURCE_BODY = 20000, MAX_RETRO_TEXT = 8000;
+  function saveRateOk(uid) {
+    const now = Date.now(), win = 60 * 1000;
+    let b = _saveBuckets.get(uid);
+    if (!b || now > b.reset) { b = { n: 0, reset: now + win }; _saveBuckets.set(uid, b); }
+    b.n++;
+    if (_saveBuckets.size > 5000) { for (const [k, v] of _saveBuckets) { if (now > v.reset) _saveBuckets.delete(k); } }
+    return b.n <= SAVE_PER_MIN;
+  }
+  function trimStr(v, max) { return typeof v === 'string' ? v.slice(0, max) : v; }
+  function sanitizeBag(d) {
+    /* 字段长度裁剪 + 数量上限（防恶意灌水撑爆数据库） */
+    const clean = { ...defaultBag(), ...d };
+    if (clean.meta) { delete clean.meta.ghToken; }
+    if (Array.isArray(clean.rules)) {
+      if (clean.rules.length > MAX_RULES_PER_USER) return { error: `规则数量超过上限 ${MAX_RULES_PER_USER}` };
+      clean.rules = clean.rules.slice(0, MAX_RULES_PER_USER).map(r => ({
+        ...r,
+        t: trimStr(r.t || '', MAX_RULE_TEXT),
+        micro: trimStr(r.micro || '', MAX_RULE_TEXT)
+      }));
+    }
+    if (Array.isArray(clean.cats)) clean.cats = clean.cats.slice(0, MAX_CATS).map(c => ({ ...c, name: trimStr(c.name, MAX_CAT_NAME) }));
+    if (Array.isArray(clean.tags)) clean.tags = clean.tags.slice(0, MAX_TAGS).map(t => ({ ...t, name: trimStr(t.name, MAX_TAG_NAME) }));
+    if (Array.isArray(clean.levels)) clean.levels = clean.levels.slice(0, MAX_LEVELS);
+    if (Array.isArray(clean.phases)) clean.phases = clean.phases.slice(0, MAX_PHASES).map(p => ({
+      ...p, name: trimStr(p.name || '', MAX_PHASE_NAME), goal: trimStr(p.goal || '', MAX_PHASE_NAME)
+    }));
+    if (Array.isArray(clean.resources)) clean.resources = clean.resources.slice(0, 500).map(r => ({
+      ...r, title: trimStr(r.title || '', 80), body: trimStr(r.body || '', MAX_RESOURCE_BODY)
+    }));
+    if (Array.isArray(clean.retros)) clean.retros = clean.retros.slice(0, 200).map(r => ({
+      ...r, text: trimStr(r.text || '', MAX_RETRO_TEXT)
+    }));
+    if (clean.daily && typeof clean.daily === 'object') clean.daily = clean.daily;
+    return { ok: true, clean };
+  }
+
   app.put('/api/data', requireAuth, wrap(async (req, res) => {
     if (!req.body || typeof req.body !== 'object') return res.status(400).json({ error: '数据格式错误' });
-    const clean = { ...defaultBag(), ...req.body };
-    /* 绝不接受任何令牌类字段（本项目无 GitHub 同步，留作安全护栏） */
-    if (clean.meta) delete clean.meta.ghToken;
-    await db.profileSet(req.session.userId, JSON.stringify(clean));
+    /* 滥用防护：写入频率限流（每用户每分钟最多 N 次） */
+    if (!saveRateOk(req.session.userId)) return res.status(429).json({ error: '写入过于频繁，请稍后再试' });
+    const result = sanitizeBag(req.body);
+    if (result.error) return res.status(400).json({ error: result.error });
+    await db.profileSet(req.session.userId, JSON.stringify(result.clean));
     res.json({ ok: true });
   }));
 
