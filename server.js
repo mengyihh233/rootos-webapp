@@ -835,6 +835,25 @@ async function start() {
     catch (e) { console.warn('⚠️ cron/backup 失败：', e && e.message); res.json({ ok: false, error: e && e.message || 'backup failed' }); }
   }));
 
+  /* 导出全部用户数据（删库前保全）：管理员用，返回完整 users + profiles（含 daily 等全部字段） */
+  app.get('/api/admin/export-users', requireAdmin, wrap(async (req, res) => {
+    const users = await db.adminUsers();
+    const out = {
+      at: new Date().toISOString(),
+      app: 'rootos-webapp',
+      count: users.length,
+      users: users.map(u => ({
+        id: u.id, username: u.username, display_name: u.display_name || '',
+        email: u.email || '', wechat: u.wechat || '',
+        is_dev: u.is_dev, created_at: u.created_at,
+        profile: (() => { try { return JSON.parse(u.data || '{}'); } catch (e) { return {}; } })()
+      }))
+    };
+    res.set('Content-Type', 'application/json');
+    res.set('Content-Disposition', 'attachment; filename="rootos-full-export-' + new Date().toISOString().slice(0, 10) + '.json"');
+    res.send(JSON.stringify(out, null, 2));
+  }));
+
   /* ---- 数据备份（全库快照存 backups 表） ---- */
   app.get('/api/admin/backups', requireAdmin, wrap(async (req, res) => {
     const list = await db.backupList(Number(req.query.limit) || 10);
@@ -988,6 +1007,25 @@ async function start() {
       if (!Array.isArray(cur.levels)) cur.levels = plan.levels || [];
       if (!cur.meta) cur.meta = Object.assign({}, plan.meta || {}, { injected: true });
       else cur.meta.injected = true;
+      /* 🔴 daily 键级合并（恢复数据不丢打卡）：同天 checks/tags 并集、本地有值字段优先 */
+      {
+        const newDaily = Object.assign({}, cur.daily || {});
+        Object.keys(plan.daily || {}).forEach(k => {
+          const s = newDaily[k] || {};
+          const t = plan.daily[k] || {};
+          newDaily[k] = Object.assign({}, s, t, {
+            checks: Object.assign({}, (s.checks || {}), (t.checks || {})),
+            tags: Array.from(new Set([...(s.tags || []), ...(t.tags || [])]))
+          });
+        });
+        cur.daily = newDaily;
+      }
+      /* events 按 id 去重合并；reviews 键级合并 */
+      cur.events = mergeArr('events', 'id');
+      {
+        const sr = plan.reviews || {}, cr = cur.reviews || {};
+        cur.reviews = { day: Object.assign({}, sr.day || {}, cr.day || {}), week: Object.assign({}, sr.week || {}, cr.week || {}), month: Object.assign({}, sr.month || {}, cr.month || {}) };
+      }
     }
     await db.profileSet(u.id, JSON.stringify(cur));
     res.json({ ok: true, username, mode: String(req.body.mode) === 'overwrite' ? 'overwrite' : 'merge',
