@@ -84,6 +84,14 @@ const SCHEMA_SQLITE = {
       tpl_id  TEXT NOT NULL DEFAULT '',
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  pay_orders: `
+    CREATE TABLE IF NOT EXISTS pay_orders (
+      out_trade_no TEXT PRIMARY KEY,
+      channel      TEXT NOT NULL DEFAULT 'afdian',
+      user_id      INTEGER NOT NULL DEFAULT 0,
+      amount       TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
     )`
 };
 
@@ -157,6 +165,14 @@ const SCHEMA_PG = {
       tpl_id  TEXT NOT NULL DEFAULT '',
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT NOW()
+    )`,
+  pay_orders: `
+    CREATE TABLE IF NOT EXISTS pay_orders (
+      out_trade_no TEXT PRIMARY KEY,
+      channel      TEXT NOT NULL DEFAULT 'afdian',
+      user_id      INTEGER NOT NULL DEFAULT 0,
+      amount       TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL DEFAULT NOW()
     )`
 };
 
@@ -195,6 +211,7 @@ async function init() {
       await pool.query(SCHEMA_PG.ratings);
       await pool.query(SCHEMA_PG.favorites);
       await pool.query(SCHEMA_PG.shares);
+      await pool.query(SCHEMA_PG.pay_orders);
       /* 既有库迁移：为旧 users 表补新列（幂等，已存在则跳过） */
       for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT', 'unlock_until TEXT', 'is_dev INTEGER NOT NULL DEFAULT 0']) {
         const name = col.split(' ')[0];
@@ -248,6 +265,7 @@ async function init() {
     if (!cols.includes('unlock_until')) sqlite.exec(`ALTER TABLE users ADD COLUMN unlock_until TEXT`);
     if (!cols.includes('is_dev')) sqlite.exec(`ALTER TABLE users ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0`);
     sqlite.exec(SCHEMA_SQLITE.shares);
+    sqlite.exec(SCHEMA_SQLITE.pay_orders);
     connected = true;
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
   }
@@ -512,6 +530,26 @@ async function userSetDev(uid, isDev) {
   }
 }
 
+/* 支付订单幂等（防 webhook 重放无限解锁）：已处理过该订单号返回 true */
+async function orderSeen(outTradeNo) {
+  if (!outTradeNo) return true;
+  if (USE_PG) {
+    const r = await pool.query('SELECT 1 FROM pay_orders WHERE out_trade_no = $1', [outTradeNo]);
+    return r.rows.length > 0;
+  }
+  return !!sqlite.prepare('SELECT 1 FROM pay_orders WHERE out_trade_no = ?').get(outTradeNo);
+}async function orderMark(outTradeNo, channel, userId, amount) {
+  try {
+    if (USE_PG) {
+      await pool.query('INSERT INTO pay_orders (out_trade_no, channel, user_id, amount) VALUES ($1,$2,$3,$4) ON CONFLICT (out_trade_no) DO NOTHING',
+        [outTradeNo, channel || 'afdian', userId || 0, String(amount || '')]);
+    } else {
+      sqlite.prepare('INSERT OR IGNORE INTO pay_orders (out_trade_no, channel, user_id, amount) VALUES (?,?,?,?)')
+        .run(outTradeNo, channel || 'afdian', userId || 0, String(amount || ''));
+    }
+  } catch (e) { console.warn('💰 订单记录失败：', e.message); }
+}
+
 async function userFindByEmail(email) {
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
@@ -589,7 +627,41 @@ async function shareGet(id) {
   return sqlite.prepare(`SELECT id,owner,title,data FROM shares WHERE id=?`).get(id);
 }
 
-module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
+/* 注销账号（PIPL 第 47 条 + 微信审核硬项）：删除该用户全部关联数据与账号行
+ * templates 按 author 字符串关联（无 owner 列），故需传入 username */
+async function userDelete(uid, username) {
+  const T = (sql) => USE_PG ? sql.replace(/\?/g, '$1') : sql;
+  if (USE_PG) {
+    await pool.query('BEGIN');
+    try {
+      await pool.query(T('DELETE FROM profiles WHERE user_id = ?'), [uid]);
+      await pool.query(T('DELETE FROM templates WHERE author = ?'), [username || '']);
+      await pool.query(T('DELETE FROM notifications WHERE user_id = ?'), [uid]);
+      await pool.query(T('DELETE FROM ratings WHERE user_id = ?'), [uid]);
+      await pool.query(T('DELETE FROM favorites WHERE user_id = ?'), [uid]);
+      await pool.query(T('DELETE FROM subscriptions WHERE user_id = ?'), [uid]);
+      await pool.query(T('DELETE FROM shares WHERE owner = ?'), [uid]);
+      await pool.query(T('DELETE FROM pay_orders WHERE user_id = ?'), [uid]);
+      await pool.query(T('DELETE FROM users WHERE id = ?'), [uid]);
+      await pool.query('COMMIT');
+    } catch (e) { await pool.query('ROLLBACK'); throw e; }
+  } else {
+    const del = sqlite.transaction(() => {
+      sqlite.prepare('DELETE FROM profiles WHERE user_id = ?').run(uid);
+      sqlite.prepare('DELETE FROM templates WHERE author = ?').run(username || '');
+      sqlite.prepare('DELETE FROM notifications WHERE user_id = ?').run(uid);
+      sqlite.prepare('DELETE FROM ratings WHERE user_id = ?').run(uid);
+      sqlite.prepare('DELETE FROM favorites WHERE user_id = ?').run(uid);
+      sqlite.prepare('DELETE FROM subscriptions WHERE user_id = ?').run(uid);
+      sqlite.prepare('DELETE FROM shares WHERE owner = ?').run(uid);
+      sqlite.prepare('DELETE FROM pay_orders WHERE user_id = ?').run(uid);
+      sqlite.prepare('DELETE FROM users WHERE id = ?').run(uid);
+    });
+    del();
+  }
+}
+
+module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {

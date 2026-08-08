@@ -328,7 +328,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
           ① 注册 / 微信登录（网页版 + 小程序双端同步）<br>
           ② 一键套用模板（或从零建自己的规则树）<br>
           ③ 每天打卡 → 崩溃走支链 → 周日复盘迭代<br>
-          <span style="color:var(--text);">数据存云端 · 每日自动备份 · 微信打卡提醒</span>
+          <span style="color:var(--text);">数据存云端 · 平台托管备份 · 微信打卡提醒</span>
         </div>
         <button class="ok" style="width:100%;margin-top:14px;" onclick="showAuthLogin()">🚀 免费开始 · 注册即用</button>
         <button class="ghost" style="width:100%;margin-top:8px;" onclick="showAuthLogin()">已有账号？登录</button>
@@ -789,7 +789,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 </div>
 
 <!-- 付费墙：免费额度用尽锁定层 -->
-<div class="modal-mask" id="licenseModal" style="display:none;z-index:300;" onclick="if(event.target===this){}">
+<div class="modal-mask" id="licenseModal" style="display:none;z-index:300;" onclick="if(event.target===this)closeLicense()">
   <div class="modal" style="max-width:420px;text-align:center;">
     <h3 style="margin:0 0 8px;">🔒 免费存储空间已用完</h3>
     <div id="licenseReasons" style="color:var(--amber);font-size:.9rem;margin:0 0 12px;line-height:1.8;"></div>
@@ -797,6 +797,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       功能不限、一直免费，只有<b>云端存储</b>有个人额度。<br>支持作者后自动扩容解锁 <b style="color:var(--accent);">30 天</b>（爱发电付款备注填你的<b>用户名</b>即可自动到账）。</p>
     <button class="ok" style="width:100%;" onclick="window.open('https://afdian.com/a/yanshuo_selfness','_blank')">❤️ 爱发电支持解锁</button>
     <button class="ghost" style="width:100%;margin-top:8px;" onclick="checkLicense()">我已支持 · 重新检测</button>
+    <button class="ghost" style="width:100%;margin-top:8px;" onclick="closeLicense()">暂时不处理（可先导出备份）</button>
     <p style="color:var(--dim);font-size:.75rem;margin:10px 0 0;">付款后如未自动解锁，联系 yanshuo_selfness 手动处理</p>
   </div>
 </div>
@@ -966,17 +967,19 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
    pos_meta                            设置
    ============================================================ */
 const $ = s => document.querySelector(s);
-const today = new Date().toLocaleDateString('sv');
+let today = new Date().toLocaleDateString('sv');
 /* 跨天检测：日期变化时更新 today 并重渲染今日页（页面挂后台跨天不再记到昨天） */
 function checkDayRollover(){
-  const t = new Date().toLocaleDateString('sv');
-  if(t === today) return;
-  today = t;
-  renderTodayRules(); updateProgress();
-  if(document.querySelector('.section.active') && document.querySelector('.section.active').id==='today'){
+  try{
+    const t = new Date().toLocaleDateString('sv');
+    if(t === today) return;
+    today = t;
     renderTodayRules(); updateProgress();
-  }
-  if(SESSION) pushToServer();
+    if(document.querySelector('.section.active') && document.querySelector('.section.active').id==='today'){
+      renderTodayRules(); updateProgress();
+    }
+    if(SESSION) pushToServer();
+  }catch(e){ console.warn('跨天检测异常：', e); }
 }
 
 /* 【v8 修复】savedTimer 必须先于任何 store.set 声明（v7 的 TDZ bug 根因） */
@@ -2296,6 +2299,7 @@ function handleShareHash(){
 }
 function applySharedBag(d){
   suppressSave=true;
+  sanitizeBagIds(d);
   if(Array.isArray(d.cats)) cats=d.cats;
   if(Array.isArray(d.levels)) levels=d.levels;
   if(Array.isArray(d.rules)) rules=d.rules;
@@ -2334,8 +2338,27 @@ function importJSON(ev){
 }
 
 /* 通用：把一份数据包写回所有存储键（导入/恢复/同步共用） */
+/* 数据入口安全清洗：所有实体 id 白名单化（防恶意 id 注入内联事件构造存储型 XSS）。
+ * 在 applyBag/applySharedBag 等一切外部数据落地的入口调用。 */
+function sanitizeBagIds(d){
+  if(!d || typeof d !== 'object') return d;
+  const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+  let fixed = 0;
+  ['cats','levels','rules','tags','phases','resources','retros'].forEach(k=>{
+    if(Array.isArray(d[k])) d[k].forEach(x=>{
+      if(x && typeof x === 'object' && x.id !== undefined && !ID_RE.test(String(x.id))){
+        x.id = 'x' + Math.random().toString(36).slice(2, 8); fixed++;
+      }
+    });
+  });
+  if(Array.isArray(d.rules)) d.rules.forEach(r=>{
+    if(r && r.parent !== undefined && r.parent !== null && !ID_RE.test(String(r.parent))){ r.parent = null; fixed++; }
+  });
+  return d;
+}
 function applyBag(d){
   if(!d.rules||!d.daily) throw 0;
+  sanitizeBagIds(d);
   cats=d.cats||SEED_CATS; levels=d.levels||SEED_LEVELS; rules=d.rules;
   tags=d.tags||SEED_TAGS; daily=d.daily; events=d.events||[]; syncEventIds(); phases=d.phases||[];
   reviews=d.reviews||{day:{},week:{},month:{}};
@@ -2499,6 +2522,7 @@ async function applyTemplate(file,title,mode,choices){
  * 套用模板绝不丢运行数据 */
 function overwriteBagFromTemplate(d){
   suppressSave=true;
+  sanitizeBagIds(d);
   if(Array.isArray(d.cats)) cats=d.cats;
   if(Array.isArray(d.levels)) levels=d.levels;
   if(Array.isArray(d.rules)) rules=d.rules;
@@ -2518,6 +2542,7 @@ async function fetchTemplateData(file){
   const r=await fetch(url); if(!r.ok) throw new Error('fetch');
   const d=await r.json();
   if(!isRootBag(d)) throw new Error('模板格式不合法');
+  sanitizeBagIds(d);
   return d;
 }
 
@@ -2733,6 +2758,9 @@ async function apiPost(url, body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   return r.json();
 }
+async function apiGet(url){
+  const r=await fetch(url); return r.json();
+}
 /* 【v0.5】静默同步：每 60s 检查服务器是否有其他端（小程序/另一台设备）写的新数据。
  * 规则：
  *  - 用户正在输入（焦点在 input/textarea）→ 不打扰
@@ -2818,7 +2846,7 @@ function renderStreak(){
 function checkWeeklyGuide(){
   if(new Date().getDay()!==0) return;
   try{ if(localStorage.getItem('pos_guideDate')===today) return; }catch(e){}
-  const wk=today.slice(0,7);
+  const wk=weekKeyOf(today);
   if(reviews.week && reviews.week[wk]) return;
   if(!confirm('🗓 今天是周日，本周的周复盘还没写。\n\n花 30 分钟：回溯 → 周视图 → 复盘三问 → 迭代台改规则，闭环才会转起来。\n\n现在去做？')) return;
   try{ localStorage.setItem('pos_guideDate',today); }catch(e){}
@@ -2872,6 +2900,7 @@ function openSupport(){
   m.style.display='flex';
 }
 function closeSupport(){ const m=document.getElementById('supportModal'); if(m) m.style.display='none'; }
+function closeLicense(){ const m=document.getElementById('licenseModal'); if(m) m.style.display='none'; }
 async function doRegister(){
   const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
   if(u.length<2){ showAuth('用户名至少 2 个字符'); return; }
@@ -2946,7 +2975,32 @@ async function renderSettings(){
     +'<div><small style="color:var(--dim);">忘记密码？登录页点「忘记密码」用绑定邮箱找回；邮箱需先在本页验证绑定。</small></div>'
     +'<div><button class="ghost" onclick="doLogout()">退出登录</button> '
     +'<button class="ghost" onclick="openSupport()" style="margin-left:8px;">☕ 支持作者</button></div>'
+    +'<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border);">'
+    +'<small style="color:var(--dim);">数据可携带 & 账号注销：</small><br>'
+    +'<button class="ghost" style="margin-top:6px;" onclick="exportAccountData()">⬇️ 导出我的全部数据</button> '
+    +'<button class="danger" style="margin-top:6px;" onclick="deleteAccount()">🗑 注销账号（不可恢复）</button>'
+    +'</div>'
     +'</div>';
+}
+/* 导出全量数据（PIPL 可携带权）：调服务器接口下载 JSON */
+async function exportAccountData(){
+  try{
+    const j = await apiGet('/api/me/export');
+    if(!j || j.error){ toast((j&&j.error)||'导出失败'); return; }
+    const blob=new Blob([JSON.stringify(j,null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+    a.download='rootos-account-export-'+today+'.json'; a.click();
+    toast('✅ 已导出全部数据（含打卡/复盘/资源）');
+  }catch(e){ toast('导出失败：'+e.message); }
+}
+/* 注销账号（PIPL 第 47 条）：输入「删除」确认，调用后端删除全部数据 */
+async function deleteAccount(){
+  const t = prompt('⚠️ 注销将永久删除你的全部数据（规则/打卡/复盘/资源），不可恢复！\n\n如果确定，请输入「删除」两个字：');
+  if(!t || t.trim() !== '删除'){ toast('已取消（未输入「删除」）'); return; }
+  const r = await fetch('/api/me',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:'删除'})});
+  const j = await r.json();
+  if(j.ok){ try{ localStorage.clear(); }catch(e){} location.href='/?deleted=1'; }
+  else toast((j.error)||'注销失败');
 }
 async function sendBindCode(){
   const email=(document.getElementById('setEmail').value||'').trim();

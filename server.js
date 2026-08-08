@@ -17,9 +17,11 @@ const db = require('./db');
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'rootos-dev-secret-change-me';
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
-/* 安全：生产环境禁止使用默认 SESSION_SECRET（可被伪造 session cookie 提权） */
+/* 安全：生产环境使用默认 SESSION_SECRET 会被伪造 session/JWT 提权 → 拒绝启动 */
 if (process.env.NODE_ENV === 'production' && SESSION_SECRET === 'rootos-dev-secret-change-me') {
-  console.error('🚨 严重安全警告：生产环境使用默认 SESSION_SECRET！请立即在环境变量设置随机 SESSION_SECRET 并重新部署。');
+  console.error('🚨 严重安全警告：生产环境使用默认 SESSION_SECRET（可被伪造会话/Token 提权，任意账号接管）。');
+  console.error('   请在云托管环境变量设置随机 SESSION_SECRET（生成：openssl rand -hex 32）后重新部署。');
+  process.exit(1);
 }
 /* 微信小程序登录（code2session）：AppID 公开，AppSecret 私密，只从环境变量读、绝不进代码 */
 const WX_APPID = process.env.WX_APPID || '';
@@ -74,7 +76,7 @@ function smtpReady() { return !!(SMTP.host && SMTP.user && SMTP.pass); }
 const emailCodes = new Map();
 function issueCode(email) {
   const code = String(crypto.randomInt(100000, 1000000));
-  emailCodes.set(email, { code, exp: Date.now() + 10 * 60 * 1000 });
+  emailCodes.set(email, { code, exp: Date.now() + 10 * 60 * 1000, fail: 0 });
   /* 防内存泄漏：超 1000 条时清理过期项 */
   if (emailCodes.size > 1000) {
     const now = Date.now();
@@ -86,7 +88,11 @@ function checkCode(email, code) {
   const v = emailCodes.get(email);
   if (!v) return false;
   if (Date.now() > v.exp) { emailCodes.delete(email); return false; }
-  if (String(code || '').trim() !== v.code) return false;
+  if (String(code || '').trim() !== v.code) {
+    v.fail = (v.fail || 0) + 1;
+    if (v.fail >= 5) emailCodes.delete(email); /* 连续失败 5 次作废验证码，防爆破 */
+    return false;
+  }
   emailCodes.delete(email); /* 一次性使用 */
   return true;
 }
@@ -210,50 +216,10 @@ function computeFailureAnalysis(d0) {
 }
 
 /* ---------- Express ---------- */
-/* 自动备份：每天把全库数据快照上传到 CloudBase 云存储 backups/，保留最近 7 份。
- * 云托管自动注入 TCB_ENV（同环境云资源免密钥访问）；本地/未配置时静默跳过。 */
-async function runAutoBackup() {
-  if (!db.isConnected()) return;
-  try {
-    const rows = await db.adminUsers();
-    const snapshot = {
-      at: new Date().toISOString(),
-      app: 'rootos-webapp',
-      users: rows.map(r => ({
-        id: r.id, username: r.username,
-        email: r.email || null, wechat: r.wechat || null, wx_openid: r.wx_openid || null,
-        created_at: r.created_at, updated_at: r.updated_at, data: (() => { try { return JSON.parse(r.data || '{}'); } catch (e) { return {}; } })()
-      }))
-    };
-    const cloudbase = require('@cloudbase/node-sdk');
-    const app = cloudbase.init({ env: process.env.TCB_ENV });
-    const storage = app.storage();
-    const date = new Date().toISOString().slice(0, 10);
-    await storage.uploadFile({
-      cloudPath: 'backups/rootos-' + date + '.json',
-      fileContent: Buffer.from(JSON.stringify(snapshot, null, 1))
-    });
-    /* 清理：保留最近 7 份备份 */
-    try {
-      const list = await storage.getFileList({ prefix: 'backups/', limit: 100 });
-      const files = (list.FileList || []).filter(f => /^backups\/rootos-\d{4}-\d{2}-\d{2}\.json$/.test(f.Key));
-      files.sort((a, b) => b.Key.localeCompare(a.Key));
-      for (const f of files.slice(7)) {
-        await storage.deleteFile({ fileList: [f.Key] });
-      }
-    } catch (e) { /* 清理失败不影响本次备份 */ }
-    console.log('✅ 自动备份完成：', date);
-  } catch (e) {
-    console.warn('⚠️ 自动备份跳过（云存储未配置/不可用）：', (e && e.message) || e);
-  }
-}
-function scheduleAutoBackup() {
-  runAutoBackup();
-  /* 每天 0 点执行（用服务器时区近似） */
-  const now = new Date();
-  const msToMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1, 0).getTime() - now.getTime();
-  setTimeout(() => { runAutoBackup(); setInterval(runAutoBackup, 24 * 3600 * 1000); }, Math.max(msToMidnight, 60000));
-}
+/* 自动备份：已停用（原 CloudBase 云存储方案依赖 @cloudbase/node-sdk，体积大已移除）。
+ * 数据库可靠性依赖部署平台的托管备份（Neon Postgres 自带按时间点恢复；
+ * 云托管本地 SQLite 场景建议定期人工导出或后续接入 COS/SCF 定时方案）。
+ * 前端「每日自动备份」宣传文案已同步修改为平台托管备份说明。 */
 
 /* ============ 微信订阅消息（每日打卡提醒 / 周日复盘提醒） ============
  * 启用条件：环境变量 WX_APPID/WX_SECRET（已有）+ WX_SUB_TMPL_REMIND（打卡提醒模板 ID）
@@ -343,7 +309,7 @@ async function start() {
     next();
   });
 
-  app.use(express.json({ limit: '5mb' }));
+  app.use(express.json({ limit: '60mb' }));
   /* 会话持久化：配置了 DATABASE_URL（Neon）时把 session 存数据库——
    * 云托管实例重启/闲置回收后网页登录态不丢（不用每次刷新重新登录）。
    * 本地 SQLite 开发模式仍用内存 store。 */
@@ -416,7 +382,9 @@ async function start() {
     const ip = req.ip;
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
-    if (username.length < 2) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(400).json({ error: '用户名至少 2 个字符' }); }
+    if (username.length < 2 || username.length > 64) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(400).json({ error: '用户名需 2-64 个字符' }); }
+    /* 允许邮箱形式用户名（老用户习惯把邮箱当用户名）+ 中文/字母/数字/_-/.@ */
+    if (!/^[A-Za-z0-9_\-.@\u4e00-\u9fa5]+$/.test(username)) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(400).json({ error: '用户名包含非法字符' }); }
     if (password.length < 6) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(400).json({ error: '密码至少 6 位' }); }
     const exists = await db.userByName(username);
     if (exists) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(409).json({ error: '用户名已被占用' }); }
@@ -507,16 +475,19 @@ async function start() {
     res.json({ ok: true, msg: '若该邮箱已注册，验证码将发送至邮箱，10 分钟内有效' });
   }));
 
-  /* ④ 重置密码（邮箱 + 验证码） */
+  /* ④ 重置密码（邮箱 + 验证码）——IP 限流 + 失败 5 次作废验证码（防爆破） */
   app.post('/api/forgot/reset', wrap(async (req, res) => {
+    const ip = req.ip;
     const email = String(req.body.email || '').trim().toLowerCase();
     const code = String(req.body.code || '').trim();
     const password = String(req.body.password || '');
-    if (!checkCode(email, code)) return res.status(400).json({ error: '验证码错误或已过期' });
+    if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
+    if (!checkCode(email, code)) { authFail(ip); return res.status(400).json({ error: '验证码错误或已过期' }); }
     if (password.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
     const holder = await db.userFindByEmail(email);
     if (!holder) return res.status(404).json({ error: '该邮箱未绑定任何账号' });
     await db.userSetPassword(holder.id, bcrypt.hashSync(password, 10));
+    authOk(ip);
     res.json({ ok: true, msg: '密码已重置，请用新密码登录' });
   }));
 
@@ -661,7 +632,8 @@ async function start() {
       const data = body.data || {};
       const order = (typeof data.order === 'string' ? JSON.parse(data.order) : data.order) || {};
       const sign = String(data.sign || '');
-      const DEBUG = process.env.AFDIAN_DEBUG === '1';
+      /* 联调开关仅限非生产环境（生产环境强制验签，防残留跳过验签被白嫖） */
+      const DEBUG = process.env.AFDIAN_DEBUG === '1' && process.env.NODE_ENV !== 'production';
       if (!DEBUG) {
         /* RSA 验签：sign_str = out_trade_no+user_id+plan_id+total_amount */
         const signStr = [order.out_trade_no, order.user_id, order.plan_id, order.total_amount].join('');
@@ -680,14 +652,16 @@ async function start() {
       } else {
         console.warn('  → AFDIAN_DEBUG=1 已忽略验签（联调模式，请尽快关闭）');
       }
-      /* 备注找用户；幂等：解锁时长只增不减（重复推送不重复计） */
+      /* 备注找用户；幂等：同一订单只解锁一次（orderSeen），重复推送直接返回成功 */
       const remark = String(order.remark || '').trim(); /* 用户付款时备注填用户名 */
       if (!remark) return res.json({ ec: 200, em: 'ok（备注为空，未解锁）' });
+      if (await db.orderSeen(order.out_trade_no)) return res.json({ ec: 200, em: 'ok（重复订单，已处理）' });
       const u = await db.userByName(remark);
-      if (!u) { console.warn('💰 爱发电回调：备注「' + remark + '」未匹配到用户'); return res.json({ ec: 200, em: '未找到用户（付款备注需填用户名）' }); }
+      if (!u) { console.warn('💰 爱发电回调：备注「' + remark.replace(/[\r\n]/g, ' ').slice(0, 40) + '」未匹配到用户'); return res.json({ ec: 200, em: '未找到用户（付款备注需填用户名）' }); }
       const cur = u.unlock_until ? new Date(u.unlock_until).getTime() : 0;
       const until = new Date(Math.max(cur, Date.now()) + LICENSE_UNLOCK_DAYS * 86400000).toISOString();
       await db.userUnlock(u.id, until);
+      await db.orderMark(order.out_trade_no, 'afdian', u.id, order.total_amount);
       console.log(`💰 爱发电回调：用户 ${u.username} 解锁至 ${until.slice(0, 10)}（订单 ${order.out_trade_no}）`);
       res.json({ ec: 200, em: 'ok' });
     } catch (e) { console.warn('⚠️ 爱发电回调处理失败：', e.message); res.json({ ec: 500, em: 'error' }); }
@@ -709,11 +683,13 @@ async function start() {
 
   /* 开发者账号登录后台：用户名+密码+is_dev=1 → admin session（开发者用自己账号直接进 admin） */
   app.post('/api/admin/login-dev', wrap(async (req, res) => {
+    if (authFail(req.ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
     const u = await db.userByName(username);
-    if (!u || Number(u.is_dev) !== 1) return res.status(401).json({ error: '非开发者账号' });
-    if (!bcrypt.compareSync(password, u.pw_hash)) return res.status(401).json({ error: '密码错误' });
+    if (!u || Number(u.is_dev) !== 1) { authFail(req.ip); return res.status(401).json({ error: '非开发者账号' }); }
+    if (!bcrypt.compareSync(password, u.pw_hash)) { authFail(req.ip); return res.status(401).json({ error: '密码错误' }); }
+    authOk(req.ip);
     req.session.isAdmin = true;
     res.json({ ok: true, username });
   }));
@@ -868,10 +844,16 @@ async function start() {
     res.json({ ok: true });
   }));
 
-  /* 二维码生成（小程序「打开网页版」弹层用）：GET /api/qr?url=https://... → PNG */
+  /* 二维码生成（小程序「打开网页版」弹层用）：GET /api/qr?url=https://... → PNG
+   * 限制仅本站域名（防被当钓鱼二维码生成器滥用） */
   app.get('/api/qr', wrap(async (req, res) => {
     const url = String(req.query.url || '').slice(0, 500);
     if (!/^https?:\/\//.test(url)) return res.status(400).json({ error: '无效链接' });
+    try {
+      const u = new URL(url);
+      const host = u.hostname;
+      if (host !== req.hostname && !host.endsWith('.' + req.hostname)) return res.status(400).json({ error: '仅支持本站域名链接' });
+    } catch (e) { return res.status(400).json({ error: '无效链接' }); }
     try {
       const QR = require('qrcode');
       const png = await QR.toBuffer(url, { width: 300, margin: 1 });
@@ -932,8 +914,10 @@ async function start() {
   /* ---- 管理后台：业务数据看板 ---- */
   app.post('/api/admin/login', wrap(async (req, res) => {
     if (!ADMIN_TOKEN) return res.status(403).json({ error: '后台未启用（服务端未设置 ADMIN_TOKEN）' });
+    if (authFail(req.ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
     const token = String(req.body.token || '').trim();
-    if (token !== ADMIN_TOKEN) return res.status(401).json({ error: 'Token 错误' });
+    if (token !== ADMIN_TOKEN) { authFail(req.ip); return res.status(401).json({ error: 'Token 错误' }); }
+    authOk(req.ip);
     req.session.isAdmin = true;
     res.json({ ok: true });
   }));
@@ -1053,17 +1037,34 @@ async function start() {
         !Array.isArray(data.tags) || !Array.isArray(data.phases) || typeof data.daily !== 'object') {
       return res.status(400).json({ error: '模板数据不合法（缺 rules/cats/tags/phases/daily）' });
     }
-    const title = String(b.title || '').trim() || '未命名模板';
-    const author = String(b.author || '').trim() || (req.session.username || '匿名');
-    const desc = String(b.desc || '').trim();
-    const tags = Array.isArray(b.tags) ? b.tags.slice(0, 12).map(String) : [];
-    const counts = {
-      rules: (data.rules || []).length,
-      phases: (data.phases || []).length,
-      resources: (data.resources || []).length,
-      retros: (data.retros || []).length
+    /* 安全：只保留结构字段，剥离个人运行数据（打卡/事件/复盘/随笔），避免模板泄露隐私 */
+    const safe = {
+      cats: data.cats, levels: data.levels || [], rules: data.rules,
+      tags: data.tags, phases: data.phases, resources: data.resources || [],
+      retros: data.retros || [], daily: {},
+      meta: Object.assign({}, data.meta || {}, { _tpl: true })
     };
-    const id = await db.templateAdd({ author, title, desc, tags, counts, data });
+    /* 安全：id 白名单校验（防注入内联事件构造存储型 XSS），非法 id 拒绝入库 */
+    const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+    const bad = [];
+    ['cats', 'levels', 'rules', 'tags', 'phases', 'resources', 'retros'].forEach(k => {
+      (safe[k] || []).forEach(x => {
+        if (x && x.id && !ID_RE.test(String(x.id))) bad.push(k + '.' + String(x.id).slice(0, 20));
+      });
+    });
+    if (bad.length) return res.status(400).json({ error: '模板含非法 id（' + bad.slice(0, 3).join(', ') + '）' });
+    const title = String(b.title || '').trim().slice(0, 60) || '未命名模板';
+    /* author 强制取登录用户名，防冒用他人名义 */
+    const author = (req.session.username || '匿名').slice(0, 32);
+    const desc = String(b.desc || '').trim().slice(0, 300);
+    const tags = Array.isArray(b.tags) ? b.tags.slice(0, 12).map(String).map(t => t.slice(0, 20)) : [];
+    const counts = {
+      rules: (safe.rules || []).length,
+      phases: (safe.phases || []).length,
+      resources: (safe.resources || []).length,
+      retros: (safe.retros || []).length
+    };
+    const id = await db.templateAdd({ author, title, desc, tags, counts, data: safe });
     res.status(201).json({ ok: true, id, status: 'pending' });
   }));
 
@@ -1076,6 +1077,31 @@ async function start() {
     });
   }));
 
+  /* 导出全量数据（PIPL 数据可携带权）：GET /api/me/export → { profile, username, created_at } */
+  app.get('/api/me/export', requireAuth, wrap(async (req, res) => {
+    const raw = await db.profileGet(req.session.userId);
+    let data = {};
+    try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
+    const u = await db.userById(req.session.userId);
+    res.json({
+      exportedAt: new Date().toISOString(),
+      username: req.session.username || (u && u.username) || '',
+      created_at: u ? u.created_at : null,
+      profile: data
+    });
+  }));
+
+  /* 注销账号（PIPL 第 47 条 + 微信审核硬项）：删除全部数据，需二次确认字段 */
+  app.delete('/api/me', requireAuth, wrap(async (req, res) => {
+    const u = await db.userById(req.session.userId);
+    if (!u) return res.status(404).json({ error: '账号不存在' });
+    const confirmText = String(req.body.confirm || '');
+    if (confirmText !== '删除') return res.status(400).json({ error: '请输入「删除」以确认注销' });
+    await db.userDelete(u.id, u.username);
+    req.session.destroy(() => {});
+    res.json({ ok: true, msg: '账号已注销，数据已全部删除' });
+  }));
+
   /* 已审核社区模板的数据（供套用/下载） */
   app.get('/api/templates/community/:id', wrap(async (req, res) => {
     const id = Number(req.params.id);
@@ -1084,7 +1110,14 @@ async function start() {
     if (!row || row.status !== 'approved') return res.status(404).json({ error: '模板不存在或未审核' });
     let data = {};
     try { data = JSON.parse(row.data); } catch (e) { data = {}; }
-    res.json(data);
+    /* 兜底剥离个人运行数据（老模板可能带 daily/events/reviews），只返回结构字段 */
+    const safe = {
+      cats: data.cats || [], levels: data.levels || [], rules: data.rules || [],
+      tags: data.tags || [], phases: data.phases || [], resources: data.resources || [],
+      retros: data.retros || [], daily: {},
+      meta: Object.assign({}, data.meta || {}, { _tpl: true })
+    };
+    res.json(safe);
   }));
 
   /* ---- 管理后台：社区模板审核 ---- */
@@ -1183,8 +1216,6 @@ async function start() {
 
   /* 后台异步连接数据库：失败不退出，5s 后重试，直到 Neon 唤醒。 */
   connectDBLoop();
-  /* 每日自动备份（DB 就绪后执行；云存储不可用时静默跳过） */
-  scheduleAutoBackup();
   /* 订阅消息定时提醒（未配置模板 ID 时仅日志提示） */
   scheduleReminders();
 }
