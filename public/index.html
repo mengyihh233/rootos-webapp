@@ -679,7 +679,13 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <h3>周报（喂给 AI 迭代用）</h3>
     <button class="ok" onclick="exportWeekly()">📤 导出本周文本报告</button>
     <h3 style="margin-top:20px;">🔗 分享我的规划（生成链接，别人打开即可一键套用）</h3>
-    <p><small>分享的是你的规则/阶段/资源/笔记结构，<b>不含</b>打卡记录与账号信息。适合分享给想用同一套规划的朋友。</small></p>
+    <p><small>勾选要分享的内容（默认全部）：<b>不含</b>打卡记录 / 复盘 / 随笔 / 账号信息。</small></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <label style="margin:0;" class="chk"><input type="checkbox" id="shCats" checked> 门类/层级</label>
+      <label style="margin:0;" class="chk"><input type="checkbox" id="shRules" checked> 规则</label>
+      <label style="margin:0;" class="chk"><input type="checkbox" id="shPhases" checked> 阶段</label>
+      <label style="margin:0;" class="chk"><input type="checkbox" id="shRes" checked> 资源收藏</label>
+    </div>
     <button onclick="shareMyPlan()">📤 生成分享链接</button>
     <h3 style="margin-top:20px;">📉 我的失败模式分析</h3>
     <p><small>只有你自己能看到这份数据——它来自你记录的崩溃 / 支链事件，帮你定位最该改的定式。<b>管理后台不再独占</b>，每个账号都能看自己的。</small></p>
@@ -2201,12 +2207,18 @@ function copyReport(){ $('#reportText').select();
 
 /* ================= 分享规划（v0.6） ================= */
 async function shareMyPlan(){
-  const r=await fetch('/api/share/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  /* 用户勾选的模块（默认全选；未勾选的不进分享快照，保护隐私） */
+  const mods=[];
+  if($('#shCats')&&$('#shCats').checked) mods.push('cats','levels');
+  if($('#shRules')&&$('#shRules').checked) mods.push('rules');
+  if($('#shPhases')&&$('#shPhases').checked) mods.push('phases');
+  if($('#shRes')&&$('#shRes').checked) mods.push('resources');
+  const r=await fetch('/api/share/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({modules:mods})});
   const j=await r.json();
   if(!j.ok) return alert(j.error||'分享失败');
   const url=location.origin+'/#share='+j.id;
   navigator.clipboard.writeText(url).then(()=>{
-    alert('✅ 分享链接已复制：\n'+url+'\n\n别人打开这个链接，即可一键套用你的规划结构（不含打卡数据）。');
+    alert('✅ 分享链接已复制：\n'+url+'\n\n别人打开这个链接，即可一键套用你勾选的规划内容（不含打卡/复盘数据）。');
   }).catch(()=>prompt('复制分享链接：',url));
 }
 /* 打开含 #share=xxx 的链接：拉取分享数据，确认后一键套用（保留当前打卡/事件/设置）

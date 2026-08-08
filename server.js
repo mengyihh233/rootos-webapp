@@ -751,20 +751,25 @@ async function start() {
 
   /* ---- 分享快照（v0.6：把规划生成链接，别人打开一键套用） ---- */
 
-  /* 创建分享：把当前用户的规划结构（不含打卡/事件）存为公开只读快照，返回短链接 */
+  /* 创建分享：把当前用户的规划结构（不含打卡/事件/复盘/笔记）存为公开只读快照，返回短链接
+   * body.modules：可选数组，用户勾选要分享的模块（cats/levels/rules/tags/phases/resources），默认全部 */
   app.post('/api/share/create', requireAuth, wrap(async (req, res) => {
     const raw = await db.profileGet(req.session.userId);
     let data = {};
     try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
     if (!Array.isArray(data.rules) || !data.rules.length) return res.status(400).json({ error: '当前没有可分享的规划' });
     /* 只分享结构字段，不含运行数据（daily/events）与隐私内容（reviews 复盘/retros 随笔）；
-     * resources 规划资源作为规划的一部分保留 */
-    const share = {
-      cats: data.cats || [], levels: data.levels || [], rules: data.rules,
-      tags: data.tags || [], phases: data.phases || [],
-      resources: data.resources || [],
-      meta: Object.assign({}, data.meta || {}, { _share: true })
-    };
+     * resources 规划资源按用户勾选决定是否包含 */
+    const mods = Array.isArray(req.body.modules) && req.body.modules.length
+      ? req.body.modules.filter(m => ['cats', 'levels', 'rules', 'tags', 'phases', 'resources'].includes(m))
+      : ['cats', 'levels', 'rules', 'tags', 'phases', 'resources'];
+    const share = { meta: Object.assign({}, data.meta || {}, { _share: true, shared: mods }) };
+    if (mods.includes('cats')) share.cats = data.cats || [];
+    if (mods.includes('levels')) share.levels = data.levels || [];
+    if (mods.includes('rules')) share.rules = data.rules || [];
+    if (mods.includes('tags')) share.tags = data.tags || [];
+    if (mods.includes('phases')) share.phases = data.phases || [];
+    if (mods.includes('resources')) share.resources = data.resources || [];
     const title = String(req.body.title || '').trim().slice(0, 60)
       || (data.phases && data.phases[0] && data.phases[0].name) || '我的规划';
     const id = crypto.randomBytes(6).toString('hex');
