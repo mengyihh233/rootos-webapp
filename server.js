@@ -463,11 +463,23 @@ async function start() {
     /* 注册名若为邮箱格式（老用户习惯把邮箱当用户名），自动写入 email 字段（未验证），
      * 这样不绑定也能用该邮箱走「找回密码」流程 */
     if (EMAIL_RE.test(username)) await db.userBindEmail(uid, username.toLowerCase());
+    /* 注册时可选直接取名（与 /api/me/name 同一套校验）；不填则登录后强制取名 */
+    let needName = true;
+    const dn = String(req.body.display_name || '').trim();
+    if (dn) {
+      if (dn.length >= 2 && dn.length <= 16 && /^[\u4e00-\u9fa5A-Za-z0-9_-]+$/.test(dn)) {
+        const holder = await db.userByDisplayName(dn, uid);
+        if (holder && String(holder.display_name).toLowerCase() === dn.toLowerCase()) return res.status(409).json({ error: '该名字已被使用' });
+        if (await db.userSetDisplayName(uid, dn)) needName = false;
+      } else {
+        /* 非法名字不阻断注册，登录后强制取名时再提示 */
+      }
+    }
     await db.profileSet(uid, JSON.stringify(defaultBag()));
     req.session.userId = uid;
     req.session.username = username;
     authOk(ip);
-    res.json({ ok: true, username });
+    res.json({ ok: true, username, display_name: dn || '', need_name: needName });
   }));
 
   /* 登录：先校验密码，正确即放行并清零失败计数（不误伤终于输对的人）；
@@ -497,10 +509,27 @@ async function start() {
     const u = await db.userById(req.session.userId);
     res.json({
       username: u ? u.username : req.session.username,
+      display_name: u ? (u.display_name || '') : '',
+      need_name: u ? !u.display_name : false, /* 未取名 → 前端弹强制取名 */
       email: u ? (u.email || '') : '',
       email_verified: u ? !!u.email_verified : false,
       wechat: u ? (u.wechat || '') : ''
     });
+  }));
+
+  /* ---- 取名（显示名）：登录后必填、全局唯一、防注入 ---- */
+  app.post('/api/me/name', requireAuth, wrap(async (req, res) => {
+    const name = String(req.body.name || '').trim();
+    /* 字符规则：2-16 位，仅中文/字母/数字/下划线/连字符——天然排除 HTML 标签字符（<>"'&;）与脚本关键字 */
+    if (name.length < 2 || name.length > 16) return res.status(400).json({ error: '名字需 2-16 个字符' });
+    if (!/^[\u4e00-\u9fa5A-Za-z0-9_-]+$/.test(name)) return res.status(400).json({ error: '名字仅支持中文、字母、数字、下划线、连字符' });
+    if (/^(admin|root|system|管理员)$/i.test(name)) return res.status(400).json({ error: '该名字不可用' });
+    /* 唯一性：大小写不敏感比较（存储原样，查重用 lower） */
+    const holder = await db.userByDisplayName(name, req.session.userId);
+    if (holder && String(holder.display_name).toLowerCase() === name.toLowerCase()) return res.status(409).json({ error: '该名字已被使用' });
+    const ok = await db.userSetDisplayName(req.session.userId, name);
+    if (!ok) return res.status(500).json({ error: '设置失败，请重试' });
+    res.json({ ok: true, display_name: name });
   }));
 
   /* ---- 用户系统 v1.2：邮箱绑定 / 找回密码 / 微信绑定 / 改密 ---- */
@@ -597,7 +626,7 @@ async function start() {
     }
     if (!openid) return res.status(400).json({ error: '未获取到 openid' });
     const u = await db.userFindByOpenid(openid);
-    if (u) return res.json({ ok: true, token: issueWxToken(u.id), username: u.username, bound: true });
+    if (u) return res.json({ ok: true, token: issueWxToken(u.id), username: u.username, display_name: u.display_name || '', need_name: !u.display_name, bound: true });
     /* 未绑定：自动注册一个新账号（微信一键登录直达，无需先有网页账号）。
      * 用户名取 wx_ + openid 片段（冲突时加序号）；密码随机不可知——用户之后可在设置页设密码，
      * 或通过「绑定网页账号」把 openid 关联到已有网页账号。 */
@@ -609,7 +638,7 @@ async function start() {
     await db.userBindOpenid(uid, openid);
     await db.profileSet(uid, JSON.stringify(defaultBag()));
     console.log('✅ 微信自动注册新账号：', uname);
-    res.json({ ok: true, token: issueWxToken(uid), username: uname, bound: true, auto_registered: true });
+    res.json({ ok: true, token: issueWxToken(uid), username: uname, display_name: '', need_name: true, bound: true, auto_registered: true });
   }));
 
   /* ⑥b 小程序绑定 web 账号：openid + 网页账号密码 → 关联并签发 token（IP 限流防爆破） */

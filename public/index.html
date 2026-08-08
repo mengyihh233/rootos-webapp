@@ -348,8 +348,10 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <p><small>把「想变好」变成一套可运行、可迭代的系统。注册即用，数据存云端。</small></p>
       <input id="auUser" type="text" placeholder="账号（邮箱或用户名，≥2 字符）" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
       <input id="auPass" type="password" placeholder="密码（≥6 位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+      <input id="auName" type="text" placeholder="显示名（注册时填，2-16 位中文/字母/数字）" style="width:100%;margin-bottom:10px;box-sizing:border-box;display:none;" onkeydown="if(event.key==='Enter')doRegister()">
+      <p id="auHint" style="font-size:.78rem;color:var(--dim);margin:0 0 10px;display:none;">💡 建议同时绑定邮箱（可找回密码）或微信号，方便以后找回账号。</p>
       <button class="ok" style="width:100%;" onclick="doLogin()">登录</button>
-      <button class="ghost" style="width:100%;margin-top:8px;" onclick="doRegister()">注册新账号</button>
+      <button class="ghost" style="width:100%;margin-top:8px;" onclick="toggleRegMode()">注册新账号</button>
       <p id="authMsg" style="color:var(--danger);min-height:1.2em;"></p>
       <p style="text-align:center;margin:6px 0 0;"><a href="javascript:void(0)" onclick="showForgot()" style="color:var(--accent);font-size:.8rem;">忘记密码？用邮箱找回</a></p>
     </div>
@@ -365,6 +367,17 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <p id="forgotMsg" style="min-height:1.2em;font-size:.85rem;"></p>
       <p style="text-align:center;margin:6px 0 0;"><a href="javascript:void(0)" onclick="backToLogin()" style="color:var(--dim);font-size:.8rem;">← 返回登录</a></p>
     </div>
+  </div>
+</div>
+
+<!-- 取名层（登录后必填）：显示名全局唯一、防注入 -->
+<div id="nameModal" style="position:fixed;inset:0;z-index:10000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.55);">
+  <div class="card" style="width:340px;max-width:92vw;">
+    <h3 style="margin-top:0;">👤 取一个显示名</h3>
+    <p style="font-size:.82rem;color:var(--dim);margin:0 0 10px;">显示名会展示在界面上（如「今日打卡」「社区模板」）。<br>规则：<b>2-16 位</b>，仅中文/字母/数字/下划线/连字符；<b>全站唯一</b>，不可与他人重复。</p>
+    <input id="nmInput" type="text" maxlength="16" placeholder="例如：自律的程序员" onkeydown="if(event.key==='Enter')saveDisplayName()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+    <p id="nmMsg" style="color:var(--danger);min-height:1.2em;font-size:.8rem;"></p>
+    <button class="ok" style="width:100%;" onclick="saveDisplayName()">保存显示名</button>
   </div>
 </div>
 
@@ -3059,17 +3072,52 @@ function openSupport(){
 }
 function closeSupport(){ const m=document.getElementById('supportModal'); if(m) m.style.display='none'; }
 function closeLicense(){ const m=document.getElementById('licenseModal'); if(m) m.style.display='none'; }
+let _regMode = false;
+function toggleRegMode(){
+  _regMode = !_regMode;
+  $('#auName').style.display = _regMode ? 'block' : 'none';
+  $('#auHint').style.display = _regMode ? 'block' : 'none';
+  const b = document.querySelector('#authLogin .ok');
+  if (b) b.textContent = _regMode ? '注册' : '登录';
+  const g = document.querySelector('#authLogin .ghost');
+  if (g) g.textContent = _regMode ? '← 返回登录' : '注册新账号';
+  $('#authMsg').textContent = '';
+}
 async function doRegister(){
   const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
+  const n=document.getElementById('auName').value.trim();
   if(u.length<2){ showAuth('用户名至少 2 个字符'); return; }
   if(p.length<6){ showAuth('密码至少 6 位'); return; }
-  const j=await apiPost('/api/register',{username:u,password:p});
+  const j=await apiPost('/api/register',{username:u,password:p,display_name:n});
   if(j.ok){ await afterLogin(); } else { showAuth(j.error||'注册失败'); }
 }
 async function doLogin(){
   const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
   const j=await apiPost('/api/login',{username:u,password:p});
   if(j.ok){ await afterLogin(); } else { showAuth(j.error||'登录失败'); }
+}
+/* ---- 显示名（登录后必填）---- */
+function openNameModal(force){
+  const m=document.getElementById('nameModal');
+  if(m){ m.style.display='flex'; $('#nmInput').value=''; $('#nmMsg').textContent=''; if(force) m.querySelector('.card').dataset.force='1'; else m.querySelector('.card').dataset.force=''; }
+}
+function closeNameModal(){
+  const m=document.getElementById('nameModal');
+  if(m && m.querySelector('.card').dataset.force) return; /* 强制模式不可关闭 */
+  if(m) m.style.display='none';
+}
+async function saveDisplayName(){
+  const v=document.getElementById('nmInput').value.trim();
+  const msg=document.getElementById('nmMsg');
+  if(v.length<2 || v.length>16){ msg.textContent='名字需 2-16 个字符'; return; }
+  if(!/^[\u4e00-\u9fa5A-Za-z0-9_-]+$/.test(v)){ msg.textContent='仅支持中文、字母、数字、下划线、连字符'; return; }
+  const j=await apiPost('/api/me/name',{name:v});
+  if(j.ok){
+    closeNameModal();
+    const ub=document.getElementById('userBox');
+    if(ub) ub.innerHTML = esc(j.display_name)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
+    toast('✅ 显示名已设置：'+j.display_name);
+  } else { msg.textContent=j.error||'设置失败'; }
 }
 /* ================= 找回密码（v1.3：登录页闭环） ================= */
 function showForgot(){ $('#authLogin').style.display='none'; $('#authForgot').style.display='block'; $('#forgotMsg').textContent=''; }
@@ -3108,6 +3156,12 @@ async function renderSettings(){
   try{ j=await (await fetch('/api/me')).json(); }catch(e){}
   const email=j.email||'', verified=!!j.email_verified, wechat=j.wechat||'';
   box.innerHTML='<div style="display:flex;flex-direction:column;gap:16px;">'
+    +'<div><b style="font-size:.9rem;">显示名 <small style="color:var(--dim);font-weight:normal;">（登录后展示的名字，全站唯一）</small></b>'
+    +'<div style="margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
+    +'<span>'+(j.display_name?esc(j.display_name):'<span style="color:var(--warn);">未设置</span>')+'</span>'
+    +'<input type="text" id="setDispName" maxlength="16" placeholder="2-16 位中文/字母/数字" style="flex:1;min-width:140px;" value="'+esc(j.display_name||'')+'">'
+    +'<button class="ok mini" onclick="saveDispName()">保存</button></div>'
+    +'<small id="setDispMsg" style="color:var(--dim);"></small></div>'
     +'<div><b style="font-size:.9rem;">登录账号</b><div style="margin-top:4px;">'+esc(j.username||'')+'</div></div>'
     +'<div><b style="font-size:.9rem;">邮箱 <small style="color:var(--dim);font-weight:normal;">（验证后可找回密码）</small></b>'
     +'<div style="margin-top:6px;">'+(email
@@ -3197,6 +3251,18 @@ function setNightBarPref(on){
   checkNight();
   toast(on?'深夜提醒已开启':'深夜提醒已关闭');
 }
+async function saveDispName(){
+  const v=document.getElementById('setDispName').value.trim();
+  const msg=document.getElementById('setDispMsg');
+  if(v.length<2 || v.length>16){ msg.style.color='var(--danger)'; msg.textContent='名字需 2-16 个字符'; return; }
+  if(!/^[\u4e00-\u9fa5A-Za-z0-9_-]+$/.test(v)){ msg.style.color='var(--danger)'; msg.textContent='仅支持中文、字母、数字、下划线、连字符'; return; }
+  const j=await apiPost('/api/me/name',{name:v});
+  if(j.ok){
+    msg.style.color='var(--ok)'; msg.textContent='✅ 已保存';
+    const ub=document.getElementById('userBox');
+    if(ub) ub.innerHTML = esc(j.display_name)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
+  } else { msg.style.color='var(--danger)'; msg.textContent=j.error||'保存失败'; }
+}
 
 async function doLogout(){
   clearTimeout(serverTimer);
@@ -3237,6 +3303,12 @@ async function afterLogin(){
   }
   suppressSave=false;
   showApp(); bootApp();
+  /* 取名检查：登录/注册后必须设置显示名（唯一、防注入），未设置 → 弹强制取名层（不可关闭） */
+  try{
+    const m = await (await fetch('/api/me')).json();
+    if (m && m.need_name) openNameModal(true);
+    else if (m && m.display_name) { const ub=document.getElementById('userBox'); if(ub) ub.innerHTML = esc(m.display_name)+' <button class="mini ghost" onclick="doLogout()">退出</button>'; }
+  }catch(e){}
   /* 版本公告：登录后弹（版本变化才弹）。新手引导（onboarded 未置位）时先不弹，引导完成后再弹（见 obFinish） */
   if(meta && meta.onboarded) setTimeout(fetchNotice, 500);
   /* 付费墙检测 */
@@ -3275,11 +3347,12 @@ function bootApp(){
   $('#rvDayReview').addEventListener('input',()=>saveReview('day', $('#rvDate').value||today, $('#rvDayReview').value));
   $('#rvWeekReview').addEventListener('input',()=>saveReview('week', weekKeyOf(today), $('#rvWeekReview').value));
   $('#rvMonthReview').addEventListener('input',()=>saveReview('month', $('#rvMonth').value||today.slice(0,7), $('#rvMonthReview').value));
-  /* 显示当前用户 + 退出 */
+  /* 显示当前用户 + 退出（显示名优先，未取名回退账号名） */
   fetch('/api/me').then(r=>r.json()).then(j=>{
     if(!j.username) return;
     const ub=document.getElementById('userBox');
-    if(ub) ub.innerHTML = esc(j.username)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
+    const shown = j.display_name || j.username;
+    if(ub) ub.innerHTML = esc(shown)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
   }).catch(()=>{});
   /* 新手引导：仅首次（meta.onboarded 未置位）自动弹出 */
   if(!meta || !meta.onboarded){ setTimeout(startOnboarding, 350); }

@@ -124,6 +124,7 @@ const SCHEMA_SQLITE = {
       email_verified INTEGER NOT NULL DEFAULT 0,
       wechat         TEXT,
       wx_openid      TEXT,
+      display_name   TEXT,
       created_at     TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
   profiles: `
@@ -210,6 +211,7 @@ const SCHEMA_PG = {
       email_verified INTEGER NOT NULL DEFAULT 0,
       wechat         TEXT,
       wx_openid      TEXT,
+      display_name   TEXT,
       unlock_until   TEXT,
       is_dev         INTEGER NOT NULL DEFAULT 0,
       created_at     TEXT NOT NULL DEFAULT NOW()
@@ -326,7 +328,7 @@ async function init() {
       await pool.query(SCHEMA_PG.pay_orders);
       await pool.query(SCHEMA_PG.backups);
       /* 既有库迁移：为旧 users 表补新列（幂等，已存在则跳过） */
-      for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT', 'unlock_until TEXT', 'is_dev INTEGER NOT NULL DEFAULT 0']) {
+      for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT', 'unlock_until TEXT', 'is_dev INTEGER NOT NULL DEFAULT 0', 'display_name TEXT']) {
         const name = col.split(' ')[0];
         await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${name} ${col.slice(name.length).trim()}`);
       }
@@ -377,6 +379,7 @@ async function init() {
     if (!cols.includes('wx_openid')) sqlite.exec(`ALTER TABLE users ADD COLUMN wx_openid TEXT`);
     if (!cols.includes('unlock_until')) sqlite.exec(`ALTER TABLE users ADD COLUMN unlock_until TEXT`);
     if (!cols.includes('is_dev')) sqlite.exec(`ALTER TABLE users ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0`);
+    if (!cols.includes('display_name')) sqlite.exec(`ALTER TABLE users ADD COLUMN display_name TEXT`);
     sqlite.exec(SCHEMA_SQLITE.shares);
     sqlite.exec(SCHEMA_SQLITE.pay_orders);
     sqlite.exec(SCHEMA_SQLITE.backups);
@@ -454,7 +457,7 @@ async function profileSet(uid, dataStr) {
 }
 
 async function adminUsers() {
-  const sql = `SELECT u.id, u.username, u.is_dev, u.created_at, p.updated_at, p.data
+  const sql = `SELECT u.id, u.username, u.display_name, u.email, u.wechat, u.is_dev, u.created_at, p.updated_at, p.data
                FROM users u LEFT JOIN profiles p ON p.user_id = u.id
                ORDER BY u.id`;
   let rows;
@@ -465,7 +468,9 @@ async function adminUsers() {
     rows = sqlite.prepare(sql).all();
   }
   const out = rows.map(row => ({
-    id: row.id, username: row.username, is_dev: Number(row.is_dev) === 1 ? 1 : 0,
+    id: row.id, username: row.username, display_name: row.display_name || '',
+    email: row.email || '', wechat: row.wechat || '',
+    is_dev: Number(row.is_dev) === 1 ? 1 : 0,
     created_at: row.created_at, updated_at: row.updated_at, data: row.data
   }));
   /* 云存储模式：profiles 表为空，并发从云存储补 data/updated_at（比串行快 N 倍，用户多不卡） */
@@ -654,6 +659,30 @@ async function userById(uid) {
     return r.rows[0];
   }
   return sqlite.prepare('SELECT * FROM users WHERE id = ?').get(uid);
+}
+
+/* 显示名唯一性检查：返回占用该名的用户（不含自身）；无则 null */
+async function userByDisplayName(name, exceptUid) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT id, username, display_name FROM users WHERE display_name = $1 AND ($2::int IS NULL OR id <> $2)', [name, exceptUid || null]);
+    return r.rows[0] || null;
+  }
+  if (exceptUid) return sqlite.prepare('SELECT id, username, display_name FROM users WHERE display_name = ? AND id <> ?').get(name, exceptUid) || null;
+  return sqlite.prepare('SELECT id, username, display_name FROM users WHERE display_name = ?').get(name) || null;
+}
+
+/* 设置显示名（唯一）：成功返回 true；已被占用返回 false（不抛错，让上层给友好提示） */
+async function userSetDisplayName(uid, name) {
+  if (USE_PG) {
+    try {
+      const r = await pool.query('UPDATE users SET display_name = $1 WHERE id = $2 RETURNING id', [name, uid]);
+      return r.rows.length > 0;
+    } catch (e) { return false; /* 唯一约束冲突 */ }
+  }
+  try {
+    const r = sqlite.prepare('UPDATE users SET display_name = ? WHERE id = ?').run(name, uid);
+    return r.changes > 0;
+  } catch (e) { return false; }
 }
 
 /* 解锁：设置 unlock_until（ISO 时间串；null/空 = 未解锁） */
@@ -855,7 +884,7 @@ async function userDelete(uid, username) {
   }
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userSetDisplayName, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {

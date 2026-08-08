@@ -340,7 +340,7 @@ function usersHTML() {
   const now = Date.now();
   return `<table>
     <thead><tr>
-      <th>ID</th><th>用户名</th><th>注册时间</th>
+      <th>ID</th><th>用户名</th><th>显示名 / 邮箱 / 微信</th><th>注册时间</th>
       <th class="num">定式</th><th class="num">阶段</th><th class="num">门类</th><th class="num">标签</th>
       <th>最后更新</th>
     </tr></thead>
@@ -349,6 +349,7 @@ function usersHTML() {
       return `<tr class="${active?'active-row':''}">
         <td>${u.id}</td>
         <td>${escapeHtml(u.username)}${u.is_dev?' <span class="badge" style="background:var(--amber);color:#1e1e1e;">开发者</span>':''}${active?' <span class="badge">活跃</span>':''}</td>
+        <td>${u.display_name ? escapeHtml(u.display_name) : '<span style="color:var(--dim);">未取名</span>'}${u.email?' <small style="color:var(--dim);">'+escapeHtml(u.email)+'</small>':''}${u.wechat?' <small style="color:var(--dim);">微信:'+escapeHtml(u.wechat)+'</small>':''}</td>
         <td>${fmt(u.created_at)}</td>
         <td class="num">${u.rules}</td>
         <td class="num">${u.phases}</td>
