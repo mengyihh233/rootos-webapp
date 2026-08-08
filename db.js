@@ -899,20 +899,18 @@ async function userDelete(uid, username) {
 /* 🔴 清空全部用户数据（重新上架前使用）：清空 users 及所有关联表 + 云存储 profile/备份。
  * 返回删除数量。注意：sent_logs 保留（防提醒重复发送逻辑不受影响）。 */
 async function wipeAllUsers() {
-  const tables = ['users', 'profiles', 'templates', 'notifications', 'ratings', 'favorites', 'shares', 'subscriptions', 'pay_orders', 'backups'];
+  /* 子表先删，主表最后（无外键，但保持合理顺序）；逐个 try/catch——某表失败不阻塞其他 */
+  const tables = ['notifications', 'ratings', 'favorites', 'shares', 'subscriptions', 'pay_orders', 'backups', 'templates', 'profiles', 'users'];
   let deleted = 0;
   if (USE_PG) {
-    const r = await pool.query('SELECT COUNT(*) AS n FROM users');
-    deleted = Number(r.rows[0].n) || 0;
-    await pool.query('BEGIN');
-    try {
-      for (const t of tables) await pool.query(`DELETE FROM ${t}`);
-      await pool.query('COMMIT');
-    } catch (e) { await pool.query('ROLLBACK'); throw e; }
+    try { const r = await pool.query('SELECT COUNT(*) AS n FROM users'); deleted = Number(r.rows[0].n) || 0; } catch (e) { console.warn('wipeAllUsers: 统计用户数失败', e.message); }
+    for (const t of tables) {
+      try { await pool.query(`DELETE FROM ${t}`); console.log('  ✓ 已清空', t); }
+      catch (e) { console.warn('  ⚠️ 清空失败（跳过）:', t, e.message); }
+    }
   } else {
-    const r = sqlite.prepare('SELECT COUNT(*) AS n FROM users').get();
-    deleted = Number(r.n) || 0;
-    const del = sqlite.transaction(() => { tables.forEach(t => sqlite.prepare(`DELETE FROM ${t}`).run()); });
+    try { const r = sqlite.prepare('SELECT COUNT(*) AS n FROM users').get(); deleted = Number(r.n) || 0; } catch (e) {}
+    const del = sqlite.transaction(() => { tables.forEach(t => { try { sqlite.prepare(`DELETE FROM ${t}`).run(); } catch (e) { console.warn('⚠️ 清空失败（跳过）:', t, e.message); } }); });
     del();
   }
   /* 云存储模式：删掉所有 profiles/ 文件（列表未知，按导出文件名枚举不可行——改为按已删用户逐条删 */
