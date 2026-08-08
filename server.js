@@ -621,10 +621,14 @@ async function start() {
   const LICENSE_MB = Number(process.env.LICENSE_LIMIT_MB) || 50;
   const LICENSE_UNLOCK_DAYS = Number(process.env.LICENSE_UNLOCK_DAYS) || 30;
   app.get('/api/license/status', requireAuth, wrap(async (req, res) => {
+    const u = await db.userById(req.session.userId);
+    /* 开发者账户：永久免费（免付费墙） */
+    if (u && Number(u.is_dev) === 1) {
+      return res.json({ limited: false, reasons: [], unlockUntil: null, dev: true, usage: { rules: 0, dataBytes: 0, limitMB: LICENSE_MB, enabled: false } });
+    }
     if (!LICENSE_ENABLED) {
       return res.json({ limited: false, reasons: [], unlockUntil: null, usage: { rules: 0, dataBytes: 0, limitMB: LICENSE_MB, enabled: false } });
     }
-    const u = await db.userById(req.session.userId);
     const raw = await db.profileGet(req.session.userId);
     let data = {};
     try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
@@ -699,6 +703,69 @@ async function start() {
     const until = new Date(Date.now() + days * 86400000).toISOString();
     await db.userUnlock(u.id, until);
     res.json({ ok: true, username, unlockUntil: until });
+  }));
+
+  /* ---- 开发者账户（免付费墙 + 可登录管理后台） ---- */
+
+  /* 开发者账号登录后台：用户名+密码+is_dev=1 → admin session（开发者用自己账号直接进 admin） */
+  app.post('/api/admin/login-dev', wrap(async (req, res) => {
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
+    const u = await db.userByName(username);
+    if (!u || Number(u.is_dev) !== 1) return res.status(401).json({ error: '非开发者账号' });
+    if (!bcrypt.compareSync(password, u.pw_hash)) return res.status(401).json({ error: '密码错误' });
+    req.session.isAdmin = true;
+    res.json({ ok: true, username });
+  }));
+
+  /* 设置/取消开发者（ADMIN_TOKEN 保护）：POST /api/admin/set-dev { username, dev } */
+  app.post('/api/admin/set-dev', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    const username = String(req.body.username || '').trim();
+    const dev = req.body.dev !== false;
+    const u = await db.userByName(username);
+    if (!u) return res.status(404).json({ error: '用户不存在' });
+    await db.userSetDev(u.id, dev);
+    res.json({ ok: true, username, dev, msg: dev ? '已设为开发者（免付费墙+可登录后台）' : '已取消开发者' });
+  }));
+
+  /* 注入规划数据（ADMIN_TOKEN 保护）：POST /api/admin/inject-plan { username, plan, mode }
+   * plan = 完整 bag JSON（字符串）；mode = merge（合并，默认）| overwrite（覆盖全部） */
+  app.post('/api/admin/inject-plan', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    const username = String(req.body.username || '').trim();
+    const u = await db.userByName(username);
+    if (!u) return res.status(404).json({ error: '用户不存在' });
+    let plan = req.body.plan;
+    if (typeof plan === 'string') { try { plan = JSON.parse(plan); } catch (e) { return res.status(400).json({ error: 'plan 不是合法 JSON' }); } }
+    if (!plan || typeof plan !== 'object') return res.status(400).json({ error: 'plan 无效' });
+    const raw = await db.profileGet(u.id);
+    let cur = {};
+    try { cur = JSON.parse(raw || '{}'); } catch (e) { cur = {}; }
+    if (String(req.body.mode) === 'overwrite') {
+      cur = Object.assign({}, cur, plan);
+    } else {
+      /* merge：数组类按 id 去重追加，标量以模板为准（保留用户已有数据） */
+      const mergeArr = (key, idKey) => {
+        const src = Array.isArray(plan[key]) ? plan[key] : [];
+        const dst = Array.isArray(cur[key]) ? cur[key] : [];
+        const seen = new Set(dst.map(x => x && x[idKey]));
+        src.forEach(x => { if (x && !seen.has(x[idKey])) { dst.push(x); seen.add(x[idKey]); } });
+        return dst;
+      };
+      cur.rules = mergeArr('rules', 'id');
+      cur.phases = mergeArr('phases', 'id');
+      cur.resources = mergeArr('resources', 'id');
+      cur.retros = mergeArr('retros', 'id');
+      if (!Array.isArray(cur.tags)) cur.tags = plan.tags || [];
+      if (!Array.isArray(cur.cats)) cur.cats = plan.cats || [];
+      if (!Array.isArray(cur.levels)) cur.levels = plan.levels || [];
+      if (!cur.meta) cur.meta = Object.assign({}, plan.meta || {}, { injected: true });
+      else cur.meta.injected = true;
+    }
+    await db.profileSet(u.id, JSON.stringify(cur));
+    res.json({ ok: true, username, mode: String(req.body.mode) === 'overwrite' ? 'overwrite' : 'merge',
+      counts: { rules: (cur.rules||[]).length, phases: (cur.phases||[]).length, resources: (cur.resources||[]).length } });
   }));
 
   /* ⑦ 修改密码（需旧密码） */

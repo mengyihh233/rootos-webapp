@@ -97,6 +97,8 @@ const SCHEMA_PG = {
       email_verified INTEGER NOT NULL DEFAULT 0,
       wechat         TEXT,
       wx_openid      TEXT,
+      unlock_until   TEXT,
+      is_dev         INTEGER NOT NULL DEFAULT 0,
       created_at     TEXT NOT NULL DEFAULT NOW()
     )`,
   profiles: `
@@ -194,7 +196,7 @@ async function init() {
       await pool.query(SCHEMA_PG.favorites);
       await pool.query(SCHEMA_PG.shares);
       /* 既有库迁移：为旧 users 表补新列（幂等，已存在则跳过） */
-      for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT']) {
+      for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT', 'unlock_until TEXT', 'is_dev INTEGER NOT NULL DEFAULT 0']) {
         const name = col.split(' ')[0];
         await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${name} ${col.slice(name.length).trim()}`);
       }
@@ -244,6 +246,7 @@ async function init() {
     if (!cols.includes('wechat')) sqlite.exec(`ALTER TABLE users ADD COLUMN wechat TEXT`);
     if (!cols.includes('wx_openid')) sqlite.exec(`ALTER TABLE users ADD COLUMN wx_openid TEXT`);
     if (!cols.includes('unlock_until')) sqlite.exec(`ALTER TABLE users ADD COLUMN unlock_until TEXT`);
+    if (!cols.includes('is_dev')) sqlite.exec(`ALTER TABLE users ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0`);
     sqlite.exec(SCHEMA_SQLITE.shares);
     connected = true;
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
@@ -500,6 +503,15 @@ async function userUnlock(uid, untilISO) {
   }
 }
 
+/* 开发者标记：is_dev=1 免付费墙 + 可直接登录管理后台 */
+async function userSetDev(uid, isDev) {
+  if (USE_PG) {
+    await pool.query('UPDATE users SET is_dev = $1 WHERE id = $2', [isDev ? 1 : 0, uid]);
+  } else {
+    sqlite.prepare('UPDATE users SET is_dev = ? WHERE id = ?').run(isDev ? 1 : 0, uid);
+  }
+}
+
 async function userFindByEmail(email) {
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
@@ -577,7 +589,7 @@ async function shareGet(id) {
   return sqlite.prepare(`SELECT id,owner,title,data FROM shares WHERE id=?`).get(id);
 }
 
-module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
+module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {
