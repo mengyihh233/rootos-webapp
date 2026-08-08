@@ -334,18 +334,18 @@ async function profileSet(uid, dataStr) {
 }
 
 async function adminUsers() {
-  const sql = `SELECT u.id, u.username, u.created_at, p.updated_at, p.data
+  const sql = `SELECT u.id, u.username, u.is_dev, u.created_at, p.updated_at, p.data
                FROM users u LEFT JOIN profiles p ON p.user_id = u.id
                ORDER BY u.id`;
   if (USE_PG) {
     const r = await pool.query(sql);
     return r.rows.map(row => ({
-      id: row.id, username: row.username,
+      id: row.id, username: row.username, is_dev: Number(row.is_dev) === 1 ? 1 : 0,
       created_at: row.created_at, updated_at: row.updated_at, data: row.data
     }));
   }
   return sqlite.prepare(sql).all().map(row => ({
-    id: row.id, username: row.username,
+    id: row.id, username: row.username, is_dev: Number(row.is_dev) === 1 ? 1 : 0,
     created_at: row.created_at, updated_at: row.updated_at, data: row.data
   }));
 }
@@ -521,6 +521,15 @@ async function userUnlock(uid, untilISO) {
   }
 }
 
+/* 大小写不敏感查找（用于开发者设置等管理场景，兼容输入大小写不一致） */
+async function userByNameCI(username) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [username]);
+    return r.rows[0];
+  }
+  return sqlite.prepare('SELECT * FROM users WHERE username = ? COLLATE NOCASE').get(username);
+}
+
 /* 开发者标记：is_dev=1 免付费墙 + 可直接登录管理后台 */
 async function userSetDev(uid, isDev) {
   if (USE_PG) {
@@ -661,7 +670,7 @@ async function userDelete(uid, username) {
   }
 }
 
-module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {

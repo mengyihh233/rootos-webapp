@@ -694,15 +694,17 @@ async function start() {
     res.json({ ok: true, username });
   }));
 
-  /* 设置/取消开发者（ADMIN_TOKEN 保护）：POST /api/admin/set-dev { username, dev } */
+  /* 设置/取消开发者（ADMIN_TOKEN 保护）：POST /api/admin/set-dev { username, dev }
+   * 支持大小写不敏感匹配（微信自动注册号 wx_ 前缀场景友好） */
   app.post('/api/admin/set-dev', wrap(async (req, res) => {
     if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
     const username = String(req.body.username || '').trim();
     const dev = req.body.dev !== false;
-    const u = await db.userByName(username);
-    if (!u) return res.status(404).json({ error: '用户不存在' });
+    let u = await db.userByName(username);
+    if (!u) u = await db.userByNameCI(username);
+    if (!u) return res.status(404).json({ error: '用户不存在——去用户列表搜索确认正确用户名（微信一键登录自动注册的是 wx_ 开头）' });
     await db.userSetDev(u.id, dev);
-    res.json({ ok: true, username, dev, msg: dev ? '已设为开发者（免付费墙+可登录后台）' : '已取消开发者' });
+    res.json({ ok: true, username: u.username, dev, msg: dev ? '已设为开发者（免付费墙+可登录后台）' : '已取消开发者' });
   }));
 
   /* 注入规划数据（ADMIN_TOKEN 保护）：POST /api/admin/inject-plan { username, plan, mode }
@@ -942,6 +944,8 @@ async function start() {
         username: r.username,
         created_at: r.created_at,
         updated_at: r.updated_at,
+        is_dev: Number(r.is_dev) === 1 ? 1 : 0,
+        email: r.email || null,
         rules: data.rules ? data.rules.length : 0,
         phases: data.phases ? data.phases.length : 0,
         cats: data.cats ? data.cats.length : 0,
@@ -998,6 +1002,19 @@ async function start() {
         totalRecovered: merged.totalRecovered,
         branchRate: merged.totalCrashes ? Math.round(merged.totalRecovered / merged.totalCrashes * 100) : 0,
         topCrashed
+      },
+      /* 系统运行状态（服务器监控） */
+      sys: {
+        uptimeSec: Math.round(process.uptime()),
+        startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+        node: process.version,
+        arch: process.platform + '/' + process.arch,
+        pid: process.pid,
+        memoryMB: Math.round(process.memoryUsage().rss / 1048576),
+        heapMB: Math.round(process.memoryUsage().heapUsed / 1048576),
+        dbEngine: db.USE_PG ? 'Postgres (Neon)' : 'SQLite',
+        dbConnected: db.isConnected(),
+        env: process.env.NODE_ENV || 'development'
       },
       generatedAt: new Date().toISOString()
     });

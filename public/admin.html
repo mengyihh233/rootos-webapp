@@ -83,6 +83,11 @@ function fmt(dt) {
   const p = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+function fmtUptime(sec) {
+  if (sec == null) return '—';
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return (d > 0 ? d + ' 天 ' : '') + (h > 0 || d > 0 ? h + ' 时 ' : '') + m + ' 分';
+}
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -157,9 +162,24 @@ function render() {
         <div class="sub">生成于 ${fmt(s.generatedAt)} · 点击「刷新」获取最新</div>
       </div>
       <div class="right">
+        <a href="https://console.cloud.tencent.com/tcb" target="_blank" class="ghost" style="text-decoration:none;">☁️ 腾讯云托管</a>
+        <a href="https://mp.weixin.qq.com" target="_blank" class="ghost" style="text-decoration:none;">💬 微信公众平台</a>
         <button class="ghost" onclick="refreshStats()">⟳ 刷新</button>
         <button class="ghost" onclick="doLogout()">退出登录</button>
       </div>
+    </div>
+
+    <div class="section" style="margin-top:14px;">
+      <h2>🖥 服务器运行状态</h2>
+      <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
+        <div class="card"><div class="num" style="font-size:18px;">${s.sys ? fmtUptime(s.sys.uptimeSec) : '—'}</div><div class="lbl">运行时长</div></div>
+        <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.node : '—'}</div><div class="lbl">Node 版本</div></div>
+        <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.memoryMB + ' MB' : '—'}</div><div class="lbl">内存占用 (RSS)</div></div>
+        <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.heapMB + ' MB' : '—'}</div><div class="lbl">堆内存 (Heap)</div></div>
+        <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.dbEngine : '—'}</div><div class="lbl">数据库引擎</div></div>
+        <div class="card"><div class="num" style="font-size:18px;color:${s.sys && s.sys.dbConnected ? 'var(--green)' : 'var(--red)'};">${s.sys && s.sys.dbConnected ? '✅ 已连接' : '❌ 未连接'}</div><div class="lbl">数据库状态</div></div>
+      </div>
+      <p style="color:var(--dim);font-size:.78rem;margin:8px 0 0;">PID ${s.sys ? s.sys.pid : '—'} · ${s.sys ? s.sys.arch : ''} · 启动于 ${s.sys ? fmt(s.sys.startedAt) : '—'} · 环境 ${s.sys ? s.sys.env : '—'}</p>
     </div>
 
     <div class="cards">
@@ -187,12 +207,13 @@ function render() {
     <div class="section">
       <h2>👑 开发者账户（免付费墙 + 可直接登录本后台）</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input id="devUser" placeholder="用户名" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+        <input id="devUser" placeholder="用户名（多个用逗号分隔）" style="flex:1;min-width:180px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
         <button class="ok" onclick="setDev(true)">设为开发者</button>
         <button class="ghost" onclick="setDev(false)">取消开发者</button>
         <span id="devMsg" style="color:var(--amber);font-size:.85rem;"></span>
       </div>
-      <p style="color:var(--dim);font-size:.8rem;">开发者账号：付费墙永不锁定；可用自己的用户名+密码在登录页直接进入本管理后台。</p>
+      <p style="color:var(--dim);font-size:.8rem;">开发者账号：付费墙永不锁定；可用自己的用户名+密码在登录页直接进入本后台。<b style="color:var(--amber);">支持批量</b>（如 yanshuo_selfness,wx_abc123,partner）。</p>
+      <div id="devList" style="margin-top:8px;font-size:.8rem;"></div>
     </div>
 
     <div class="section">
@@ -240,6 +261,7 @@ function render() {
   const us = document.getElementById('userSearch');
   if (us) us.addEventListener('input', () => { userFilter = us.value.trim(); renderUserTableOnly(); });
   loadTplReview();
+  renderDevList();
 }
 
 /* 只重渲染用户表（搜索输入时调用，避免整页闪烁） */
@@ -297,7 +319,7 @@ function usersHTML() {
       const active = u.updated_at && (now - new Date(u.updated_at).getTime()) <= 7*86400000;
       return `<tr class="${active?'active-row':''}">
         <td>${u.id}</td>
-        <td>${escapeHtml(u.username)}${active?' <span class="badge">活跃</span>':''}</td>
+        <td>${escapeHtml(u.username)}${u.is_dev?' <span class="badge" style="background:var(--amber);color:#1e1e1e;">开发者</span>':''}${active?' <span class="badge">活跃</span>':''}</td>
         <td>${fmt(u.created_at)}</td>
         <td class="num">${u.rules}</td>
         <td class="num">${u.phases}</td>
@@ -410,16 +432,33 @@ async function unlockUser() {
   document.getElementById('unlockMsg').textContent = r.ok ? `✅ 已解锁 ${username} ${days} 天` : (r.body && r.body.error) || '解锁失败';
   document.getElementById('unlockUser').value = '';
 }
-/* 设置/取消开发者（需要 ADMIN_TOKEN，弹窗输入一次） */
+/* 设置/取消开发者（需要 ADMIN_TOKEN，弹窗输入一次）；支持逗号分隔批量 */
 async function setDev(dev) {
-  const username = document.getElementById('devUser').value.trim();
-  if (!username) { document.getElementById('devMsg').textContent = '请输入用户名'; return; }
+  const raw = document.getElementById('devUser').value.trim();
+  if (!raw) { document.getElementById('devMsg').textContent = '请输入用户名（可逗号分隔多个）'; return; }
+  const names = raw.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean);
   const token = prompt('请输入 ADMIN_TOKEN（用于身份确认）：');
   if (!token) return;
   document.getElementById('devMsg').textContent = '处理中…';
-  const r = await api('/api/admin/set-dev', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ username, dev }) });
-  document.getElementById('devMsg').textContent = r.ok ? (r.body.msg || '✅ 完成') : (r.body && r.body.error) || '失败';
-  if (r.ok) { document.getElementById('devUser').value = ''; }
+  const okList = [], failList = [];
+  for (const username of names) {
+    const r = await api('/api/admin/set-dev', { method: 'POST', headers: { 'Authorization': 'Bearer ' + token }, body: JSON.stringify({ username, dev }) });
+    if (r.ok) okList.push(username);
+    else failList.push(username + '(' + ((r.body && r.body.error) || '失败') + ')');
+  }
+  document.getElementById('devMsg').textContent =
+    (okList.length ? '✅ 已' + (dev ? '设为开发者：' : '取消开发者：') + okList.join(', ') : '') +
+    (failList.length ? ' ⚠️ ' + failList.join('；') + (dev ? ' —— 用户不存在？去下方用户列表搜索确认正确用户名（微信一键登录自动注册的账号是 wx_ 开头）' : '') : '');
+  if (okList.length) { document.getElementById('devUser').value = ''; refreshStatsSilent(); renderDevList(); }
+}
+/* 显示当前开发者列表 */
+function renderDevList() {
+  const box = document.getElementById('devList');
+  if (!box) return;
+  const devs = (S && S.users || []).filter(u => u.is_dev === 1);
+  box.innerHTML = devs.length
+    ? '<b style="color:var(--green);">当前开发者（' + devs.length + '）：</b> ' + devs.map(u => '<span style="color:var(--accent);">' + escapeHtml(u.username) + '</span>').join('、')
+    : '<span style="color:var(--dim);">当前还没有开发者账号</span>';
 }
 /* 注入规划数据（需要 ADMIN_TOKEN，弹窗输入一次） */
 async function injectPlan(mode) {
