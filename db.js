@@ -77,6 +77,13 @@ const SCHEMA_SQLITE = {
       title      TEXT NOT NULL DEFAULT '',
       data       TEXT NOT NULL DEFAULT '{}',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  subs: `
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      user_id INTEGER PRIMARY KEY,
+      tpl_id  TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
 };
 
@@ -140,6 +147,13 @@ const SCHEMA_PG = {
       owner      INTEGER NOT NULL DEFAULT 0,
       title      TEXT NOT NULL DEFAULT '',
       data       TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT NOW()
+    )`,
+  subs: `
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      user_id INTEGER PRIMARY KEY,
+      tpl_id  TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT NOW()
     )`
 };
@@ -553,4 +567,24 @@ async function shareGet(id) {
   return sqlite.prepare(`SELECT id,owner,title,data FROM shares WHERE id=?`).get(id);
 }
 
-module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, USE_PG };
+module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
+
+/* ---------- 订阅消息（微信提醒） ---------- */
+async function subUpsert(userId, tplId, enabled) {
+  const e = enabled ? 1 : 0;
+  if (USE_PG) {
+    await pool.query(`INSERT INTO subscriptions (user_id, tpl_id, enabled) VALUES ($1,$2,$3)
+      ON CONFLICT (user_id) DO UPDATE SET tpl_id=$2, enabled=$3`, [userId, tplId, e]);
+  } else {
+    sqlite.prepare(`INSERT INTO subscriptions (user_id, tpl_id, enabled) VALUES (?,?,?)
+      ON CONFLICT(user_id) DO UPDATE SET tpl_id=excluded.tpl_id, enabled=excluded.enabled`).run(userId, tplId, e);
+  }
+}
+/* 已开启订阅的用户（含 openid），用于定时下发提醒 */
+async function subEnabledList() {
+  const sql = `SELECT s.user_id, s.tpl_id, u.wx_openid FROM subscriptions s
+               JOIN users u ON u.id = s.user_id
+               WHERE s.enabled = 1 AND u.wx_openid IS NOT NULL`;
+  if (USE_PG) { const r = await pool.query(sql); return r.rows.map(x => ({ userId: x.user_id, tplId: x.tpl_id, openid: x.wx_openid })); }
+  return sqlite.prepare(sql).all().map(x => ({ userId: x.user_id, tplId: x.tpl_id, openid: x.wx_openid }));
+}

@@ -286,6 +286,65 @@ function scheduleAutoBackup() {
   setTimeout(() => { runAutoBackup(); setInterval(runAutoBackup, 24 * 3600 * 1000); }, Math.max(msToMidnight, 60000));
 }
 
+/* ============ 微信订阅消息（每日打卡提醒 / 周日复盘提醒） ============
+ * 启用条件：环境变量 WX_APPID/WX_SECRET（已有）+ WX_SUB_TMPL_REMIND（打卡提醒模板 ID）
+ * 可选 WX_SUB_TMPL_WEEKLY（复盘提醒模板 ID）。模板字段需含 thing1（内容）/time2（时间）。 */
+let wxTokenCache = { token: '', expire: 0 };
+async function getWxAccessToken() {
+  if (wxTokenCache.token && Date.now() < wxTokenCache.expire) return wxTokenCache.token;
+  const appid = process.env.WX_APPID, secret = process.env.WX_SECRET;
+  if (!appid || !secret) return null;
+  try {
+    const r = await fetch(`https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}`).then(r => r.json());
+    if (r.access_token) { wxTokenCache = { token: r.access_token, expire: Date.now() + (Number(r.expires_in) - 300) * 1000 }; return r.access_token; }
+    console.warn('⚠️ 获取微信 access_token 失败：', (r && r.errmsg) || JSON.stringify(r));
+  } catch (e) { console.warn('⚠️ access_token 请求异常：', e.message); }
+  return null;
+}
+async function sendSubMsg(openid, tplId, page, data) {
+  const token = await getWxAccessToken();
+  if (!token) return false;
+  try {
+    const r = await fetch('https://api.weixin.qq.com/cgi-bin/message/subscribe/send?access_token=' + token, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ touser: openid, template_id: tplId, page: page || 'pages/today/today', data })
+    }).then(r => r.json());
+    if (r.errcode && r.errcode !== 0) console.warn('⚠️ 订阅消息发送失败：', r.errcode, r.errmsg);
+    return r.errcode === 0;
+  } catch (e) { console.warn('⚠️ 订阅消息发送异常：', e.message); return false; }
+}
+/* 定时下发：每天 20:00 打卡提醒；周日 20:00 复盘提醒 */
+async function sendReminders() {
+  const tplRemind = process.env.WX_SUB_TMPL_REMIND;
+  const tplWeekly = process.env.WX_SUB_TMPL_WEEKLY;
+  if (!tplRemind && !tplWeekly) {
+    console.warn('⏰ 订阅消息未启用：请配置环境变量 WX_SUB_TMPL_REMIND（打卡提醒模板 ID），可选 WX_SUB_TMPL_WEEKLY（周复盘模板 ID）');
+    return;
+  }
+  const subs = await db.subEnabledList();
+  if (!subs.length) return;
+  const isSunday = new Date().getDay() === 0;
+  for (const s of subs) {
+    try {
+      if (isSunday && tplWeekly) {
+        await sendSubMsg(s.openid, tplWeekly, 'pages/review/review', { thing1: { value: '周末复盘：花 30 分钟回顾本周，迭代你的定式' }, time2: { value: '20:00' } });
+      } else if (tplRemind) {
+        await sendSubMsg(s.openid, tplRemind, 'pages/today/today', { thing1: { value: '今天也要跑通你的定式链，打开 ROOT-OS 打卡' }, time2: { value: '20:00' } });
+      }
+    } catch (e) { console.warn('⚠️ 提醒下发失败（用户 ' + s.userId + '）：', e.message); }
+  }
+}
+function scheduleReminders() {
+  let lastSendKey = '';
+  setInterval(async () => {
+    const now = new Date();
+    if (now.getHours() === 20 && now.getMinutes() < 30) {
+      const key = now.toISOString().slice(0, 10) + (now.getDay() === 0 ? '-wk' : '-day');
+      if (key !== lastSendKey) { lastSendKey = key; try { await sendReminders(); } catch (e) { console.warn('⚠️ 提醒下发失败：', e.message); } }
+    }
+  }, 10 * 60 * 1000);
+}
+
 async function start() {
   /* 注意：数据库初始化不再阻塞启动、也不再因连接失败而退出进程。
    * 先起 HTTP 服务（让 Render 健康检查 / 通过），数据库由后台循环异步连接，
@@ -568,6 +627,14 @@ async function start() {
     }
     await db.userBindOpenid(u.id, openid);
     res.json({ ok: true, token: issueWxToken(u.id), username: u.username, bound: true });
+  }));
+
+  /* ⑥c 保存订阅消息状态（小程序点击"开启每日提醒"后） */
+  app.post('/api/wechat/subscribe', requireAuth, wrap(async (req, res) => {
+    const tplId = String(req.body.tplId || '').trim();
+    const enabled = req.body.enabled !== false;
+    await db.subUpsert(req.session.userId, tplId, enabled);
+    res.json({ ok: true, enabled });
   }));
 
   /* ⑦ 修改密码（需旧密码） */
@@ -958,6 +1025,8 @@ async function start() {
   connectDBLoop();
   /* 每日自动备份（DB 就绪后执行；云存储不可用时静默跳过） */
   scheduleAutoBackup();
+  /* 订阅消息定时提醒（未配置模板 ID 时仅日志提示） */
+  scheduleReminders();
 }
 
 function connectDBLoop() {
