@@ -801,13 +801,13 @@ async function start() {
   app.post('/api/cron/remind', wrap(async (req, res) => {
     if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
     const before = Date.now();
-    await sendReminders();
-    res.json({ ok: true, ms: Date.now() - before });
+    try { await sendReminders(); res.json({ ok: true, ms: Date.now() - before }); }
+    catch (e) { console.warn('⚠️ cron/remind 失败：', e && e.message); res.json({ ok: false, error: e && e.message || 'remind failed' }); }
   }));
   app.post('/api/cron/backup', wrap(async (req, res) => {
     if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
-    await runAutoBackup();
-    res.json({ ok: true });
+    try { await runAutoBackup(); res.json({ ok: true }); }
+    catch (e) { console.warn('⚠️ cron/backup 失败：', e && e.message); res.json({ ok: false, error: e && e.message || 'backup failed' }); }
   }));
 
   /* ---- 数据备份（全库快照存 backups 表） ---- */
