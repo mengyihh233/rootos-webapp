@@ -90,7 +90,7 @@ button.mini { padding:6px 12px; min-height:34px; font-size:.8rem; margin-top:0; 
 .trow:hover { background:#2d2d30; }
 .trow.sel { background:#0e639c44; outline:1px solid var(--accent2); }
 .trow .dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-.trow .tname { flex:1; }
+.trow .tname { flex:1; min-width:0; overflow-wrap:anywhere; word-break:break-word; }
 .trow .cnt { font-size:.7rem; color:var(--dim); font-family:var(--mono); }
 .tkids { margin-left:14px; padding-left:12px; border-left:1px solid var(--border); }
 .grp-title { font-family:var(--mono); font-size:.78rem; color:var(--dim); margin:14px 0 2px; letter-spacing:1px; }
@@ -100,8 +100,8 @@ button.mini { padding:6px 12px; min-height:34px; font-size:.8rem; margin-top:0; 
 #nodePanel.show, #tagPanel.show { display:block; }
 
 .ev { display:flex; gap:10px; align-items:flex-start; background:var(--bg2); border:1px solid var(--border);
-  border-left-width:4px; padding:8px 12px; border-radius:8px; margin-top:8px; font-size:.88rem; }
-.ev .t { font-family:var(--mono); color:var(--dim); font-size:.78rem; white-space:nowrap; padding-top:2px; }
+  border-left-width:4px; padding:8px 12px; border-radius:8px; margin-top:8px; font-size:.88rem; flex-wrap:wrap; }
+.ev .t { font-family:var(--mono); color:var(--dim); font-size:.78rem; white-space:nowrap; padding-top:2px; flex:1; min-width:0; overflow-wrap:anywhere; }
 .ev .x { margin-left:auto; color:var(--dim); cursor:pointer; background:none; border:none; padding:0 4px; min-height:0; font-size:1rem; }
 .ev-crash{border-left-color:var(--danger);} .ev-relapse{border-left-color:#e8912d;} .ev-sleep{border-left-color:#569cd6;}
 .ev-debug{border-left-color:var(--ok);} .ev-mile{border-left-color:var(--warn);} .ev-note{border-left-color:var(--dim);}
@@ -142,7 +142,8 @@ table.wk th { color:var(--dim); font-weight:normal; font-size:.75rem; }
 .stat .k { font-size:.72rem; color:var(--dim); }
 .phedit { display:none; margin-top:10px; border-top:1px dashed var(--border); padding-top:10px; }
 .phedit.show { display:block; }
-.phase-head { cursor:pointer; display:flex; align-items:center; gap:6px; user-select:none; }
+.phase-head { cursor:pointer; display:flex; align-items:center; gap:6px; user-select:none; flex-wrap:wrap; }
+.phase-head h3 { min-width:0; overflow-wrap:anywhere; word-break:break-word; }
 .phase-head:hover h3 { color:var(--accent); }
 .caret { font-size:.75rem; color:var(--dim); transition:transform .15s; flex:0 0 auto; }
 .phase.mini { padding:8px 14px; }
@@ -205,7 +206,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 .node-card.broken{ border-color:var(--danger); }
 .node-card.broken .nc-state{ color:var(--danger); }
 .node-card.dim{ opacity:.38; filter:grayscale(60%); pointer-events:none; }
-.node-card .nc-text{ flex:1; font-size:.9rem; line-height:1.45; color:var(--txt); }
+.node-card .nc-text{ flex:1; min-width:0; overflow-wrap:anywhere; word-break:break-word; font-size:.9rem; line-height:1.45; color:var(--txt); }
 .node-card .nc-actions{ display:flex; gap:4px; flex-shrink:0; }
 .node-card .nc-actions button{ margin:0; }
 #todayChain{ margin-bottom:10px; padding:10px 12px; border:1px dashed var(--ok); border-radius:10px;
@@ -213,7 +214,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 #todayChain .chain-title{ font-size:.78rem; color:var(--ok); font-weight:500; margin-bottom:6px; letter-spacing:.04em; }
 #todayChain .chain-grp{ display:flex; align-items:flex-start; gap:8px; margin:4px 0; flex-wrap:wrap; }
 #todayChain .chain-cat{ flex-shrink:0; font-size:.8rem; font-weight:500; padding-top:2px; }
-#todayChain .chain-path{ font-size:.82rem; font-family:var(--mono); line-height:1.8; color:var(--txt); }
+#todayChain .chain-path{ font-size:.82rem; font-family:var(--mono); line-height:1.8; color:var(--txt); overflow-wrap:anywhere; word-break:break-word; }
 #todayChain .chain-arr{ color:var(--dim); margin:0 4px; }
 
 @media (max-width:600px){
@@ -1939,7 +1940,7 @@ function renderResources(){
       + '<span style="flex-shrink:0;margin-left:8px;"><button class="x" title="编辑" onclick="event.stopPropagation();editResource(\''+escJs(id)+'\')">✎</button>'
       + ' <button class="x" title="删除" onclick="event.stopPropagation();delResource(\''+escJs(id)+'\')">×</button></span>'
       + '</div>'
-      + (open ? '<div style="white-space:pre-wrap;margin-top:6px;color:var(--txt);">'+linkify(body)+'</div>'
+      + (open ? '<div style="white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;margin-top:6px;color:var(--txt);">'+linkify(body)+'</div>'
         + '<div style="margin-top:4px;color:var(--dim);font-size:12px;">🕓 '+(r.updatedAt||'')+'</div>' : '')
       + '</div>';
   }).join('');
