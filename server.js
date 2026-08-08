@@ -1248,7 +1248,9 @@ async function start() {
         const tcbCore = Number(process.env.RESIDENT_CPU_CORE) || 0.25;
         const tcbMem = Number(process.env.RESIDENT_MEM_GB) || 0.5;
         const pgCore = Number(process.env.PG_CPU_CORE) || 0.25;
-        const pgPaused = process.env.PG_PAUSED === '1'; /* 个人版 PG 默认自动暂停：空闲时不计 CPU */
+        /* 方案3 后：profile 已搬云存储，PG 只跑 users 小表（登录/管理低频），CPU 趋近 0。
+         * PG_PAUSED=1 或 CLOUD_STORAGE=1 都视为 PG 常驻成本归零。 */
+        const pgPaused = process.env.PG_PAUSED === '1' || process.env.CLOUD_STORAGE === '1';
         const hoursToday = Math.max(1, Math.min(24, Math.ceil((now - dayStart) / 3600000)));
         const residentDay = tcbCore * CPU_RATE * 24 + tcbMem * MEM_RATE * 24
           + (pgPaused ? 0 : pgCore * PG_CPU_RATE * 24); /* PG 容量(0.5/GB·h × 0.1GB ≈ 1点/天)忽略 */

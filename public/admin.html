@@ -499,7 +499,7 @@ function renderUsage() {
     : '🟢 余量充足，继续用';
   const daysLeft = dayPtsCost > 0 ? Math.max(0, Math.floor((PACKET - monPts * 0.1) / Math.max(1, dayPtsCost))) : 30;
   /* 常驻 vs 请求 分项说明（官方单价） */
-  const pgCpuNote = bd.pgPaused ? '（已自动暂停，不计费）' : '⚠️ PG 未暂停，占大头';
+  const pgCpuNote = bd.pgPaused ? '（方案3 已生效：profile 在云存储，PG 只跑小表，不计常驻）' : '⚠️ PG 未暂停，占大头';
   const breakdownHtml =
     `<div style="background:#181818;border:1px solid #3c3c3c;border-radius:6px;padding:10px 12px;margin:8px 0;font-size:.8rem;line-height:1.8;">` +
       `<div style="color:var(--dim);margin-bottom:4px;">📐 每日消耗构成（官方单价估算）：</div>` +

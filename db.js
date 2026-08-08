@@ -14,10 +14,11 @@
 const path = require('path');
 
 const USE_PG = !!process.env.DATABASE_URL;
-/* 云存储引擎启用条件：CLOUD_STORAGE=1 即可（@cloudbase/node-sdk 在云托管环境自动从 context 鉴权拿环境）。
- * 环境 ID 多来源探测：TCB_ENV > TCB_ENV_ID > SCF_NAMESPACE > 空（SDK 自动识别） */
+/* 云存储引擎启用条件：CLOUD_STORAGE=1 且 存在云凭证（TENCENTCLOUD_SECRETID 永久密钥，或 TENCENTCLOUD_SESSIONTOKEN 临时）。
+ * 教训：容器型云托管不自动注入密钥，需手动配；无凭证时启用会连不上 → 视为未启用，本地开发安全。 */
 const CLOUD_ENV = process.env.TCB_ENV || process.env.TCB_ENV_ID || process.env.SCF_NAMESPACE || '';
-const USE_CLOUD_STORAGE = process.env.CLOUD_STORAGE === '1';
+const HAS_CLOUD_CRED = !!(process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY);
+const USE_CLOUD_STORAGE = process.env.CLOUD_STORAGE === '1' && HAS_CLOUD_CRED;
 let _cloudApp = null; /* @cloudbase/node-sdk app 实例（惰性初始化） */
 
 let sqlite = null;   // better-sqlite3 实例
@@ -28,7 +29,13 @@ let connected = false; // 是否已成功初始化（供 server 判断 DB 就绪
 function cloudApp() {
   if (!_cloudApp) {
     const cloudbase = require('@cloudbase/node-sdk');
-    _cloudApp = cloudbase.init({ env: CLOUD_ENV });
+    /* 显式传凭证（容器型云托管不自动注入，需手动配 TENCENTCLOUD_SECRETID/SECRETKEY） */
+    _cloudApp = cloudbase.init({
+      env: CLOUD_ENV,
+      secretId: process.env.TENCENTCLOUD_SECRETID || undefined,
+      secretKey: process.env.TENCENTCLOUD_SECRETKEY || undefined,
+      sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined
+    });
   }
   return _cloudApp;
 }
@@ -412,12 +419,18 @@ async function adminUsers() {
     id: row.id, username: row.username, is_dev: Number(row.is_dev) === 1 ? 1 : 0,
     created_at: row.created_at, updated_at: row.updated_at, data: row.data
   }));
-  /* 云存储模式：profiles 表为空，逐个从云存储补 data/updated_at */
+  /* 云存储模式：profiles 表为空，并发从云存储补 data/updated_at（比串行快 N 倍，用户多不卡） */
   if (USE_CLOUD_STORAGE) {
-    for (const u of out) {
-      const data = await cloudProfileGet(u.id);
-      const ts = await cloudProfileUpdatedAt(u.id);
-      if (data !== null) { u.data = data; u.updated_at = ts || u.updated_at; }
+    const CONC = 10; /* 并发下载上限 */
+    for (let i = 0; i < out.length; i += CONC) {
+      const chunk = out.slice(i, i + CONC);
+      await Promise.all(chunk.map(async u => {
+        try {
+          const data = await cloudProfileGet(u.id);
+          const ts = await cloudProfileUpdatedAt(u.id);
+          if (data !== null) { u.data = data; u.updated_at = ts || u.updated_at; }
+        } catch (e) { /* 单个失败不影响其他 */ }
+      }));
     }
   }
   return out;
@@ -426,6 +439,15 @@ async function adminUsers() {
 /* 存储用量统计：数据库总大小 + 用户数据总大小 + 用户数（供看板展示容量） */
 async function dbStats() {
   const stats = { dbBytes: 0, dataBytes: 0, users: 0 };
+  /* 云存储模式：users 数从 users 表取；数据量按云存储估算（每用户约 50KB 均值） */
+  if (USE_CLOUD_STORAGE) {
+    const d = USE_PG
+      ? await pool.query('SELECT COUNT(*) AS n FROM users')
+      : sqlite.prepare('SELECT COUNT(*) AS n FROM users').get();
+    stats.users = Number(d.rows ? d.rows[0].n : d.n) || 0;
+    stats.dataBytes = stats.users * 51200; /* 云存储 profile 均值估算 ~50KB/人 */
+    return stats;
+  }
   if (USE_PG) {
     try {
       const r = await pool.query('SELECT pg_database_size(current_database()) AS b');
