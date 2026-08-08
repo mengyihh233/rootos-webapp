@@ -641,19 +641,27 @@ async function start() {
     });
   }));
 
-  /* 爱发电支付回调（创作中心 → 通知设置 → 回调 URL 填本接口；AFDIAN_TOKEN 为签名 token） */
+  /* 爱发电支付回调（创作中心 → 设置 → 开发者设置 → Webhook URL 填本接口；AFDIAN_TOKEN 为 Webhook token）
+   * 联调：AFDIAN_DEBUG=1 时跳过验签（仅测试期用，跑通后务必关闭） */
   app.post('/api/payment/afdian', wrap(async (req, res) => {
     const token = process.env.AFDIAN_TOKEN;
-    if (!token) { console.warn('💰 爱发电回调未启用：请配置环境变量 AFDIAN_TOKEN'); return res.json({ ec: 400, em: '未配置' }); }
+    if (!token) { console.warn('💰 爱发电回调未启用：请配置环境变量 AFDIAN_TOKEN（爱发电 Webhook Token）'); return res.json({ ec: 400, em: '未配置 AFDIAN_TOKEN' }); }
     try {
       const body = req.body || {};
-      /* 验签：拼接 params 与 token，再与 sign 比对（爱发电签名规则） */
+      /* 验签：md5(params + token) 比对 sign */
       const calc = crypto.createHash('md5').update(String(body.params || '') + token).digest('hex');
-      if (calc !== body.sign) return res.status(403).json({ ec: 403, em: '验签失败' });
+      if (calc !== body.sign) {
+        console.warn('⚠️ 爱发电验签失败 | received sign=' + String(body.sign).slice(0, 12) + '… | computed=' + calc.slice(0, 12) + '… | token 前缀=' + token.slice(0, 4) + '…');
+        if (process.env.AFDIAN_DEBUG === '1') {
+          console.warn('  → AFDIAN_DEBUG=1 已忽略验签（联调模式，请尽快关闭）');
+        } else {
+          return res.status(403).json({ ec: 403, em: '验签失败' });
+        }
+      }
       const params = typeof body.params === 'string' ? JSON.parse(body.params) : body.params;
       const remark = String(params.remark || params.out_trade_no || '').trim(); /* 用户付款时备注填用户名 */
       const u = await db.userByName(remark);
-      if (!u) return res.json({ ec: 200, em: '未找到用户（备注需填用户名）' });
+      if (!u) return res.json({ ec: 200, em: '未找到用户（付款备注需填用户名）' });
       const until = new Date(Date.now() + LICENSE_UNLOCK_DAYS * 86400000).toISOString();
       await db.userUnlock(u.id, until);
       console.log(`💰 爱发电回调：用户 ${u.username} 解锁 ${LICENSE_UNLOCK_DAYS} 天`);
