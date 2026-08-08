@@ -265,28 +265,53 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 <body>
 <!-- ================= 登录 / 注册 / 找回密码 ================= -->
 <div id="auth" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);">
-  <!-- 落地页（未登录默认显示：价值主张 + 特点 + 模板预览，提升转化） -->
+  <!-- 落地页（未登录默认显示：价值主张 + 思想来源 + 特点 + 模板预览，提升转化） -->
   <div id="authLanding" style="max-height:100vh;overflow-y:auto;width:100%;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">
-    <div class="card" style="width:720px;max-width:100%;">
-      <h1 style="margin:0 0 6px;">🧠 ROOT-OS 个人操作系统</h1>
-      <p style="margin:0 0 18px;color:var(--dim);font-size:1.05rem;">把「想变好」变成一套<strong style="color:var(--text);">可运行、可迭代</strong>的系统 —— 不是打鸡血，是装系统。</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
-        <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">🌳 规则树 × 三层级</div><small style="color:var(--dim);line-height:1.6;">根部保命、中层推进、顶层冲刺。崩溃走支链不扣分，永远有 B 计划。</small></div>
-        <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">💥 崩溃即调试</div><small style="color:var(--dim);line-height:1.6;">崩了不是失败，是系统报错。迭代台记录 → 改规则 → 次日重启，闭环迭代。</small></div>
-        <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">📤 AI 周报</div><small style="color:var(--dim);line-height:1.6;">每周数据打包喂给 AI，得到"改哪条规则"的具体建议，越用越适合你。</small></div>
+    <div style="width:760px;max-width:100%;">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+        <a href="javascript:void(0)" onclick="showAuthLogin()" style="color:var(--accent);font-size:.9rem;text-decoration:none;">已有账号？<b>登录 →</b></a>
       </div>
-      <div style="margin-bottom:16px;">
-        <div style="font-size:.9rem;color:var(--dim);margin-bottom:8px;">🎯 官方模板一键套用：</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🎓 高中三年高考向</span>
-          <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🧠 Huberman 脑科学 30 天</span>
-          <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">💪 自制力系统</span>
-          <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🎒 CS 学生</span>
+      <div class="card">
+        <h1 style="margin:0 0 6px;">🧠 ROOT-OS 个人操作系统</h1>
+        <p style="margin:0 0 18px;color:var(--dim);font-size:1.05rem;">把「想变好」变成一套<strong style="color:var(--text);">可运行、可迭代</strong>的系统 —— 不是打鸡血，是装系统。</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
+          <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">🌳 规则树 × 三层级</div><small style="color:var(--dim);line-height:1.6;">根部保命、中层推进、顶层冲刺。崩溃走支链不扣分，永远有 B 计划。</small></div>
+          <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">💥 崩溃即调试</div><small style="color:var(--dim);line-height:1.6;">崩了不是失败，是系统报错。迭代台记录 → 改规则 → 次日重启，闭环迭代。</small></div>
+          <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">📤 AI 周报</div><small style="color:var(--dim);line-height:1.6;">每周数据打包喂给 AI，得到"改哪条规则"的具体建议，越用越适合你。</small></div>
+        </div>
+        <div style="margin-bottom:16px;">
+          <div style="font-size:.9rem;color:var(--dim);margin-bottom:8px;">🎯 官方模板一键套用：</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🎓 高中三年高考向</span>
+            <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🧠 Huberman 脑科学 30 天</span>
+            <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">💪 自制力系统</span>
+            <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🎒 CS 学生</span>
+          </div>
+        </div>
+        <button class="ok" style="width:100%;" onclick="showAuthLogin()">🚀 免费开始 · 注册即用（数据存云端）</button>
+        <button class="ghost" style="width:100%;margin-top:8px;" onclick="showAuthLogin()">已有账号？登录</button>
+      </div>
+      <div class="card">
+        <h3 style="margin:0 0 10px;">🧭 系统哲学：负反馈自控</h3>
+        <div style="color:var(--dim);font-size:.92rem;line-height:1.9;">
+          <p style="margin:0 0 8px;">你不是缺意志力，你是缺一套<strong style="color:var(--text);">可迭代的系统</strong>。<br>
+          这套「规则树 × 三层级 × 支链降级 × 三级复盘」的思想，源自知乎答主 <strong style="color:var(--accent);" id="philAuthor">@底层创造者OS（待补全）</strong> 的《底层创造者OS》，在此致谢。</p>
+          <p style="margin:0;">核心理念：<br>
+          · <b>崩塌即调试</b>——崩溃是系统报错，不是道德失败<br>
+          · <b>环境 > 意志力</b>——设计环境，而不是考验自己<br>
+          · <b>胜于易胜</b>——根部定式小到不可能失败</p>
         </div>
       </div>
-      <button class="ok" style="width:100%;" onclick="showAuthLogin()">🚀 免费开始 · 注册即用（数据存云端）</button>
-      <button class="ghost" style="width:100%;margin-top:8px;" onclick="showAuthLogin()">已有账号？登录</button>
-      <p style="text-align:center;margin:10px 0 0;color:var(--dim);font-size:.8rem;">网页版 + 微信小程序双端同步 · 每天自动备份</p>
+      <div class="card">
+        <h3 style="margin:0 0 10px;">🚀 三步上手</h3>
+        <div style="color:var(--dim);font-size:.92rem;line-height:2;">
+          ① 注册 / 微信登录 → ② 一键套用模板（或从零建规则树）→ ③ 每天打卡，周日复盘迭代<br>
+          <span style="color:var(--text);">网页版 + 微信小程序双端同步 · 数据存云端 · 每日自动备份</span>
+        </div>
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);color:var(--dim);font-size:.85rem;">
+          📮 反馈 / 建议 / 合作：<b style="color:var(--accent);">yanshuo_selfness</b>
+        </div>
+      </div>
     </div>
   </div>
   <!-- 登录 / 注册 -->
