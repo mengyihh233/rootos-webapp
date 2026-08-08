@@ -474,26 +474,34 @@ async function setDev(dev) {
     (failList.length ? ' ⚠️ ' + failList.join('；') + (dev ? ' —— 用户不存在？去下方用户列表搜索确认正确用户名（微信一键登录自动注册的账号是 wx_ 开头）' : '') : '');
   if (okList.length) { document.getElementById('devUser').value = ''; refreshStatsSilent(); renderDevList(); }
 }
-/* 显示当前开发者列表 */
-/* 渲染用量估算面板（基于 stats 接口的 usage 字段） */
+/* 渲染用量估算面板（基于 stats 接口的 usage 字段，腾讯云官方计费标准） */
 function renderUsage() {
   const box = document.getElementById('usagePanel');
   if (!box || !S || !S.usage) { if (box) box.textContent = '加载中…'; return; }
   const u = S.usage;
-  const dayPts = u.projected && u.projected.dayPoints || 0;
+  const bd = u.breakdown || {};
   const monPts = u.projected && u.projected.monthPoints || 0;
-  /* 套餐额度（19.9 基础版约 10000 点/月；可在 localStorage 覆盖 PACKET_LIMIT 校准） */
-  let PACKET = 10000;
-  try { PACKET = Number(localStorage.getItem('PACKET_LIMIT')) || 10000; } catch (e) {}
   const dayPtsCost = u.today.estPoints || 0;
-  /* 进度条：已用比例 + 超限红色警告 + 剩余可撑天数 */
+  /* 套餐额度：个人版 40000 点/月（可在 localStorage 覆盖 PACKET_LIMIT 校准） */
+  let PACKET = 40000;
+  try { PACKET = Number(localStorage.getItem('PACKET_LIMIT')) || 40000; } catch (e) {}
   const pct = Math.min(100, Math.round(monPts / PACKET * 100));
   const barColor = pct >= 90 ? 'var(--red)' : pct >= 60 ? 'var(--amber)' : 'var(--green)';
   const statusTxt = pct >= 100 ? '🔴 已超套餐额度！立即查看腾讯云控制台或准备迁移'
     : pct >= 80 ? '🟠 接近上限，本周务必关注'
     : pct >= 50 ? '🟡 用量过半，月底可能吃紧'
     : '🟢 余量充足，继续用';
-  const daysLeft = dayPtsCost > 0 ? Math.max(0, Math.floor((PACKET - monPts * 0.1) / Math.max(1, dayPts))) : 30;
+  const daysLeft = dayPtsCost > 0 ? Math.max(0, Math.floor((PACKET - monPts * 0.1) / Math.max(1, dayPtsCost))) : 30;
+  /* 常驻 vs 请求 分项说明（官方单价） */
+  const pgCpuNote = bd.pgPaused ? '（已自动暂停，不计费）' : '⚠️ PG 未暂停，占大头';
+  const breakdownHtml =
+    `<div style="background:#181818;border:1px solid #3c3c3c;border-radius:6px;padding:10px 12px;margin:8px 0;font-size:.8rem;line-height:1.8;">` +
+      `<div style="color:var(--dim);margin-bottom:4px;">📐 每日消耗构成（官方单价估算）：</div>` +
+      `<div>☁️ 云托管 CPU <b>${bd.tcbCpu||0}</b> 点 + 内存 <b>${bd.tcbMem||0}</b> 点</div>` +
+      `<div>🗄 PostgreSQL CPU <b>${bd.pgCpu||0}</b> 点 ${pgCpuNote}</div>` +
+      `<div>📡 API 请求 <b>${bd.reqDay||0}</b> 点 · 合计 <b style="color:var(--accent);">${bd.residentDay||0} 点/天</b></div>` +
+      `<div style="color:var(--dim);margin-top:4px;">→ 常驻（云托管+PG）占 <b>${bd.residentDay ? Math.round(bd.residentDay / Math.max(1,(bd.residentDay||0)+(bd.reqDay||0)) * 100) : 0}%</b>，请求几乎不花钱——<b>想省点：让云托管/ PG 空闲自动暂停</b></div>` +
+    `</div>`;
   /* 最近 60 分钟 API 请求条形图 */
   const maxApi = Math.max(1, ...u.buckets.map(b => b.api));
   const barHtml = u.buckets.slice(-30).map(b =>
@@ -503,18 +511,18 @@ function renderUsage() {
     `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:10px;">` +
       `<div><span style="color:var(--dim);">今日 API 请求</span><br><b style="font-size:1.3rem;">${u.today.api}</b> <small>（GET meta ${u.last1h.rpm}/分钟 最近1h）</small></div>` +
       `<div><span style="color:var(--dim);">今日 DB 读 / 写</span><br><b style="font-size:1.3rem;">${u.today.dbRead} / ${u.today.dbWrite}</b></div>` +
-      `<div><span style="color:var(--dim);">今日估算资源点</span><br><b style="font-size:1.3rem;color:${dayPtsCost > 300 ? 'var(--amber)' : 'var(--green)'};">${dayPtsCost}</b></div>` +
+      `<div><span style="color:var(--dim);">今日估算资源点</span><br><b style="font-size:1.3rem;color:${dayPtsCost > 800 ? 'var(--amber)' : 'var(--green)'};">${dayPtsCost}</b> <small>（常驻为主）</small></div>` +
       `<div><span style="color:var(--dim);">预测本月消耗</span><br><b style="font-size:1.3rem;color:${monPts > PACKET ? 'var(--red)' : 'var(--text)'};">${monPts}</b> <small>/ ${PACKET} 点</small></div>` +
     `</div>` +
-    /* 进度条 + 状态灯 + 余量 */
+    breakdownHtml +
     `<div style="margin:10px 0 6px;font-size:.85rem;">${statusTxt}</div>` +
     `<div style="background:#181818;border:1px solid #3c3c3c;border-radius:6px;height:14px;overflow:hidden;margin-bottom:4px;">` +
       `<div style="width:${pct}%;height:100%;background:${barColor};transition:width .4s;"></div>` +
     `</div>` +
-    `<div style="color:var(--dim);font-size:.8rem;margin-bottom:8px;">预测已用 <b style="color:${barColor};">${pct}%</b> · 19.9 套餐约剩 <b style="color:var(--accent);">${daysLeft}</b> 天可撑（按当前速率推算）</div>` +
+    `<div style="color:var(--dim);font-size:.8rem;margin-bottom:8px;">预测已用 <b style="color:${barColor};">${pct}%</b> · 个人版 4 万点约剩 <b style="color:var(--accent);">${daysLeft}</b> 天可撑（按当前速率推算）</div>` +
     `<div style="margin:8px 0 4px;color:var(--dim);">最近 30 分钟 API 请求（点柱看详情）：</div>` +
     `<div style="background:#181818;padding:6px 8px;border-radius:6px;line-height:1;">${barHtml}</div>` +
-    `<div style="margin-top:6px;color:var(--dim);font-size:.75rem;">套餐额度可校准：控制台 localStorage 设 PACKET_LIMIT=实际点数（如 8000）后刷新</div>`;
+    `<div style="margin-top:6px;color:var(--dim);font-size:.75rem;">校准：控制台 localStorage 设 PACKET_LIMIT=实际点数；env 可配 RESIDENT_CPU_CORE/RESIDENT_MEM_GB/PG_CPU_CORE/PG_PAUSED=1</div>`;
 }
 /* 备份：列出最近备份 */
 async function loadBackups() {

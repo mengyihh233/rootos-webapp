@@ -1121,9 +1121,13 @@ async function start() {
         dbConnected: db.isConnected(),
         env: process.env.NODE_ENV || 'development'
       },
-      /* 用量估算（云开发资源点）：
-       *   本服务请求数 + DB 读写次数的实时曲线，对照腾讯云控制台"今日资源点消耗"校准
-       *   经验系数：每次 API 请求≈0.5 点（GET meta < GET 全量 < PUT save），DB 读写各≈1 点 */
+      /* 用量估算（云开发资源点）——按腾讯云官方计费标准（2026-08 版）：
+       *   资源点单价：云托管 CPU 55点/核·小时、内存 32点/GB·小时；
+       *   PostgreSQL CPU 342点/核·小时、容量 0.5点/GB·小时；
+       *   小程序 API 调用 200点/万次、云开发 API 100点/万次、HTTP 30点/万次、云函数 13.3点/万次；
+       *   估算 = 常驻成本（云托管 + PG 按配置规格 × 运行时长）+ 请求成本（API/DB 次数）。
+       *   规格可经 env 校准：RESIDENT_CPU_CORE（默认 0.25 核）、RESIDENT_MEM_GB（默认 0.5GB）、
+       *   PG_CPU_CORE（默认 0.25 核）、PG_PAUSED（默认 false：PG 自动暂停已开启则设 1）。 */
       usage: (function() {
         const now = Date.now();
         const dayStart = Math.floor(now / 86400000) * 86400000;
@@ -1132,14 +1136,31 @@ async function start() {
         const sum = (arr, k) => arr.reduce((a, b) => a + (b[k] || 0), 0);
         const todayApi = sum(today, 'api'), todayRead = sum(today, 'dbRead'), todayWrite = sum(today, 'dbWrite');
         const h1Api = sum(last1h, 'api');
-        /* 粗略系数（云开发 PG 资源点）：仅供趋势估算，非精确计费 */
-        const todayPoints = todayApi * 0.4 + todayRead * 1.0 + todayWrite * 1.2;
-        /* 当天小时数（避免刚启动时按整月推算） */
+        /* ---- 常驻成本（官方单价） ---- */
+        const CPU_RATE = 55, MEM_RATE = 32, PG_CPU_RATE = 342, PG_CAP_RATE = 0.5;
+        const tcbCore = Number(process.env.RESIDENT_CPU_CORE) || 0.25;
+        const tcbMem = Number(process.env.RESIDENT_MEM_GB) || 0.5;
+        const pgCore = Number(process.env.PG_CPU_CORE) || 0.25;
+        const pgPaused = process.env.PG_PAUSED === '1'; /* 个人版 PG 默认自动暂停：空闲时不计 CPU */
         const hoursToday = Math.max(1, Math.min(24, Math.ceil((now - dayStart) / 3600000)));
+        const residentDay = tcbCore * CPU_RATE * 24 + tcbMem * MEM_RATE * 24
+          + (pgPaused ? 0 : pgCore * PG_CPU_RATE * 24); /* PG 容量(0.5/GB·h × 0.1GB ≈ 1点/天)忽略 */
+        /* ---- 请求成本（官方单价：API 调用 ≈ 100点/万次 → 每千次 10 点；DB 读写含在 API 内不计额外） ---- */
+        const reqDay = todayApi / 10000 * 100; /* 简化：按 100点/万次 API */
+        const todayPoints = residentDay * (hoursToday / 24) + reqDay;
         const projectedDayPoints = todayPoints / hoursToday * 24;
         return {
           today: { api: todayApi, dbRead: todayRead, dbWrite: todayWrite, estPoints: Math.round(todayPoints) },
           last1h: { api: h1Api, rpm: Math.round(h1Api / 60) },
+          /* 常驻/请求 分项（官方单价，供面板展示） */
+          breakdown: {
+            residentDay: Math.round(residentDay),
+            reqDay: Math.round(reqDay),
+            tcbCpu: Math.round(tcbCore * CPU_RATE * 24),
+            tcbMem: Math.round(tcbMem * MEM_RATE * 24),
+            pgCpu: pgPaused ? 0 : Math.round(pgCore * PG_CPU_RATE * 24),
+            pgPaused
+          },
           projected: { dayPoints: Math.round(projectedDayPoints), monthPoints: Math.round(projectedDayPoints * 30) },
           buckets: _buckets.slice(-60).map(b => ({ t: b.t, api: b.api, dbR: b.dbRead, dbW: b.dbWrite }))
         };
