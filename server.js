@@ -738,6 +738,17 @@ async function start() {
     res.json({ ok: true });
   }));
 
+  /* 站内公告：登录后两端弹窗展示（版本变化才弹）。内容维护在 public/notice.json，大版本更新改那里即可 */
+  app.get('/api/notice', wrap(async (req, res) => {
+    try {
+      const fs = require('fs');
+      const raw = fs.readFileSync(path.join(__dirname, 'public', 'notice.json'), 'utf8');
+      res.json(JSON.parse(raw));
+    } catch (e) {
+      res.json({ version: '0', title: '', features: [] });
+    }
+  }));
+
   /* ---- 分享快照（v0.6：把规划生成链接，别人打开一键套用） ---- */
 
   /* 创建分享：把当前用户的规划结构（不含打卡/事件）存为公开只读快照，返回短链接 */

@@ -731,6 +731,14 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 </div>
 
 <!-- 套用模板：合并 / 仅追加阶段资源 / 覆盖 选择 -->
+<div class="modal-mask" id="noticeModal" style="display:none;z-index:260;" onclick="if(event.target===this)closeNotice()">
+  <div class="modal" style="max-width:480px;text-align:left;">
+    <h3 id="noticeTitle" style="margin:0 0 10px;color:var(--accent);"></h3>
+    <div id="noticeBody" style="max-height:46vh;overflow-y:auto;font-size:.92rem;line-height:1.9;color:var(--text);"></div>
+    <div id="noticeFoot" style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--border);color:var(--dim);font-size:.85rem;line-height:1.8;"></div>
+    <button class="ok" style="width:100%;margin-top:14px;" onclick="closeNotice()">知道了</button>
+  </div>
+</div>
 <div class="modal-mask" id="tplApplyModal" style="display:none;z-index:210;" onclick="if(event.target===this)closeApplyModal()">
   <div class="modal" style="max-width:460px;text-align:left;">
     <h3 style="margin:0 0 6px;">套用模板：<span id="tplApplyName" style="color:var(--accent);"></span></h3>
@@ -2685,6 +2693,24 @@ function showAuthLogin(){
   const l=document.getElementById('authLanding'); if(l) l.style.display='none';
   const b=document.getElementById('authBox'); if(b) b.style.display='block';
 }
+/* ===== 版本公告：登录后拉 /api/notice，版本变化才弹（localStorage 记已读版本） ===== */
+function fetchNotice(){
+  fetch('/api/notice').then(r=>r.json()).then(n=>{
+    if(!n || !n.version || n.version==='0') return;
+    let seen='';
+    try{ seen=localStorage.getItem('pos_noticeSeen')||''; }catch(e){}
+    if(seen===n.version) return;
+    const body=document.getElementById('noticeBody');
+    body.innerHTML='<div style="color:var(--dim);font-size:.8rem;margin-bottom:8px;">📦 v'+n.version+' · '+esc(n.date||'')+'</div>'
+      +(n.features||[]).map(f=>'<div style="padding:4px 0;">'+esc(f)+'</div>').join('');
+    const foot=document.getElementById('noticeFoot');
+    foot.innerHTML=(n.footer?esc(n.footer)+'<br>':'')+'📮 反馈/建议：<b style="color:var(--accent);">'+esc((n.contact&&n.contact.value)||'')+'</b>';
+    document.getElementById('noticeTitle').textContent=n.title||'更新公告';
+    document.getElementById('noticeModal').style.display='flex';
+    try{ localStorage.setItem('pos_noticeSeen', n.version); }catch(e){}
+  }).catch(()=>{});
+}
+function closeNotice(){ const m=document.getElementById('noticeModal'); if(m) m.style.display='none'; }
 async function doRegister(){
   const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
   if(u.length<2){ showAuth('用户名至少 2 个字符'); return; }
@@ -2801,6 +2827,8 @@ async function afterLogin(){
   SESSION=true;
   try{ await loadFromServer(); }catch(e){ console.warn('加载数据失败', e); }
   showApp(); bootApp();
+  /* 版本公告：登录后弹（版本变化才弹） */
+  setTimeout(fetchNotice, 500);
   /* 分享落地：未登录时点分享链接 → 登录成功 → 自动弹套用确认 */
   try{
     const ps = sessionStorage.getItem('pendingShare');
