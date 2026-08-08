@@ -698,7 +698,7 @@ async function userByWechat(name) {
     const r = await pool.query('SELECT * FROM users WHERE LOWER(wechat) = LOWER($1) LIMIT 1', [name]);
     return r.rows[0] || null;
   }
-  return sqlite.prepare('SELECT * FROM users WHERE LOWER(IFNULL(wechat,"")) = LOWER(?) LIMIT 1').get(name) || null;
+  return sqlite.prepare("SELECT * FROM users WHERE LOWER(IFNULL(wechat,'')) = LOWER(?) LIMIT 1").get(name) || null;
 }
 
 /* 检查 wechat 是否已被占用（不含自身） */
