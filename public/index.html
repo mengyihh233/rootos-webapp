@@ -2723,7 +2723,11 @@ function checkWeeklyGuide(){
   if(!confirm('🗓 今天是周日，本周的周复盘还没写。\n\n花 30 分钟：回溯 → 周视图 → 复盘三问 → 迭代台改规则，闭环才会转起来。\n\n现在去做？')) return;
   try{ localStorage.setItem('pos_guideDate',today); }catch(e){}
   show('review');
-  try{ if($('#rvScope')) $('#rvScope').value='week'; renderReviewScope(); }catch(e){}
+  /* 切到周视图：周复盘 textarea 就近可见 */
+  try{
+    const wr=document.getElementById('rvWeekReview');
+    if(wr){ wr.scrollIntoView({behavior:'smooth', block:'center'}); wr.focus(); }
+  }catch(e){}
 }
 
 /* ===== 版本公告：登录后拉 /api/notice，版本变化才弹（localStorage 记已读版本） ===== */
