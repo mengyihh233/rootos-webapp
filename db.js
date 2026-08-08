@@ -82,13 +82,15 @@ async function cloudProfileGet(uid) {
 }
 /* 探测 updatedAt：优先 getFileInfo（HEAD 请求，不下载 body，省流量/读次数）。
  * 文件内也存 updatedAt 作为兜底（getFileInfo 失败时）。 */
-async function cloudProfileUpdatedAt(uid) {
-  /* 🔴 修复：优先读文件内的 updatedAt（毫秒级 ISO，cloudProfileSet 写入）——
-   * getFileInfo 的 lastModified 是【秒级】，同一秒内双端写会拿到相同时间戳 → 乐观锁失效（静默覆盖）。
-   * lastModified 仅作兜底。 */
-  const raw = await cloudDownload(uid);
-  if (raw) {
-    try { const j = JSON.parse(raw); if (j && j.updatedAt) { const d = new Date(j.updatedAt); if (!isNaN(d.getTime())) return d.toISOString(); } } catch (e) { /* 继续兜底 */ }
+async function cloudProfileUpdatedAt(uid, preferFile) {
+  /* 两种精度：
+   * preferFile=true  → 读文件内毫秒级 updatedAt（PUT 乐观锁用，防同秒双写静默覆盖）
+   * preferFile=false → getFileInfo 秒级（meta 探测用，省全量下载流量；秒级误差只多拉一次不丢数据） */
+  if (preferFile) {
+    const raw = await cloudDownload(uid);
+    if (raw) {
+      try { const j = JSON.parse(raw); if (j && j.updatedAt) { const d = new Date(j.updatedAt); if (!isNaN(d.getTime())) return d.toISOString(); } } catch (e) { /* 兜底 */ }
+    }
   }
   try {
     const fileID = cloudFileID(uid);
@@ -444,9 +446,9 @@ async function profileGet(uid) {
 
 /* 读取数据最后更新时间（服务器时钟，跨设备冲突判断的权威依据）。
  * 返回 ISO 字符串；无记录返回 null。 */
-async function profileUpdatedAt(uid) {
+async function profileUpdatedAt(uid, preferFile) {
   if (globalThis.__incUsageDbRead) globalThis.__incUsageDbRead();
-  if (USE_CLOUD_STORAGE) return cloudProfileUpdatedAt(uid);
+  if (USE_CLOUD_STORAGE) return cloudProfileUpdatedAt(uid, preferFile);
   if (USE_PG) {
     const r = await pool.query('SELECT updated_at FROM profiles WHERE user_id = $1', [uid]);
     if (!r.rows[0] || !r.rows[0].updated_at) return null;
@@ -897,6 +899,31 @@ async function shareGet(id) {
   return sqlite.prepare(`SELECT id,owner,title,data FROM shares WHERE id=?`).get(id);
 }
 
+/* 🔴 合并后清理 wx_ 孤儿账号：openid 已转走，清空身份字段（wechat/display_name/email/wx_openid）
+ * + 随机化密码（无法再登录）+ 删除 profile（不留旧数据副本）。
+ * 保留 user 行（防 openid 冲突/分享关联断裂），但账号彻底不可用、不可见。 */
+async function orphanWxAccount(uid) {
+  if (USE_CLOUD_STORAGE) {
+    try {
+      const fileID = cloudFileID(uid);
+      if (fileID) await cloudApp().deleteFile({ fileList: [fileID] });
+    } catch (e) { console.warn('⚠️ 孤儿清理删云存储 profile 失败：', (e && e.message) || e); }
+  }
+  if (USE_PG) {
+    await pool.query(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = $1 WHERE id = $2`, [cryptoRandomHash(), uid]);
+    await pool.query('DELETE FROM profiles WHERE user_id = $1', [uid]);
+    return;
+  }
+  sqlite.prepare(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = ? WHERE id = ?`).run(cryptoRandomHash(), uid);
+  sqlite.prepare('DELETE FROM profiles WHERE user_id = ?').run(uid);
+}
+
+/* 随机密码哈希（孤儿账号不可再登录） */
+function cryptoRandomHash() {
+  const rnd = Array.from({ length: 24 }, () => Math.floor(Math.random() * 36).toString(36)).join('');
+  return '$2b$10$' + rnd + rnd; /* 长度伪造，bcrypt.compareSync 必失败 */
+}
+
 /* 注销账号（PIPL 第 47 条 + 微信审核硬项）：删除该用户全部关联数据与账号行
  * templates 按 author 字符串关联（无 owner 列），故需传入 username */
 async function userDelete(uid, username) {
@@ -944,28 +971,33 @@ async function wipeAllUsers() {
   /* 子表先删，主表最后（无外键，但保持合理顺序）；逐个 try/catch——某表失败不阻塞其他 */
   const tables = ['notifications', 'ratings', 'favorites', 'shares', 'subscriptions', 'pay_orders', 'backups', 'templates', 'profiles', 'users'];
   let deleted = 0;
+  const allUids = [];
   if (USE_PG) {
-    try { const r = await pool.query('SELECT COUNT(*) AS n FROM users'); deleted = Number(r.rows[0].n) || 0; } catch (e) { console.warn('wipeAllUsers: 统计用户数失败', e.message); }
+    try {
+      const r = await pool.query('SELECT id FROM users');
+      deleted = r.rows.length; r.rows.forEach(x => allUids.push(Number(x.id)));
+    } catch (e) { console.warn('wipeAllUsers: 统计用户数失败', e.message); }
     for (const t of tables) {
       try { await pool.query(`DELETE FROM ${t}`); console.log('  ✓ 已清空', t); }
       catch (e) { console.warn('  ⚠️ 清空失败（跳过）:', t, e.message); }
     }
   } else {
-    try { const r = sqlite.prepare('SELECT COUNT(*) AS n FROM users').get(); deleted = Number(r.n) || 0; } catch (e) {}
+    try { const rows = sqlite.prepare('SELECT id FROM users').all(); deleted = rows.length; rows.forEach(x => allUids.push(Number(x.id))); } catch (e) {}
     const del = sqlite.transaction(() => { tables.forEach(t => { try { sqlite.prepare(`DELETE FROM ${t}`).run(); } catch (e) { console.warn('⚠️ 清空失败（跳过）:', t, e.message); } }); });
     del();
   }
-  /* 云存储模式：删掉所有 profiles/ 文件（列表未知，按导出文件名枚举不可行——改为按已删用户逐条删 */
-  if (USE_CLOUD_STORAGE) {
+  /* 🔴 云存储模式：按删除前的 uid 列表逐文件删 profiles/（无法列目录，但 uid 列表可得）——隐私兜底 */
+  if (USE_CLOUD_STORAGE && allUids.length) {
     try {
-      /* 无法列目录，跳过文件清理；新注册用户会覆盖同 uid 文件（uid 自增，旧文件成孤儿，无害） */
-      console.warn('⚠️ wipeAllUsers：云存储 profile 文件未逐一删除（孤儿文件无害，新用户 uid 不同）');
-    } catch (e) { console.warn('云存储清理跳过：', e.message); }
+      const fileList = allUids.map(u => cloudFilePath(u));
+      const res = await cloudApp().deleteFile({ fileList });
+      console.log('  🗑️ 云存储 profile 文件清理:', (res && res.fileList || []).length, '/', allUids.length);
+    } catch (e) { console.warn('⚠️ 云存储 profile 清理失败（孤儿文件无害）:', (e && e.message) || e); }
   }
   return deleted;
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userByWechat, wechatTaken, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userByWechat, wechatTaken, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orphanWxAccount, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {

@@ -1152,6 +1152,8 @@ async function start() {
     await db.userBindOpenid(req.session.userId, null);
     /* 🔴 修复：显示名继承——微信账号有名字而网页账号空时，把名字带给网页账号（同一人不应重复取名） */
     if (cur.display_name && !target.display_name) await db.userSetDisplayName(target.id, cur.display_name);
+    /* 🔴 清理孤儿：wx_ 账号已合并，清空身份字段+随机密码+删 profile */
+    await db.orphanWxAccount(req.session.userId);
     console.log('✅ 账号合并：', cur.username, '→', target.username);
     res.json({ ok: true, token: issueWxToken(target.id), username: target.username, display_name: (await db.userById(target.id)).display_name || '', need_name: !(await db.userById(target.id)).display_name, msg: '已绑定并合并数据' });
   }));
@@ -1205,6 +1207,8 @@ async function start() {
     await db.userBindOpenid(target.id, wx.wx_openid);
     await db.userBindOpenid(wx.id, null);
     if (wx.display_name && !target.display_name) await db.userSetDisplayName(target.id, wx.display_name);
+    /* 🔴 清理孤儿：wx_ 账号已合并，清空身份字段+随机密码+删 profile（防微信号占用/双份数据/可登录） */
+    await db.orphanWxAccount(wx.id);
     console.log('✅ 网页接入微信：', wx.username, '→', target.username);
     res.json({ ok: true, token: issueWxToken(target.id), username: target.username, display_name: (await db.userById(target.id)).display_name || '', msg: '已接入并合并数据' });
   }));
@@ -1244,7 +1248,8 @@ async function start() {
   /* 轻量版本探测：只返回数据更新时间（几字节），供前端 60s 轮询判断是否需要全量拉取，
    * 避免每次轮询都传整个 JSON 包（腾讯云按流量+读次数计费，这是降消耗的关键接口） */
   app.get('/api/data/meta', requireAuth, wrap(async (req, res) => {
-    const updatedAt = await db.profileUpdatedAt(req.session.userId);
+    /* meta 探测用快速版（getFileInfo 秒级）：省全量下载流量；秒级误差只多拉一次不丢数据 */
+    const updatedAt = await db.profileUpdatedAt(req.session.userId, false);
     res.json({ updatedAt: updatedAt || 0 });
   }));
 
@@ -1360,7 +1365,7 @@ async function start() {
      * baseTs=0（旧客户端/未读取服务端数据）不再放行，杜绝"用本地旧数据覆盖云端新数据"。 */
     const baseTs = Number(req.body._baseTs) || 0;
     delete req.body._baseTs;
-    const curTsStr = await db.profileUpdatedAt(req.session.userId);
+    const curTsStr = await db.profileUpdatedAt(req.session.userId, true); /* 乐观锁：精确毫秒 */
     const curTs = curTsStr ? new Date(curTsStr).getTime() : 0;
     if (curTs > 0 && baseTs < curTs) {
       const raw = await db.profileGet(req.session.userId);
@@ -1372,7 +1377,7 @@ async function start() {
     if (result.error) return res.status(400).json({ error: result.error });
     await db.profileSet(req.session.userId, JSON.stringify(result.clean));
     /* 返回最新 updatedAt，供小程序端更新乐观锁基准（_bagTs） */
-    const after = await db.profileUpdatedAt(req.session.userId);
+    const after = await db.profileUpdatedAt(req.session.userId, true); /* 写后基准：精确毫秒 */
     res.json({ ok: true, updatedAt: after || null });
   }));
 
