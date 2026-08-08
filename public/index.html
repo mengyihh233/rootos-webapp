@@ -3172,7 +3172,19 @@ async function doLogout(){
 }
 async function afterLogin(){
   SESSION=true;
+  /* 🔴 关键：登录/注册成功必须「以服务端数据为准」。
+   * 清掉本地残留的时间戳与暂存——否则 loadFromServer 会误判"本地较新"
+   * 把上一个账号/演示数据推上去覆盖当前账号（曾导致账号数据被清空的严重 bug）。 */
+  suppressSave=true;
+  try{
+    pendingPushData=null;
+    localStorage.removeItem('pos_pendingPush');
+    localStorage.removeItem('pos_savedAt');
+    localStorage.removeItem('pos_serverTs');
+  }catch(e){}
+  localSavedAt=0;
   try{ await loadFromServer(); }catch(e){ console.warn('加载数据失败', e); }
+  suppressSave=false;
   showApp(); bootApp();
   /* 版本公告：登录后弹（版本变化才弹）。新手引导（onboarded 未置位）时先不弹，引导完成后再弹（见 obFinish） */
   if(meta && meta.onboarded) setTimeout(fetchNotice, 500);

@@ -148,6 +148,9 @@ function makeDocx(text) {
   const cookie3 = r.headers.get('set-cookie').split(';')[0];
 
   // 失败模式分析：种子一个崩溃事件 + 支链勾选
+  /* 乐观锁：先 GET 拿服务端 X-Data-Updated 作为 baseTs，PUT 携带（服务端已有数据时 baseTs=0 会被 409 拒绝） */
+  r = await fetch(base + '/api/data', { headers: { cookie: cookie3 } });
+  const baseTs = Number(new Date(r.headers.get('x-data-updated') || 0).getTime()) || 0;
   const bag = {
     rules: [
       { id: 'r1', cat: 'c_study', lv: 'lv0', t: '主线', on: true, parent: null },
@@ -155,7 +158,8 @@ function makeDocx(text) {
     ],
     cats: [{ id: 'c_study', name: '学习' }], levels: [{ id: 'lv0', name: 'L0' }], tags: [],
     phases: [], daily: { '2026-08-07': { checks: { r1b: true } } },
-    events: [{ id: 'e1', type: 'crash', ruleId: 'r1', day: '2026-08-07', ts: Date.now() }]
+    events: [{ id: 'e1', type: 'crash', ruleId: 'r1', day: '2026-08-07', ts: Date.now() }],
+    _baseTs: baseTs
   };
   r = await fetch(base + '/api/data', { method: 'PUT', headers: { ...hd, cookie: cookie3 }, body: JSON.stringify(bag) });
   ok('PUT 数据 200', r.status === 200);

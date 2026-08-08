@@ -977,16 +977,17 @@ async function start() {
     if (!saveRateOk(req.session.userId)) return res.status(429).json({ error: '写入过于频繁，请稍后再试' });
     /* 乐观锁（防双端同时写互相覆盖）：客户端带 baseTs = 它读取数据时的服务端 updated_at。
      * 服务端已比 baseTs 新 → 说明另一端的改动先落库了 → 返回 409 + 最新数据，前端合并后重试。
-     * baseTs 为 0（旧客户端/首次写入）时跳过检查，保持兼容。 */
+     * 安全加固：服务端已有数据（curTs>0）时，客户端必须带 baseTs 且 >= curTs 才允许覆盖——
+     * baseTs=0（旧客户端/未读取服务端数据）不再放行，杜绝"用本地旧数据覆盖云端新数据"。 */
     const baseTs = Number(req.body._baseTs) || 0;
     delete req.body._baseTs;
     const curTsStr = await db.profileUpdatedAt(req.session.userId);
     const curTs = curTsStr ? new Date(curTsStr).getTime() : 0;
-    if (baseTs && curTs && baseTs < curTs) {
+    if (curTs > 0 && baseTs < curTs) {
       const raw = await db.profileGet(req.session.userId);
       let latest = {};
       try { latest = JSON.parse(raw || '{}'); } catch (e) { latest = {}; }
-      return res.status(409).json({ error: '数据已在其他设备更新', latest, updatedAt: curTsStr });
+      return res.status(409).json({ error: '数据已在其他设备更新，已自动合并', latest, updatedAt: curTsStr });
     }
     const result = sanitizeBag(req.body);
     if (result.error) return res.status(400).json({ error: result.error });
