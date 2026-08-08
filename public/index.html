@@ -988,6 +988,7 @@ function checkDayRollover(){
 /* 【v8 修复】savedTimer 必须先于任何 store.set 声明（v7 的 TDZ bug 根因） */
 let savedTimer = null;
 let localSavedAt = Number(localStorage.getItem('pos_savedAt'))||0;  /* 【新增】本地最后保存时间戳，用于多端冲突判断 */
+let localDirty = false;  /* 本地有未推送改动标记：推送成功才清。silentSync 见 dirty 则跳过拉取，防旧服务端数据覆盖本地刚做的改动 */
 function markSaved(){
   try{
     const el = $('#savedTag'); if(!el) return;
@@ -995,6 +996,7 @@ function markSaved(){
     clearTimeout(savedTimer); savedTimer = setTimeout(()=>el.textContent='',2500);
   }catch(e){}
   try{ localSavedAt = Date.now(); localStorage.setItem('pos_savedAt', String(localSavedAt)); }catch(e){}
+  localDirty = true;
   /* 多用户版：改动后防抖推送到服务器（已登录时） */
   try{ if(SESSION) scheduleServerSave(); }catch(e){}
 }
@@ -1189,8 +1191,8 @@ function renderTodayTags(){
     banner.textContent='⚠️ 降级协议已激活（'+dg.map(t=>t.name).join('、')+'）：只做侦查任务，不追责'; }
   else banner.style.display='none';
 }
-function addTag(tid){ dayRec().tags.push(tid); saveDaily(); renderTodayTags(); }
-function untag(tid){ const r=dayRec(); r.tags=r.tags.filter(x=>x!==tid); saveDaily(); renderTodayTags(); }
+function addTag(tid){ if(!dayRec().tags.includes(tid)){ dayRec().tags.push(tid); saveDaily(); markSaved(); } renderTodayTags(); }
+function untag(tid){ const r=dayRec(); r.tags=r.tags.filter(x=>x!==tid); saveDaily(); markSaved(); renderTodayTags(); }
 function toggleTagPanel(){ $('#tagPanel').classList.toggle('show'); renderTagDefs(); }
 function renderTagDefs(){
   $('#tagDefs').innerHTML = tags.map(t=>
@@ -1201,16 +1203,18 @@ function renderTagDefs(){
 }
 function addTagDef(){
   const n=$('#newTagName').value.trim(); if(!n) return alert('标记名不能为空');
-  tags.push({id:'t'+Date.now(), name:n, color:$('#newTagColor').value, degrade:$('#newTagDegrade').checked});
+  /* id 唯一化：时间戳 + 随机后缀，避免同毫秒连建两个标签 id 冲突互相顶掉 */
+  tags.push({id:'t'+Date.now().toString(36)+Math.random().toString(36).slice(2,6), name:n, color:$('#newTagColor').value, degrade:$('#newTagDegrade').checked});
   store.set('tags',tags); $('#newTagName').value=''; $('#newTagDegrade').checked=false;
+  markSaved();  /* 同步云端，防止 silentSync 用旧服务端数据覆盖掉新标记 */
   renderTagDefs(); renderTodayTags();
 }
-function toggleTagDegrade(id){ const t=tagOf(id); if(t){ t.degrade=!t.degrade; store.set('tags',tags); renderTagDefs(); renderTodayTags(); } }
+function toggleTagDegrade(id){ const t=tagOf(id); if(t){ t.degrade=!t.degrade; store.set('tags',tags); markSaved(); renderTagDefs(); renderTodayTags(); } }
 function delTagDef(id){
   if(!confirm('删除该标记定义？历史日期上的此标记也会消失。')) return;
   tags=tags.filter(t=>t.id!==id);
   Object.keys(daily).forEach(d=>{ if(daily[d].tags) daily[d].tags=daily[d].tags.filter(x=>x!==id); });
-  store.set('tags',tags); saveDaily(); renderTagDefs(); renderTodayTags();
+  store.set('tags',tags); saveDaily(); markSaved(); renderTagDefs(); renderTodayTags();
 }
 
 /* ================= 今日规则清单（v9.2 节点流：点节点=完成，💥=崩溃激活支链） ================= */
@@ -2784,6 +2788,7 @@ async function pushToServer(){
           const r2=await fetch('/api/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(bag2)});
           if(!r2.ok) throw new Error('http '+r2.status);
           pendingPushData=null;
+          localDirty=false;  /* 合并重试成功：本地改动已同步 */
           try{ localStorage.removeItem('pos_pendingPush'); }catch(e){}
           /* 更新服务端时间戳，后续轮询不再重复拉取 */
           const nt=Number(new Date(j.updatedAt||0).getTime())||0;
@@ -2795,6 +2800,7 @@ async function pushToServer(){
     }
     if(!r.ok) throw new Error('http '+r.status);
     pendingPushData=null;
+    localDirty=false;  /* 推送成功：本地改动已同步，允许 silentSync 拉取 */
     try{ localStorage.removeItem('pos_pendingPush'); }catch(e){}
     return true;
   }catch(e){
@@ -2885,6 +2891,8 @@ async function apiGet(url){
  *  - 服务器较新 → 静默应用数据（suppressSave 防回推）+ 轻量重渲染当前视图 + toast 提示 */
 async function silentSync(){
   if(!SESSION || suppressSave) return;
+  /* 🔴 本地有未推送改动（1.5s 防抖窗口内/推送失败重试期）→ 不拉取，防止旧服务端数据覆盖本地刚做的改动（曾导致新增标记消失） */
+  if(localDirty || localStorage.getItem('pos_pendingPush')) return;
   /* 跨天检测：页面挂后台跨天时，今日日期与打卡目标要跟着翻页 */
   checkDayRollover();
   const el=document.activeElement;
