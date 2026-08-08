@@ -482,9 +482,17 @@ function renderUsage() {
   const u = S.usage;
   const dayPts = u.projected && u.projected.dayPoints || 0;
   const monPts = u.projected && u.projected.monthPoints || 0;
-  /* 套餐余量估算（基础 19.9 元 ~ 10000 点/月，可改 PACKET_LIMIT 调整） */
-  const PACKET = 10000;
+  /* 套餐额度（19.9 基础版约 10000 点/月；可在 localStorage 覆盖 PACKET_LIMIT 校准） */
+  let PACKET = 10000;
+  try { PACKET = Number(localStorage.getItem('PACKET_LIMIT')) || 10000; } catch (e) {}
   const dayPtsCost = u.today.estPoints || 0;
+  /* 进度条：已用比例 + 超限红色警告 + 剩余可撑天数 */
+  const pct = Math.min(100, Math.round(monPts / PACKET * 100));
+  const barColor = pct >= 90 ? 'var(--red)' : pct >= 60 ? 'var(--amber)' : 'var(--green)';
+  const statusTxt = pct >= 100 ? '🔴 已超套餐额度！立即查看腾讯云控制台或准备迁移'
+    : pct >= 80 ? '🟠 接近上限，本周务必关注'
+    : pct >= 50 ? '🟡 用量过半，月底可能吃紧'
+    : '🟢 余量充足，继续用';
   const daysLeft = dayPtsCost > 0 ? Math.max(0, Math.floor((PACKET - monPts * 0.1) / Math.max(1, dayPts))) : 30;
   /* 最近 60 分钟 API 请求条形图 */
   const maxApi = Math.max(1, ...u.buckets.map(b => b.api));
@@ -493,14 +501,20 @@ function renderUsage() {
   ).join('');
   box.innerHTML =
     `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:10px;">` +
-      `<div><span style="color:var(--dim);">今日 API 请求</span><br><b style="font-size:1.3rem;">${u.today.api}</b> <small>（含 GET meta ${u.last1h.rpm}/分钟最近1h）</small></div>` +
+      `<div><span style="color:var(--dim);">今日 API 请求</span><br><b style="font-size:1.3rem;">${u.today.api}</b> <small>（GET meta ${u.last1h.rpm}/分钟 最近1h）</small></div>` +
       `<div><span style="color:var(--dim);">今日 DB 读 / 写</span><br><b style="font-size:1.3rem;">${u.today.dbRead} / ${u.today.dbWrite}</b></div>` +
       `<div><span style="color:var(--dim);">今日估算资源点</span><br><b style="font-size:1.3rem;color:${dayPtsCost > 300 ? 'var(--amber)' : 'var(--green)'};">${dayPtsCost}</b></div>` +
-      `<div><span style="color:var(--dim);">预测本月消耗</span><br><b style="font-size:1.3rem;color:${monPts > PACKET ? 'var(--red)' : 'var(--text)'};">${monPts}</b> <small>/ ${PACKET} (19.9基础)</small></div>` +
+      `<div><span style="color:var(--dim);">预测本月消耗</span><br><b style="font-size:1.3rem;color:${monPts > PACKET ? 'var(--red)' : 'var(--text)'};">${monPts}</b> <small>/ ${PACKET} 点</small></div>` +
     `</div>` +
+    /* 进度条 + 状态灯 + 余量 */
+    `<div style="margin:10px 0 6px;font-size:.85rem;">${statusTxt}</div>` +
+    `<div style="background:#181818;border:1px solid #3c3c3c;border-radius:6px;height:14px;overflow:hidden;margin-bottom:4px;">` +
+      `<div style="width:${pct}%;height:100%;background:${barColor};transition:width .4s;"></div>` +
+    `</div>` +
+    `<div style="color:var(--dim);font-size:.8rem;margin-bottom:8px;">预测已用 <b style="color:${barColor};">${pct}%</b> · 19.9 套餐约剩 <b style="color:var(--accent);">${daysLeft}</b> 天可撑（按当前速率推算）</div>` +
     `<div style="margin:8px 0 4px;color:var(--dim);">最近 30 分钟 API 请求（点柱看详情）：</div>` +
     `<div style="background:#181818;padding:6px 8px;border-radius:6px;line-height:1;">${barHtml}</div>` +
-    `<div style="margin-top:8px;color:var(--dim);">预测 19.9 套餐约剩 <b style="color:var(--accent);">${daysLeft}</b> 天可撑（按当前速率推算）</div>`;
+    `<div style="margin-top:6px;color:var(--dim);font-size:.75rem;">套餐额度可校准：控制台 localStorage 设 PACKET_LIMIT=实际点数（如 8000）后刷新</div>`;
 }
 /* 备份：列出最近备份 */
 async function loadBackups() {
