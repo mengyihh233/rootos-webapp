@@ -32,25 +32,26 @@ function cloudApp() {
   }
   return _cloudApp;
 }
-async function cloudProfileGet(uid) {
+/* 云存储读取（官方用法：downloadFile({ fileID: 'cloud://<envId>/<path>' })，返回 res.fileContent） */
+async function cloudDownload(uid) {
   try {
-    const r = await cloudApp().downloadFile({ fileList: ['profiles/' + uid + '.json'] });
-    const list = (r && r.fileList) || [];
-    if (!list[0] || list[0].code !== 0) return null;
-    const buf = list[0].fileContent;
-    const j = JSON.parse(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf));
-    return j && j.data ? j.data : null;
+    const fileID = 'cloud://' + (CLOUD_ENV || '') + '/profiles/' + uid + '.json';
+    const r = await cloudApp().downloadFile({ fileID });
+    if (!r || r.code !== 'SUCCESS') return null;
+    const c = r.fileContent;
+    if (c === undefined || c === null) return null;
+    return Buffer.isBuffer(c) ? c.toString('utf8') : String(c);
   } catch (e) { return null; }
 }
+async function cloudProfileGet(uid) {
+  const raw = await cloudDownload(uid);
+  if (!raw) return null;
+  try { const j = JSON.parse(raw); return j && j.data ? j.data : null; } catch (e) { return null; }
+}
 async function cloudProfileUpdatedAt(uid) {
-  try {
-    const r = await cloudApp().downloadFile({ fileList: ['profiles/' + uid + '.json'] });
-    const list = (r && r.fileList) || [];
-    if (!list[0] || list[0].code !== 0) return null;
-    const buf = list[0].fileContent;
-    const j = JSON.parse(Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf));
-    return j && j.updatedAt ? j.updatedAt : null;
-  } catch (e) { return null; }
+  const raw = await cloudDownload(uid);
+  if (!raw) return null;
+  try { const j = JSON.parse(raw); return j && j.updatedAt ? j.updatedAt : null; } catch (e) { return null; }
 }
 async function cloudProfileSet(uid, dataStr) {
   const obj = JSON.stringify({ data: dataStr, updatedAt: new Date().toISOString() });
