@@ -327,6 +327,13 @@ async function sendReminders() {
     console.warn('⏰ 订阅消息未启用：请配置环境变量 WX_SUB_TMPL_REMIND（打卡提醒模板 ID），可选 WX_SUB_TMPL_WEEKLY（周复盘模板 ID）');
     return;
   }
+  /* 🔴 去重：当天（北京）已发过则跳过——常驻 setInterval 与云函数 cron 并存时防双下发 */
+  const beijing = new Date(Date.now() + 8 * 3600 * 1000);
+  const dayKey = beijing.toISOString().slice(0, 10);
+  if (!(await db.sentOnce('remind-' + dayKey))) {
+    console.log('⏰ 今日提醒已发过（remind-' + dayKey + '），跳过');
+    return;
+  }
   const subs = await db.subEnabledList();
   if (!subs.length) return;
   const isSunday = new Date().getDay() === 0;
@@ -1392,6 +1399,11 @@ async function start() {
         !Array.isArray(data.tags) || !Array.isArray(data.phases) || typeof data.daily !== 'object') {
       return res.status(400).json({ error: '模板数据不合法（缺 rules/cats/tags/phases/daily）' });
     }
+    /* 模板体积上限：结构字段 JSON 超 300KB 拒绝（防超大模板成为公共下载负担） */
+    try {
+      const size = Buffer.byteLength(JSON.stringify({ rules: data.rules, cats: data.cats, levels: data.levels, tags: data.tags, phases: data.phases, resources: data.resources }));
+      if (size > 300 * 1024) return res.status(400).json({ error: '模板过大（结构数据 >300KB），请精简后重试' });
+    } catch (e) { return res.status(400).json({ error: '模板数据异常' }); }
     /* 安全：只保留结构字段，剥离个人运行数据（打卡/事件/复盘/随笔），避免模板泄露隐私。
      * 🔴 修复：retros（个人复盘随笔）属于隐私记录，绝不进社区模板 */
     const safe = {
@@ -1525,6 +1537,8 @@ async function start() {
   app.post('/api/templates/:id/rate', requireAuth, wrap(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
+    const tpl = await db.templateGet(id);
+    if (!tpl || tpl.status !== 'approved') return res.status(404).json({ error: '模板不存在或未上架' });
     const score = Number(req.body && req.body.score);
     if (!(score >= 1 && score <= 5)) return res.status(400).json({ error: '评分需在 1-5 之间' });
     await db.ratingUpsert(id, req.session.userId, score);
@@ -1535,6 +1549,8 @@ async function start() {
   app.post('/api/templates/:id/favorite', requireAuth, wrap(async (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
+    const tpl = await db.templateGet(id);
+    if (!tpl || tpl.status !== 'approved') return res.status(404).json({ error: '模板不存在或未上架' });
     const favorited = await db.favoriteToggle(id, req.session.userId);
     res.json({ ok: true, favorited });
   }));

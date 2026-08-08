@@ -2361,7 +2361,7 @@ function handleShareHash(){
       showAuthLogin();
       return;
     }
-    if(!confirm('📥 检测到一份分享的规划：「'+j.title+'」\n\n套用后将替换你的 规则/阶段/资源/笔记（保留打卡记录与账号设置）。\n确定套用吗？')) return;
+    if(!confirm('📥 检测到一份分享的规划：「'+j.title+'」\n\n套用后将替换你的 规则/阶段/门类/标签（保留打卡记录、复盘、随笔与账号设置）。\n确定套用吗？')) return;
     applySharedBag(j.data);
     toast('✅ 已套用分享：「'+j.title+'」');
   }).catch(()=>{});
@@ -2598,8 +2598,9 @@ function overwriteBagFromTemplate(d){
   if(Array.isArray(d.rules)) rules=d.rules;
   if(Array.isArray(d.tags)) tags=d.tags;
   if(Array.isArray(d.phases)) phases=d.phases;
-  if(d.reviews) reviews=d.reviews;
-  if(Array.isArray(d.retros)) retros=d.retros;
+  /* 🔴 修复：覆盖套用绝不替换 reviews/retros——模板的复盘/随笔恒为空（服务端剥离），
+   * 覆盖它们会清空用户自己的复盘与随笔（与"打卡保留"的承诺矛盾）。保留用户现有数据。 */
+  if(d.reviews && Object.keys(d.reviews).length) { /* 仅当模板自带非空复盘才合并（内置模板无） */ }
   if(Array.isArray(d.resources)) resources=d.resources;
   suppressSave=false;
   const m={cats,levels,rules,tags,phases,reviews,retros,resources};

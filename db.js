@@ -198,6 +198,11 @@ const SCHEMA_SQLITE = {
       snapshot   TEXT NOT NULL,
       size_bytes INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  sent_logs: `
+    CREATE TABLE IF NOT EXISTS sent_logs (
+      key        TEXT PRIMARY KEY,
+      at         TEXT NOT NULL DEFAULT (datetime('now'))
     )`
 };
 
@@ -287,6 +292,11 @@ const SCHEMA_PG = {
       snapshot   TEXT NOT NULL,
       size_bytes INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT NOW()
+    )`,
+  sent_logs: `
+    CREATE TABLE IF NOT EXISTS sent_logs (
+      key        TEXT PRIMARY KEY,
+      at         TEXT NOT NULL DEFAULT NOW()
     )`
 };
 
@@ -327,6 +337,7 @@ async function init() {
       await pool.query(SCHEMA_PG.shares);
       await pool.query(SCHEMA_PG.pay_orders);
       await pool.query(SCHEMA_PG.backups);
+      await pool.query(SCHEMA_PG.sent_logs);
       /* 既有库迁移：为旧 users 表补新列（幂等，已存在则跳过） */
       for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT', 'unlock_until TEXT', 'is_dev INTEGER NOT NULL DEFAULT 0', 'display_name TEXT']) {
         const name = col.split(' ')[0];
@@ -383,6 +394,7 @@ async function init() {
     sqlite.exec(SCHEMA_SQLITE.shares);
     sqlite.exec(SCHEMA_SQLITE.pay_orders);
     sqlite.exec(SCHEMA_SQLITE.backups);
+    sqlite.exec(SCHEMA_SQLITE.sent_logs);
     connected = true;
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
   }
@@ -884,7 +896,7 @@ async function userDelete(uid, username) {
   }
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userSetDisplayName, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userSetDisplayName, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {
@@ -904,4 +916,20 @@ async function subEnabledList() {
                WHERE s.enabled = 1 AND u.wx_openid IS NOT NULL`;
   if (USE_PG) { const r = await pool.query(sql); return r.rows.map(x => ({ userId: x.user_id, tplId: x.tpl_id, openid: x.wx_openid })); }
   return sqlite.prepare(sql).all().map(x => ({ userId: x.user_id, tplId: x.tpl_id, openid: x.wx_openid }));
+}
+
+/* 提醒去重（跨进程幂等）：key 如 'remind-2026-08-09'，当天已发过返回 false。
+ * 解决「常驻 setInterval + 云函数 cron」并存时的双下发。 */
+async function sentOnce(key) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT 1 FROM sent_logs WHERE key = $1', [key]);
+    if (r.rows.length) return false;
+    await pool.query('INSERT INTO sent_logs (key) VALUES ($1) ON CONFLICT (key) DO NOTHING', [key]);
+    const r2 = await pool.query('SELECT 1 FROM sent_logs WHERE key = $1', [key]);
+    return r2.rows.length > 0; /* 插入失败（并发已插）→ false */
+  }
+  const exist = sqlite.prepare('SELECT 1 FROM sent_logs WHERE key = ?').get(key);
+  if (exist) return false;
+  try { sqlite.prepare('INSERT INTO sent_logs (key) VALUES (?)').run(key); return true; }
+  catch (e) { return false; }
 }
