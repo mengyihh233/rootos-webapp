@@ -75,5 +75,23 @@
       "resources": 40,
       "retros": 7
     }
+  },
+  {
+    "id": "classic",
+    "file": "classic.json",
+    "title": "通用自律系统（原默认模板）",
+    "author": "ROOT-OS 官方",
+    "desc": "完整版通用自律系统：5 门类（学习/专注/娱乐/健康/生活）+ 晨间主链与支链 + 三阶段规划。适合想要完整体系的老用户。",
+    "tags": [
+      "自律",
+      "通用",
+      "系统"
+    ],
+    "counts": {
+      "rules": 27,
+      "phases": 4,
+      "resources": 0,
+      "retros": 0
+    }
   }
 ]

@@ -125,13 +125,13 @@ function dayOff(n) {
 }
 
 function defaultBag() {
+  /* 轻量引导版：新用户 3 天学会系统，不劝退。
+   * 原完整版（5 门类 27 规则）已迁移为官方模板 classic.json，需要可在模板市场套用。
+   * 内容与前端 public/index.html 的 SEED_* 保持一致。 */
   return {
     cats: [
-      { id: 'c_study',  name: '学习', color: '#4fc1ff' },
-      { id: 'c_focus',  name: '专注', color: '#4ec9b0' },
-      { id: 'c_play',   name: '娱乐', color: '#dcdcaa' },
-      { id: 'c_health', name: '健康', color: '#f44747' },
-      { id: 'c_life',   name: '生活', color: '#c586c0' }
+      { id: 'c_start',  name: '起步', color: '#4fc1ff' },
+      { id: 'c_health', name: '健康', color: '#4ec9b0' }
     ],
     levels: [
       { id: 'lv0', name: '根部' },
@@ -140,63 +140,32 @@ function defaultBag() {
     ],
     /* parent=null 为主链节点；parent=某规则 id 为该节点的支链（主链崩溃时才激活） */
     rules: [
-      /* 学习 */
-      { id: 'r_stu1', cat: 'c_study', lv: 'lv0', t: '主线课程/主线任务推进 1 节', on: true, parent: null, seq: 1 },
-      { id: 'r_stu2', cat: 'c_study', lv: 'lv0', t: '背单词 / 记术语 30min', on: true, parent: null, seq: 2 },
-      { id: 'r_stu3', cat: 'c_study', lv: 'lv1', t: '动手练习：写代码 / 做题 / 实操 30min', on: true, parent: null, seq: 1, micro: '先只写 5 行代码 / 做 1 题，侦测手感再决定继续' },
-      { id: 'r_stu4', cat: 'c_study', lv: 'lv1', t: '啃一块硬骨头（当前最难的知识点）', on: true, parent: null, seq: 2 },
-      { id: 'r_stu5', cat: 'c_study', lv: 'lv2', t: '当日产出留痕（提交 / 笔记 / 截图）', on: true, parent: null, seq: 1 },
-      { id: 'r_stu6', cat: 'c_study', lv: 'lv2', t: '每周 10min 三问复盘', on: true, parent: null, seq: 2 },
-      /* 专注 */
-      { id: 'r_foc1', cat: 'c_focus', lv: 'lv0', t: '开工前先到固定工位坐下（仪式感启动）', on: true, parent: null, seq: 1 },
-      { id: 'r_foc2', cat: 'c_focus', lv: 'lv0', t: '两分钟规则：只承诺做 2 分钟', on: true, parent: null, seq: 2, micro: '先只做 2 分钟，时间到再决定续不续' },
-      { id: 'r_foc3', cat: 'c_focus', lv: 'lv1', t: '45min 深专注块 ×2', on: true, parent: null, seq: 1 },
-      { id: 'r_foc4', cat: 'c_focus', lv: 'lv2', t: '到外部场所（图书馆/自习室/咖啡馆）≥2h', on: true, parent: null, seq: 1 },
-      /* 娱乐 */
-      { id: 'r_pla1', cat: 'c_play', lv: 'lv0', t: '娱乐片段结束即停，不续播', on: true, parent: null, seq: 1 },
-      { id: 'r_pla2', cat: 'c_play', lv: 'lv1', t: '开始娱乐前先设定时器（到点即停）', on: true, parent: null, seq: 1 },
-      { id: 'r_pla3', cat: 'c_play', lv: 'lv2', t: '零无意识刷屏日（拿手机前先想：要看什么）', on: true, parent: null, seq: 1 },
-      /* 健康（睡眠卫生 + 冲动管理，承接原戒断链） */
-      { id: 'r_hlt1', cat: 'c_health', lv: 'lv0', t: '睡前 1 小时放下手机（闹钟放远处）', on: true, parent: null, seq: 1 },
-      { id: 'r_hlt2', cat: 'c_health', lv: 'lv1', t: '冲动来袭 → 先做 15 分钟别的事', on: true, parent: null, seq: 1 },
-      { id: 'r_hlt3', cat: 'c_health', lv: 'lv2', t: '连续 7 天守住关键底线（链式记录）', on: true, parent: null, seq: 1 },
-      { id: 'r_hlt4', cat: 'c_health', lv: 'lv1', t: '小睡 ≤20min 且不晚于 15 点', on: true, parent: null, seq: 2 },
-      { id: 'r_hlt5', cat: 'c_health', lv: 'lv2', t: '全天保持清醒节奏（白天不补觉）', on: true, parent: null, seq: 2 },
-      /* 生活 · 晨间主链 */
-      { id: 'r_lif1',  cat: 'c_life', lv: 'lv0', t: '起床脚落地，不沾床', on: true, parent: null, seq: 1 },
-      { id: 'r_lif2a', cat: 'c_life', lv: 'lv0', t: '刷牙洗脸', on: true, parent: null, seq: 2 },
-      { id: 'r_lif2',  cat: 'c_life', lv: 'lv0', t: '开窗见光，唤醒身体', on: true, parent: null, seq: 3 },
-      { id: 'r_lif2b', cat: 'c_life', lv: 'lv0', t: '吃一份带蛋白质的早餐', on: true, parent: null, seq: 4 },
-      { id: 'r_lif7',  cat: 'c_life', lv: 'lv0', t: '走出家门 → 去到学习/工作场所', on: true, parent: null, seq: 5 },
-      { id: 'r_lif3',  cat: 'c_life', lv: 'lv0', t: '清醒时段不吃零食/不喝含糖饮料', on: true, parent: null, seq: 6 },
-      /* 早起失败支链（挂在 r_lif1 下） */
-      { id: 'r_lif1b1', cat: 'c_life', lv: 'lv0', t: '补觉 ≤20min（沙发，不躺回床）', on: true, parent: 'r_lif1', seq: 1 },
-      { id: 'r_lif1b2', cat: 'c_life', lv: 'lv0', t: '洗漱后直接开始当日第一件事', on: true, parent: 'r_lif1', seq: 2 },
-      /* 生活中层 */
-      { id: 'r_lif5', cat: 'c_life', lv: 'lv1', t: '固定时间上床（睡足 7-8 小时）', on: true, parent: null, seq: 1 }
+      /* 起步 */
+      { id: 'r_st1', cat: 'c_start', lv: 'lv0', t: '完成 1 次打卡（先试试点一下）', on: true, parent: null, seq: 1 },
+      { id: 'r_st2', cat: 'c_start', lv: 'lv0', t: '两分钟规则：不想做就先做 2 分钟', on: true, parent: null, seq: 2, micro: '只做 2 分钟，时间到再决定续不续' },
+      { id: 'r_st3', cat: 'c_start', lv: 'lv1', t: '崩溃了？点 💥 记一笔（不归零）', on: true, parent: null, seq: 1 },
+      { id: 'r_st4', cat: 'c_start', lv: 'lv2', t: '睡前写下今天的一句话复盘', on: true, parent: null, seq: 1 },
+      /* 健康 */
+      { id: 'r_ht1', cat: 'c_health', lv: 'lv0', t: '今晚 12 点前睡觉', on: true, parent: null, seq: 1 },
+      { id: 'r_ht2', cat: 'c_health', lv: 'lv1', t: '每天户外光照 10 分钟', on: true, parent: null, seq: 1 }
     ],
     tags: [
-      { id: 't_social', name: '社交日',     color: '#e8912d', degrade: true },
-      { id: 't_lib',    name: '外出学习日', color: '#4ec9b0', degrade: false },
-      { id: 't_chaos',  name: '高扰动',     color: '#f44747', degrade: true },
-      { id: 't_sleepy', name: '低能量日',   color: '#569cd6', degrade: true }
+      { id: 't_social', name: '社交日',   color: '#e8912d', degrade: true },
+      { id: 't_sleepy', name: '低能量日', color: '#569cd6', degrade: true }
     ],
     daily: {},
     events: [],
     phases: [
-      { id: 'p1', parent: null, name: '第一阶段 · 系统冷启动', start: dayOff(0), end: dayOff(30), imp: 3, done: false, journal: '',
-        goal: '把早起主链连续跑通 21 天 + 锁定 1 条主线任务 + 建立每日留痕习惯' },
-      { id: 'p1a', parent: 'p1', name: '7 天启动清单', start: dayOff(0), end: dayOff(6), imp: 3, done: false, journal: '',
-        goal: 'Day1 砍到只留 3 条根部规则 / Day2 布置固定工位 / Day3 跑通一次 45min 专注块 / Day5 建立产出留痕的地方 / Day7 做第一次周复盘' },
-      { id: 'p2', parent: null, name: '第二阶段 · 主链加固', start: dayOff(31), end: dayOff(120), imp: 3, done: false, journal: '',
-        goal: '根部完成率 ≥80% + 主线任务推进过半 + 关键底线连续 7 天守住' },
-      { id: 'p3', parent: null, name: '第三阶段 · 顶层输出', start: dayOff(121), end: dayOff(240), imp: 2, done: false, journal: '',
-        goal: '把学到的东西做成一个能拿出手的作品，完成「输入 → 输出」闭环' }
+      { id: 'p1', parent: null, name: '第 1 周 · 认识系统', start: dayOff(0), end: dayOff(6), imp: 3, done: false, journal: '',
+        goal: '每天完成根部打卡；周日晚打开「回溯 → 周视图」写第一次周复盘，就明白这套系统怎么运转' }
     ],
     reviews: { day: {}, week: {}, month: {} },
-    /* 通用复盘随笔（不绑定日/周/月结构，随手记）与「规划·资源」收藏 */
-    retros: [],
-    resources: [],
+    retros: [
+      { id: 'rt0', date: '', text: '📖 3 天快速上手：\n1. 点一下规则 = 完成打卡；点 💥 = 今日崩溃（可走支链）。\n2. 规则不够用？「规则」页点右上角编辑，自己加。\n3. 崩溃不归零：去「回溯 → 定式迭代台」记一笔、改规则，明天重启。\n4. 周日晚写周复盘，系统就转起来了。\n更多模板在「模板市场」，随时可换。' }
+    ],
+    resources: [
+      { id: 'res0', title: '新手手册：这套系统怎么用', body: '规则树：根部=保命定式，中层=推进动作，顶层=冲刺目标。\n标记：社交日/低能量日打上后自动降级（只保根部，不追责）。\n迭代：崩了 → 回溯迭代台 → 改规则 → 次日重启。\n数据都在云端，网页和小程序实时同步。', tags: ['新手'], updatedAt: '' }
+    ],
     meta: { version: 'webapp-1.0' }
   };
 }
