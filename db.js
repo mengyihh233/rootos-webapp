@@ -83,6 +83,13 @@ async function cloudProfileGet(uid) {
 /* 探测 updatedAt：优先 getFileInfo（HEAD 请求，不下载 body，省流量/读次数）。
  * 文件内也存 updatedAt 作为兜底（getFileInfo 失败时）。 */
 async function cloudProfileUpdatedAt(uid) {
+  /* 🔴 修复：优先读文件内的 updatedAt（毫秒级 ISO，cloudProfileSet 写入）——
+   * getFileInfo 的 lastModified 是【秒级】，同一秒内双端写会拿到相同时间戳 → 乐观锁失效（静默覆盖）。
+   * lastModified 仅作兜底。 */
+  const raw = await cloudDownload(uid);
+  if (raw) {
+    try { const j = JSON.parse(raw); if (j && j.updatedAt) { const d = new Date(j.updatedAt); if (!isNaN(d.getTime())) return d.toISOString(); } } catch (e) { /* 继续兜底 */ }
+  }
   try {
     const fileID = cloudFileID(uid);
     if (fileID) {
@@ -93,10 +100,8 @@ async function cloudProfileUpdatedAt(uid) {
         if (!isNaN(d.getTime())) return d.toISOString();
       }
     }
-  } catch (e) { /* 走 body 兜底 */ }
-  const raw = await cloudDownload(uid);
-  if (!raw) return null;
-  try { const j = JSON.parse(raw); return j && j.updatedAt ? j.updatedAt : null; } catch (e) { return null; }
+  } catch (e) { /* 返回 null */ }
+  return null;
 }
 async function cloudProfileSet(uid, dataStr) {
   const obj = JSON.stringify({ data: dataStr, updatedAt: new Date().toISOString() });

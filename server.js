@@ -667,7 +667,7 @@ async function start() {
        * 视为可合并——把临时账号的数据并入目标账号、openid 转移，否则才是真冲突 */
       if (!/^wx_/.test(String(holder.username || ''))) return res.status(409).json({ error: '该微信已绑定其他账号' });
       const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
-      const isDefaultBag = d => (d && d.meta && d.meta._seed) || !d.rules || !Array.isArray(d.rules) || d.rules.length === 0; /* 🔴 _seed 标记优先：defaultBag 恒含种子规则，仅判 length 会误判临时账号为真实数据 */
+      const isDefaultBag = d => { /* 🔴 精确判定：有真实内容（非种子规则/有打卡/有事件/有复盘）就不是默认——_seed 标记在新用户保存后仍残留，不能只信它 */ const hasReal = (d && Array.isArray(d.rules) && d.rules.length > 0 && !(d.meta && d.meta._seed)) || (d && d.daily && Object.keys(d.daily).length > 0) || (d && d.events && d.events.length > 0) || (d && d.reviews && (Object.keys(d.reviews.day||{}).length > 0 || Object.keys(d.reviews.week||{}).length > 0)); return !hasReal; };
       const hData = parse(await db.profileGet(holder.id));
       const tData = parse(await db.profileGet(u.id));
       const hReal = !isDefaultBag(hData), tReal = !isDefaultBag(tData);
@@ -1188,7 +1188,12 @@ async function start() {
   function sanitizeBag(d) {
     /* 字段长度裁剪 + 数量上限（防恶意灌水撑爆数据库） */
     const clean = { ...defaultBag(), ...d };
-    if (clean.meta) { delete clean.meta.ghToken; }
+    if (clean.meta) {
+      delete clean.meta.ghToken;
+      /* 🔴 修复：一旦用户保存（写入真实数据），清除 _seed 默认标记——
+       * 否则新用户改过规则后仍被 isDefaultBag 判为"临时账号"，绑定合并方向错乱 */
+      delete clean.meta._seed;
+    }
     if (Array.isArray(clean.rules)) {
       if (clean.rules.length > MAX_RULES_PER_USER) return { error: `规则数量超过上限 ${MAX_RULES_PER_USER}` };
       clean.rules = clean.rules.slice(0, MAX_RULES_PER_USER).map(r => ({
