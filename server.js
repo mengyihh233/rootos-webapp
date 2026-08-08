@@ -641,30 +641,50 @@ async function start() {
     });
   }));
 
-  /* 爱发电支付回调（创作中心 → 设置 → 开发者设置 → Webhook URL 填本接口；AFDIAN_TOKEN 为 Webhook token）
-   * 联调：AFDIAN_DEBUG=1 时跳过验签（仅测试期用，跑通后务必关闭） */
+  /* 爱发电支付回调（官方 Webhook 格式，2026-08 核实 guide.afdian.com/creator/developer）：
+   *   请求体 = { ec, em, data: { type:'order', order:{ out_trade_no, user_id, plan_id, total_amount, remark, ... }, sign } }
+   *   验签   = RSA-SHA256：sign_str = out_trade_no + user_id + plan_id + total_amount（依次拼接，无分隔符）
+   *             data.sign 为 base64 编码的 RSA 签名，用爱发电官方公钥验证
+   *   公钥   = 默认内置官方文档公钥；AFDIAN_PUBKEY 环境变量可覆盖（爱发电开发者后台可查）
+   *   AFDIAN_TOKEN 现仅作功能开关（未配置视为未启用该功能）
+   *   联调   = AFDIAN_DEBUG=1 时跳过验签（仅测试期用，跑通后务必关闭） */
+  const AFDIAN_PUBKEY = (process.env.AFDIAN_PUBKEY || '').replace(/\\n/g, '\n')
+    || '-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwwdaCg1Bt+UKZKs0R54y\nlYnuANma49IpgoOwNmk3a0rhg/PQuhUJ0EOZSowIC44l0K3+fqGns3Ygi4AfmEfS\n4EKbdk1ahSxu7Zkp2rHMt+R9GarQFQkwSS/5x1dYiHNVMiR8oIXDgjmvxuNes2Cr\n8fw9dEF0xNBKdkKgG2qAawcN1nZrdyaKWtPVT9m2Hl0ddOO9thZmVLFOb9NVzgYf\njEgI+KWX6aY19Ka/ghv/L4t1IXmz9pctablN5S0CRWpJW3Cn0k6zSXgjVdKm4uN7\njRlgSRaf/Ind46vMCm3N2sgwxu/g3bnooW+db0iLo13zzuvyn727Q3UDQ0MmZcEW\nMQIDAQAB\n-----END PUBLIC KEY-----';
   app.post('/api/payment/afdian', wrap(async (req, res) => {
-    const token = process.env.AFDIAN_TOKEN;
-    if (!token) { console.warn('💰 爱发电回调未启用：请配置环境变量 AFDIAN_TOKEN（爱发电 Webhook Token）'); return res.json({ ec: 400, em: '未配置 AFDIAN_TOKEN' }); }
+    if (!process.env.AFDIAN_TOKEN) { console.warn('💰 爱发电回调未启用：请配置环境变量 AFDIAN_TOKEN（爱发电 Webhook 开关）'); return res.json({ ec: 400, em: '未配置 AFDIAN_TOKEN' }); }
     try {
       const body = req.body || {};
-      /* 验签：md5(params + token) 比对 sign */
-      const calc = crypto.createHash('md5').update(String(body.params || '') + token).digest('hex');
-      if (calc !== body.sign) {
-        console.warn('⚠️ 爱发电验签失败 | received sign=' + String(body.sign).slice(0, 12) + '… | computed=' + calc.slice(0, 12) + '… | token 前缀=' + token.slice(0, 4) + '…');
-        if (process.env.AFDIAN_DEBUG === '1') {
-          console.warn('  → AFDIAN_DEBUG=1 已忽略验签（联调模式，请尽快关闭）');
-        } else {
+      const data = body.data || {};
+      const order = (typeof data.order === 'string' ? JSON.parse(data.order) : data.order) || {};
+      const sign = String(data.sign || '');
+      const DEBUG = process.env.AFDIAN_DEBUG === '1';
+      if (!DEBUG) {
+        /* RSA 验签：sign_str = out_trade_no+user_id+plan_id+total_amount */
+        const signStr = [order.out_trade_no, order.user_id, order.plan_id, order.total_amount].join('');
+        if (!signStr || !sign) return res.status(400).json({ ec: 400, em: '缺少订单数据或签名' });
+        try {
+          const verifier = crypto.createVerify('RSA-SHA256');
+          verifier.update(signStr);
+          if (!verifier.verify(AFDIAN_PUBKEY, Buffer.from(sign, 'base64'))) {
+            console.warn('⚠️ 爱发电验签失败 | order=' + order.out_trade_no + ' | sign 前缀=' + sign.slice(0, 12));
+            return res.status(403).json({ ec: 403, em: '验签失败' });
+          }
+        } catch (ve) {
+          console.warn('⚠️ 爱发电验签异常：', ve.message);
           return res.status(403).json({ ec: 403, em: '验签失败' });
         }
+      } else {
+        console.warn('  → AFDIAN_DEBUG=1 已忽略验签（联调模式，请尽快关闭）');
       }
-      const params = typeof body.params === 'string' ? JSON.parse(body.params) : body.params;
-      const remark = String(params.remark || params.out_trade_no || '').trim(); /* 用户付款时备注填用户名 */
+      /* 备注找用户；幂等：解锁时长只增不减（重复推送不重复计） */
+      const remark = String(order.remark || '').trim(); /* 用户付款时备注填用户名 */
+      if (!remark) return res.json({ ec: 200, em: 'ok（备注为空，未解锁）' });
       const u = await db.userByName(remark);
-      if (!u) return res.json({ ec: 200, em: '未找到用户（付款备注需填用户名）' });
-      const until = new Date(Date.now() + LICENSE_UNLOCK_DAYS * 86400000).toISOString();
+      if (!u) { console.warn('💰 爱发电回调：备注「' + remark + '」未匹配到用户'); return res.json({ ec: 200, em: '未找到用户（付款备注需填用户名）' }); }
+      const cur = u.unlock_until ? new Date(u.unlock_until).getTime() : 0;
+      const until = new Date(Math.max(cur, Date.now()) + LICENSE_UNLOCK_DAYS * 86400000).toISOString();
       await db.userUnlock(u.id, until);
-      console.log(`💰 爱发电回调：用户 ${u.username} 解锁 ${LICENSE_UNLOCK_DAYS} 天`);
+      console.log(`💰 爱发电回调：用户 ${u.username} 解锁至 ${until.slice(0, 10)}（订单 ${order.out_trade_no}）`);
       res.json({ ec: 200, em: 'ok' });
     } catch (e) { console.warn('⚠️ 爱发电回调处理失败：', e.message); res.json({ ec: 500, em: 'error' }); }
   }));
