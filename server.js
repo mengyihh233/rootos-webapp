@@ -615,7 +615,14 @@ async function start() {
     const wechat = String(req.body.wechat || '').trim();
     if (!wechat) return res.status(400).json({ error: '微信号不能为空' });
     if (wechat.length > 64) return res.status(400).json({ error: '微信号过长' });
-    await db.userSetWechat(req.session.userId, wechat);
+    /* 🔴 wechat 全局唯一（网页端按微信号识别 wx_ 账号，必须唯一） */
+    if (await db.wechatTaken(wechat, req.session.userId)) return res.status(409).json({ error: '该微信号已被其他账号使用' });
+    try {
+      await db.userSetWechat(req.session.userId, wechat);
+    } catch (e) {
+      /* PG 唯一索引冲突兜底 */
+      return res.status(409).json({ error: '该微信号已被其他账号使用' });
+    }
     res.json({ ok: true, wechat });
   }));
 
@@ -1152,14 +1159,19 @@ async function start() {
   /* ⑧b 网页端接入微信账号（反向合并）：网页账号当前登录 → 输入 wx_ 账号 + 密码 → 微信数据并入网页账号。
    * 场景：用户网页端用邮箱注册，之前在小程序用过 wx_ 账号（设过密码），现在想把两边数据合在一起。 */
   app.post('/api/account/attach-wx', requireAuth, wrap(async (req, res) => {
-    const username = String((req.body || {}).username || '').trim();
+    /* 🔴 用户期望的逻辑：网页端输入【微信号 + 密码】接入小程序端 wx_ 账号
+     * 微信号是 wx_ 账号在「我的」里设置的友好登录标识（替代 wx_xxx 不友好的系统账号） */
+    const wechat = String((req.body || {}).wechat || '').trim();
     const password = String((req.body || {}).password || '');
-    const wx = await db.userByName(username);
-    if (!wx || !/^wx_/.test(String(wx.username || ''))) return res.status(401).json({ error: '账号或密码错误' });
-    if (!bcrypt.compareSync(password, wx.pw_hash)) return res.status(401).json({ error: '账号或密码错误' });
+    if (!wechat) return res.status(400).json({ error: '请输入小程序端微信号' });
+    if (!password) return res.status(400).json({ error: '请输入小程序端密码' });
+    /* 🔴 关键：微信号不能为空（用户必须先在小程序端设置过才能接入）——这是身份锚点 */
+    const wx = await db.userByWechat(wechat);
+    if (!wx) return res.status(401).json({ error: '未找到该微信号对应的小程序账号（请先在小程序端「我的」设置微信号+密码）' });
+    if (!/^wx_/.test(String(wx.username || ''))) return res.status(401).json({ error: '该微信号不是小程序自动注册账号' });
+    if (!bcrypt.compareSync(password, wx.pw_hash)) return res.status(401).json({ error: '密码错误' });
     if (wx.id === req.session.userId) return res.status(400).json({ error: '当前已是该账号，无需绑定' });
-    /* 该 wx_ 账号必须持有 openid（才能把微信登录导向网页账号） */
-    if (!wx.wx_openid) return res.status(400).json({ error: '该微信账号未绑定微信登录，无法接入' });
+    if (!wx.wx_openid) return res.status(400).json({ error: '该小程序账号未绑定微信登录，无法接入' });
     const target = await db.userById(req.session.userId);
     /* 数据合并：与 merge-web 同一套（目标=网页账号，源=wx_ 账号） */
     const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };

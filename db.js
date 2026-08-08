@@ -348,6 +348,9 @@ async function init() {
         const name = col.split(' ')[0];
         await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${name} ${col.slice(name.length).trim()}`);
       }
+      /* 🔴 wechat 唯一索引（应用层 + DB 双重保障，让「微信号+密码」能定位 wx_ 账号）
+       * 用 LOWER() 实现大小写不敏感的唯一性（微信号不区分大小写） */
+      await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_wechat_unique ON users (LOWER(wechat)) WHERE wechat IS NOT NULL AND wechat <> ''`);
     };
     let ok = false;
     let lastErr = null;
@@ -688,6 +691,23 @@ async function userByDisplayName(name, exceptUid) {
   return sqlite.prepare('SELECT id, username, display_name FROM users WHERE display_name = ?').get(name) || null;
 }
 
+/* 按微信号查用户（不区分大小写）——用于网页端「微信号+密码」接入 wx_ 账号。
+ * 🔴 wechat 字段全局唯一：应用层校验（SQLite ALTER 加列无 UNIQUE 约束，PG 用 UNIQUE INDEX）。 */
+async function userByWechat(name) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT * FROM users WHERE LOWER(wechat) = LOWER($1) LIMIT 1', [name]);
+    return r.rows[0] || null;
+  }
+  return sqlite.prepare('SELECT * FROM users WHERE LOWER(IFNULL(wechat,"")) = LOWER(?) LIMIT 1').get(name) || null;
+}
+
+/* 检查 wechat 是否已被占用（不含自身） */
+async function wechatTaken(name, exceptUid) {
+  if (!name) return false;
+  const u = await userByWechat(name);
+  return !!(u && u.id !== exceptUid);
+}
+
 /* 设置显示名（唯一）：成功返回 true；已被占用返回 false（不抛错，让上层给友好提示） */
 async function userSetDisplayName(uid, name) {
   if (USE_PG) {
@@ -945,7 +965,7 @@ async function wipeAllUsers() {
   return deleted;
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userByWechat, wechatTaken, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {
