@@ -311,6 +311,7 @@ async function createUser(username, pw_hash) {
 }
 
 async function profileGet(uid) {
+  if (globalThis.__incUsageDbRead) globalThis.__incUsageDbRead();
   if (USE_PG) {
     const r = await pool.query('SELECT data FROM profiles WHERE user_id = $1', [uid]);
     return r.rows[0] ? r.rows[0].data : null;
@@ -322,6 +323,7 @@ async function profileGet(uid) {
 /* 读取数据最后更新时间（服务器时钟，跨设备冲突判断的权威依据）。
  * 返回 ISO 字符串；无记录返回 null。 */
 async function profileUpdatedAt(uid) {
+  if (globalThis.__incUsageDbRead) globalThis.__incUsageDbRead();
   if (USE_PG) {
     const r = await pool.query('SELECT updated_at FROM profiles WHERE user_id = $1', [uid]);
     if (!r.rows[0] || !r.rows[0].updated_at) return null;
@@ -334,6 +336,7 @@ async function profileUpdatedAt(uid) {
 }
 
 async function profileSet(uid, dataStr) {
+  if (globalThis.__incUsageDbWrite) globalThis.__incUsageDbWrite();
   if (USE_PG) {
     await pool.query(
       `INSERT INTO profiles (user_id, data, updated_at)

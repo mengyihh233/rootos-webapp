@@ -228,6 +228,16 @@ function render() {
     </div>
 
     <div class="section">
+      <h2>📊 用量估算（云开发资源点）</h2>
+      <div id="usagePanel" style="font-size:.85rem;line-height:1.7;">加载中…</div>
+      <p style="color:var(--dim);font-size:.8rem;">
+        ⚠️ 这只是 <b>本服务</b> 请求/数据库读写的实时计数（按经验系数估算），非云开发官方计费。<br>
+        准确消耗请到 <a href="https://console.cloud.tencent.com/tcb" target="_blank" style="color:var(--accent);">腾讯云开发控制台 → 用量统计</a> 查看「资源点」曲线并校准系数。<br>
+        <b>19.9 元基础版约含 1 万资源点/月</b>（云控制台套餐页可查）——超过就会停服务，需续费或升级。
+      </p>
+    </div>
+
+    <div class="section">
       <h2>📥 注入规划数据（个人模板私有导入）</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
         <input id="injUser" placeholder="目标用户名" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
@@ -274,6 +284,7 @@ function render() {
   loadTplReview();
   renderDevList();
   loadBackups();
+  renderUsage();
 }
 
 /* 只重渲染用户表（搜索输入时调用，避免整页闪烁） */
@@ -464,13 +475,32 @@ async function setDev(dev) {
   if (okList.length) { document.getElementById('devUser').value = ''; refreshStatsSilent(); renderDevList(); }
 }
 /* 显示当前开发者列表 */
-function renderDevList() {
-  const box = document.getElementById('devList');
-  if (!box) return;
-  const devs = (S && S.users || []).filter(u => u.is_dev === 1);
-  box.innerHTML = devs.length
-    ? '<b style="color:var(--green);">当前开发者（' + devs.length + '）：</b> ' + devs.map(u => '<span style="color:var(--accent);">' + escapeHtml(u.username) + '</span>').join('、')
-    : '<span style="color:var(--dim);">当前还没有开发者账号</span>';
+/* 渲染用量估算面板（基于 stats 接口的 usage 字段） */
+function renderUsage() {
+  const box = document.getElementById('usagePanel');
+  if (!box || !S || !S.usage) { if (box) box.textContent = '加载中…'; return; }
+  const u = S.usage;
+  const dayPts = u.projected && u.projected.dayPoints || 0;
+  const monPts = u.projected && u.projected.monthPoints || 0;
+  /* 套餐余量估算（基础 19.9 元 ~ 10000 点/月，可改 PACKET_LIMIT 调整） */
+  const PACKET = 10000;
+  const dayPtsCost = u.today.estPoints || 0;
+  const daysLeft = dayPtsCost > 0 ? Math.max(0, Math.floor((PACKET - monPts * 0.1) / Math.max(1, dayPts))) : 30;
+  /* 最近 60 分钟 API 请求条形图 */
+  const maxApi = Math.max(1, ...u.buckets.map(b => b.api));
+  const barHtml = u.buckets.slice(-30).map(b =>
+    `<div style="display:inline-block;width:14rpx;height:14rpx;background:#4fc1ff;opacity:${0.3 + 0.7 * b.api / maxApi};margin-right:2rpx;vertical-align:bottom;" title="${new Date(b.t).toLocaleTimeString()} API:${b.api} DB-R:${b.dbR} W:${b.dbW}"></div>`
+  ).join('');
+  box.innerHTML =
+    `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:10px;">` +
+      `<div><span style="color:var(--dim);">今日 API 请求</span><br><b style="font-size:1.3rem;">${u.today.api}</b> <small>（含 GET meta ${u.last1h.rpm}/分钟最近1h）</small></div>` +
+      `<div><span style="color:var(--dim);">今日 DB 读 / 写</span><br><b style="font-size:1.3rem;">${u.today.dbRead} / ${u.today.dbWrite}</b></div>` +
+      `<div><span style="color:var(--dim);">今日估算资源点</span><br><b style="font-size:1.3rem;color:${dayPtsCost > 300 ? 'var(--amber)' : 'var(--green)'};">${dayPtsCost}</b></div>` +
+      `<div><span style="color:var(--dim);">预测本月消耗</span><br><b style="font-size:1.3rem;color:${monPts > PACKET ? 'var(--red)' : 'var(--text)'};">${monPts}</b> <small>/ ${PACKET} (19.9基础)</small></div>` +
+    `</div>` +
+    `<div style="margin:8px 0 4px;color:var(--dim);">最近 30 分钟 API 请求（点柱看详情）：</div>` +
+    `<div style="background:#181818;padding:6px 8px;border-radius:6px;line-height:1;">${barHtml}</div>` +
+    `<div style="margin-top:8px;color:var(--dim);">预测 19.9 套餐约剩 <b style="color:var(--accent);">${daysLeft}</b> 天可撑（按当前速率推算）</div>`;
 }
 /* 备份：列出最近备份 */
 async function loadBackups() {

@@ -396,10 +396,11 @@ async function start() {
 
   /* 统一鉴权：网页走 session cookie，小程序走 Bearer token；后续逻辑统一用 req.session.userId */
   function requireAuth(req, res, next) {
-    if (req.session.userId) return next();
+    if (req.session.userId) { globalThis.__incUsageApi && globalThis.__incUsageApi(); return next(); }
     const uid = wxUidFromReq(req);
     if (!uid) return res.status(401).json({ error: '未登录' });
     req.session.userId = uid;
+    globalThis.__incUsageApi && globalThis.__incUsageApi();
     next();
   }
 
@@ -1120,6 +1121,29 @@ async function start() {
         dbConnected: db.isConnected(),
         env: process.env.NODE_ENV || 'development'
       },
+      /* 用量估算（云开发资源点）：
+       *   本服务请求数 + DB 读写次数的实时曲线，对照腾讯云控制台"今日资源点消耗"校准
+       *   经验系数：每次 API 请求≈0.5 点（GET meta < GET 全量 < PUT save），DB 读写各≈1 点 */
+      usage: (function() {
+        const now = Date.now();
+        const dayStart = Math.floor(now / 86400000) * 86400000;
+        const today = _buckets.filter(b => b.t >= dayStart);
+        const last1h = _buckets.filter(b => b.t >= now - 3600000);
+        const sum = (arr, k) => arr.reduce((a, b) => a + (b[k] || 0), 0);
+        const todayApi = sum(today, 'api'), todayRead = sum(today, 'dbRead'), todayWrite = sum(today, 'dbWrite');
+        const h1Api = sum(last1h, 'api');
+        /* 粗略系数（云开发 PG 资源点）：仅供趋势估算，非精确计费 */
+        const todayPoints = todayApi * 0.4 + todayRead * 1.0 + todayWrite * 1.2;
+        /* 当天小时数（避免刚启动时按整月推算） */
+        const hoursToday = Math.max(1, Math.min(24, Math.ceil((now - dayStart) / 3600000)));
+        const projectedDayPoints = todayPoints / hoursToday * 24;
+        return {
+          today: { api: todayApi, dbRead: todayRead, dbWrite: todayWrite, estPoints: Math.round(todayPoints) },
+          last1h: { api: h1Api, rpm: Math.round(h1Api / 60) },
+          projected: { dayPoints: Math.round(projectedDayPoints), monthPoints: Math.round(projectedDayPoints * 30) },
+          buckets: _buckets.slice(-60).map(b => ({ t: b.t, api: b.api, dbR: b.dbRead, dbW: b.dbWrite }))
+        };
+      })(),
       generatedAt: new Date().toISOString()
     });
   }));
@@ -1343,6 +1367,26 @@ async function start() {
   app.listen(PORT, () => {
     console.log(`✅ 底层创造者OS 多用户版运行中： http://localhost:${PORT}`);
   });
+
+  /* ============ 用量计数器（资源点估算用） ============
+   * 内存级轻量采样：每分钟一个桶，记录该分钟的 API 请求数 + DB 读/写次数
+   * 供 admin /api/admin/stats 输出当日/最近 60 分钟曲线 + 月底估算 */
+  const _buckets = []; /* [{ t: 分钟时间戳, api, dbRead, dbWrite }]，最多保留 1440 个（24h） */
+  let _curBucket = null;
+  function tickUsage() {
+    const minute = Math.floor(Date.now() / 60000) * 60000;
+    if (!_curBucket || _curBucket.t !== minute) {
+      _curBucket = { t: minute, api: 0, dbRead: 0, dbWrite: 0 };
+      _buckets.push(_curBucket);
+      if (_buckets.length > 1440) _buckets.shift();
+    }
+    return _curBucket;
+  }
+  globalThis.__incUsageApi = () => { tickUsage().api++; };
+  globalThis.__incUsageDbRead = () => { tickUsage().dbRead++; };
+  globalThis.__incUsageDbWrite = () => { tickUsage().dbWrite++; };
+  /* 自启动后预热：立即生成一个桶（避免 stats 接口访问时 _curBucket=null） */
+  tickUsage();
 
   /* 后台异步连接数据库：失败不退出，5s 后重试，直到 Neon 唤醒。 */
   connectDBLoop();
