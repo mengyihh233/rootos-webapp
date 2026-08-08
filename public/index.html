@@ -853,6 +853,17 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
    ============================================================ */
 const $ = s => document.querySelector(s);
 const today = new Date().toLocaleDateString('sv');
+/* 跨天检测：日期变化时更新 today 并重渲染今日页（页面挂后台跨天不再记到昨天） */
+function checkDayRollover(){
+  const t = new Date().toLocaleDateString('sv');
+  if(t === today) return;
+  today = t;
+  renderTodayRules(); updateProgress();
+  if(document.querySelector('.section.active') && document.querySelector('.section.active').id==='today'){
+    renderTodayRules(); updateProgress();
+  }
+  if(SESSION) pushToServer();
+}
 
 /* 【v8 修复】savedTimer 必须先于任何 store.set 声明（v7 的 TDZ bug 根因） */
 let savedTimer = null;
@@ -2597,6 +2608,8 @@ async function apiPost(url, body){
  *  - 服务器较新 → 静默应用数据（suppressSave 防回推）+ 轻量重渲染当前视图 + toast 提示 */
 async function silentSync(){
   if(!SESSION || suppressSave) return;
+  /* 跨天检测：页面挂后台跨天时，今日日期与打卡目标要跟着翻页 */
+  checkDayRollover();
   const el=document.activeElement;
   if(el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
   try{
