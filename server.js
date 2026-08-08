@@ -220,12 +220,14 @@ function computeFailureAnalysis(d0) {
  * 保留最近 BACKUP_KEEP 份（默认 7）；配合 Neon PITR 双重保险。
  * admin 可随时「立即备份」/下载（见 /api/admin/backup*）。 */
 const BACKUP_KEEP = Math.max(1, Math.min(30, Number(process.env.BACKUP_KEEP) || 7));
+/* 云开发环境 ID 探测：与 db.js CLOUD_ENV 保持一致（TCB_ENV > TCB_ENV_ID > SCF_NAMESPACE） */
+const CLOUD_ENV = process.env.TCB_ENV || process.env.TCB_ENV_ID || process.env.SCF_NAMESPACE || '';
 /* 云存储双保险备份：数据库内快照之外，再上传一份到 CloudBase 云存储。
  * 正确用法（已查证 @cloudbase/node-sdk 文档）：app.init({env:TCB_ENV}).uploadFile({cloudPath, fileContent})
  * —— 云托管环境自动注入 TCB_ENV + 临时密钥，免手动配密钥；桶是环境自动分配（cloudbasestorage-<envId>）。
  * 非云托管环境（无 TCB_ENV，如本地开发）静默跳过，不影响数据库内备份。 */
 async function uploadSnapshotToCOS(snapshotStr, dateStr) {
-  const envId = process.env.TCB_ENV;
+  const envId = CLOUD_ENV;
   if (!envId) return '跳过（非云托管环境，仅存数据库内）';
   try {
     const cloudbase = require('@cloudbase/node-sdk');
@@ -738,7 +740,7 @@ async function start() {
   /* ---- 数据备份（全库快照存 backups 表） ---- */
   app.get('/api/admin/backups', requireAdmin, wrap(async (req, res) => {
     const list = await db.backupList(Number(req.query.limit) || 10);
-    res.json({ ok: true, keep: BACKUP_KEEP, cos: { enabled: !!process.env.TCB_ENV, envId: process.env.TCB_ENV || '' }, list });
+    res.json({ ok: true, keep: BACKUP_KEEP, cos: { enabled: !!CLOUD_ENV, envId: CLOUD_ENV }, list });
   }));
   /* 立即备份（管理员手动触发） */
   app.post('/api/admin/backup', requireAdmin, wrap(async (req, res) => {
@@ -749,7 +751,7 @@ async function start() {
   /* 【方案3迁移】一键把 PG profiles 表 → 云存储（幂等，可重复执行）。
    * 仅 CLOUD_STORAGE=1 且 DATABASE_URL 可用时提供。迁移后 profiles 表数据保留作备份。 */
   app.post('/api/admin/migrate-profiles', requireAdmin, wrap(async (req, res) => {
-    if (!db.USE_CLOUD_STORAGE) return res.status(400).json({ error: '未启用云存储引擎（CLOUD_STORAGE=1 + TCB_ENV）' });
+    if (!db.USE_CLOUD_STORAGE) return res.status(400).json({ error: '未启用云存储引擎（环境变量 CLOUD_STORAGE=1）' });
     if (!process.env.DATABASE_URL) return res.status(400).json({ error: '无 DATABASE_URL（旧 PG 连接串），无法读取待迁移数据' });
     const { Pool } = require('pg');
     const pg = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 3 });
@@ -758,7 +760,7 @@ async function start() {
       const rows = r.rows;
       let ok = 0, fail = 0, firstErr = '';
       const cloudbase = require('@cloudbase/node-sdk');
-      const app0 = cloudbase.init({ env: process.env.TCB_ENV });
+      const app0 = cloudbase.init({ env: CLOUD_ENV });
       for (const row of rows) {
         try {
           const updatedAt = row.updated_at

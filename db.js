@@ -14,7 +14,10 @@
 const path = require('path');
 
 const USE_PG = !!process.env.DATABASE_URL;
-const USE_CLOUD_STORAGE = process.env.CLOUD_STORAGE === '1' && !!(process.env.TCB_ENV);
+/* 云存储引擎启用条件：CLOUD_STORAGE=1 即可（@cloudbase/node-sdk 在云托管环境自动从 context 鉴权拿环境）。
+ * 环境 ID 多来源探测：TCB_ENV > TCB_ENV_ID > SCF_NAMESPACE > 空（SDK 自动识别） */
+const CLOUD_ENV = process.env.TCB_ENV || process.env.TCB_ENV_ID || process.env.SCF_NAMESPACE || '';
+const USE_CLOUD_STORAGE = process.env.CLOUD_STORAGE === '1';
 let _cloudApp = null; /* @cloudbase/node-sdk app 实例（惰性初始化） */
 
 let sqlite = null;   // better-sqlite3 实例
@@ -25,7 +28,7 @@ let connected = false; // 是否已成功初始化（供 server 判断 DB 就绪
 function cloudApp() {
   if (!_cloudApp) {
     const cloudbase = require('@cloudbase/node-sdk');
-    _cloudApp = cloudbase.init({ env: process.env.TCB_ENV });
+    _cloudApp = cloudbase.init({ env: CLOUD_ENV });
   }
   return _cloudApp;
 }
