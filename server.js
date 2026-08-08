@@ -757,6 +757,23 @@ async function start() {
     res.json({ ok: true, username, unlockUntil: until });
   }));
 
+  /* ---- 定时任务入口（云函数定时触发器调用，解决缩容0下常驻定时器失效）----
+   * 用法：云开发控制台 → 云函数 → rootosCron → 定时触发器（cron 表达式）
+   *   每天 20:00：0 0 20 * * * *   → POST /api/cron/remind
+   *   每天 00:10：0 10 0 * * * *   → POST /api/cron/backup
+   * 鉴权：Authorization: Bearer <ADMIN_TOKEN> */
+  app.post('/api/cron/remind', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    const before = Date.now();
+    await sendReminders();
+    res.json({ ok: true, ms: Date.now() - before });
+  }));
+  app.post('/api/cron/backup', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    await runAutoBackup();
+    res.json({ ok: true });
+  }));
+
   /* ---- 数据备份（全库快照存 backups 表） ---- */
   app.get('/api/admin/backups', requireAdmin, wrap(async (req, res) => {
     const list = await db.backupList(Number(req.query.limit) || 10);
