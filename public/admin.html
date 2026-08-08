@@ -532,9 +532,9 @@ async function loadBackups() {
   if (!r.ok) { box.innerHTML = '<span style="color:var(--red);">加载失败</span>'; return; }
   const list = r.body.list || [];
   const cos = r.body.cos || {};
-  box.innerHTML = (cos.bucket
-      ? '<div style="margin-bottom:6px;color:var(--green);">☁️ 云存储双保险已启用：' + escapeHtml(cos.bucket) + '（' + escapeHtml(cos.region) + '），每日快照同步上传</div>'
-      : '<div style="margin-bottom:6px;color:var(--amber);">⚠️ 云存储双保险未启用：环境变量加 <b>COS_BUCKET</b>（如 rootos-1301234567）后每日快照同步上传云存储</div>')
+  box.innerHTML = (cos.enabled
+      ? '<div style="margin-bottom:6px;color:var(--green);">☁️ 云存储双保险已启用（环境 ' + escapeHtml(cos.envId || '') + '），每日快照同步上传</div>'
+      : '<div style="margin-bottom:6px;color:var(--amber);">⚠️ 云存储双保险未启用：非云托管环境（无 TCB_ENV），当前仅存数据库内备份</div>')
     + (list.length
     ? list.map(b => '<div style="margin:4px 0;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
         + '<span>#' + b.id + ' · ' + fmt(b.created_at) + ' · ' + fmtBytes(b.size_bytes) + '</span>'

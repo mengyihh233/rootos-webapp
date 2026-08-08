@@ -220,26 +220,19 @@ function computeFailureAnalysis(d0) {
  * 保留最近 BACKUP_KEEP 份（默认 7）；配合 Neon PITR 双重保险。
  * admin 可随时「立即备份」/下载（见 /api/admin/backup*）。 */
 const BACKUP_KEEP = Math.max(1, Math.min(30, Number(process.env.BACKUP_KEEP) || 7));
-/* 云存储双保险备份：数据库内快照之外，再上传一份到 CloudBase 云存储（COS）。
- * 需环境变量：COS_BUCKET（如 rootos-1301234567）、COS_REGION（如 ap-guangzhou）；
- * 凭证用云托管自动注入的 TENCENTCLOUD_SECRETID/SECRETKEY/SESSIONTOKEN（无需手动配密钥）。
- * 未配置 COS_BUCKET 时静默跳过（不影响数据库内备份）。 */
+/* 云存储双保险备份：数据库内快照之外，再上传一份到 CloudBase 云存储。
+ * 正确用法（已查证 @cloudbase/node-sdk 文档）：app.init({env:TCB_ENV}).uploadFile({cloudPath, fileContent})
+ * —— 云托管环境自动注入 TCB_ENV + 临时密钥，免手动配密钥；桶是环境自动分配（cloudbasestorage-<envId>）。
+ * 非云托管环境（无 TCB_ENV，如本地开发）静默跳过，不影响数据库内备份。 */
 async function uploadSnapshotToCOS(snapshotStr, dateStr) {
-  const bucket = process.env.COS_BUCKET;
-  if (!bucket) return '跳过（未配置 COS_BUCKET，仅存数据库内）';
+  const envId = process.env.TCB_ENV;
+  if (!envId) return '跳过（非云托管环境，仅存数据库内）';
   try {
-    const COS = require('cos-nodejs-sdk-v5');
-    const cos = new COS({
-      SecretId: process.env.TENCENTCLOUD_SECRETID || '',
-      SecretKey: process.env.TENCENTCLOUD_SECRETKEY || '',
-      SecurityToken: process.env.TENCENTCLOUD_SESSIONTOKEN || ''
-    });
-    const region = process.env.COS_REGION || 'ap-guangzhou';
-    await cos.putObject({
-      Bucket: bucket, Region: region,
-      Key: 'rootos-backups/rootos-' + dateStr + '.json',
-      Body: Buffer.from(snapshotStr, 'utf8'),
-      ContentType: 'application/json'
+    const cloudbase = require('@cloudbase/node-sdk');
+    const app = cloudbase.init({ env: envId });
+    await app.uploadFile({
+      cloudPath: 'rootos-backups/rootos-' + dateStr + '.json',
+      fileContent: Buffer.from(snapshotStr, 'utf8')
     });
     return '已上传云存储';
   } catch (e) {
@@ -745,7 +738,7 @@ async function start() {
   /* ---- 数据备份（全库快照存 backups 表） ---- */
   app.get('/api/admin/backups', requireAdmin, wrap(async (req, res) => {
     const list = await db.backupList(Number(req.query.limit) || 10);
-    res.json({ ok: true, keep: BACKUP_KEEP, cos: { bucket: process.env.COS_BUCKET || '', region: process.env.COS_REGION || 'ap-guangzhou' }, list });
+    res.json({ ok: true, keep: BACKUP_KEEP, cos: { enabled: !!process.env.TCB_ENV, envId: process.env.TCB_ENV || '' }, list });
   }));
   /* 立即备份（管理员手动触发） */
   app.post('/api/admin/backup', requireAdmin, wrap(async (req, res) => {
