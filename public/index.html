@@ -2846,8 +2846,12 @@ async function renderSettings(){
     +'<small id="setEmailMsg" style="color:var(--dim);"></small></div>'
     +'<div><b style="font-size:.9rem;">微信号 <small style="color:var(--dim);font-weight:normal;">（身份标识；小程序接入后自动关联 openid）</small></b>'
     +'<div style="margin-top:6px;">'+(wechat?'已绑定：<span style="color:var(--ok);">'+esc(wechat)+'</span>':'<small style="color:var(--dim);">未绑定</small>')+'</div>'
-    +'<div class="row" style="margin-top:8px;"><input type="text" id="setWechat" placeholder="微信号" style="flex:1;min-width:140px;">'
-    +'<button class="ok mini" onclick="bindWechat()">绑定</button></div></div>'
+    + (wechat
+      ? '<div class="row" style="margin-top:8px;"><input type="text" id="setWechat" placeholder="新微信号" value="'+esc(wechat)+'" style="flex:1;min-width:140px;">'
+          +'<button class="ok mini" onclick="bindWechat()">修改</button>'
+          +'<button class="ghost mini" onclick="unbindWechat()">解绑</button></div>'
+      : '<div class="row" style="margin-top:8px;"><input type="text" id="setWechat" placeholder="微信号" style="flex:1;min-width:140px;">'
+          +'<button class="ok mini" onclick="bindWechat()">绑定</button></div>')
     +'<div><b style="font-size:.9rem;">修改密码</b>'
     +'<div class="row" style="margin-top:6px;"><input type="password" id="setOldPw" placeholder="当前密码" style="flex:1;min-width:100px;">'
     +'<input type="password" id="setNewPw" placeholder="新密码（≥6 位）" style="flex:1;min-width:100px;">'
@@ -2875,7 +2879,12 @@ async function bindEmail(){
 async function bindWechat(){
   const wechat=(document.getElementById('setWechat').value||'').trim();
   const j=await apiPost('/api/wechat/bind',{wechat});
-  if(j.ok){ toast('微信绑定成功'); renderSettings(); } else toast(j.error||'绑定失败');
+  if(j.ok){ toast('微信'+(j.wechat?'绑定已更新':'绑定成功')); renderSettings(); } else toast(j.error||'操作失败');
+}
+async function unbindWechat(){
+  if(!confirm('确定解绑微信号？（仅清除此处的「微信号」文字标识，不影响小程序 openid 关联）')) return;
+  const j=await apiPost('/api/wechat/unbind',{});
+  if(j.ok){ toast('已解绑'); renderSettings(); } else toast(j.error||'解绑失败');
 }
 async function changePassword(){
   const old=document.getElementById('setOldPw').value, next=document.getElementById('setNewPw').value;

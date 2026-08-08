@@ -560,6 +560,12 @@ async function start() {
     res.json({ ok: true, wechat });
   }));
 
+  /* ⑤b 解绑微信号（清空 wechat 字段；不影响小程序 openid 绑定） */
+  app.post('/api/wechat/unbind', requireAuth, wrap(async (req, res) => {
+    await db.userSetWechat(req.session.userId, '');
+    res.json({ ok: true });
+  }));
+
   /* ⑥ 小程序微信登录：wx.login 的 code 换 openid → 已有绑定则签发 token，未绑定则返回 openid 供绑定 */
   app.post('/api/wechat/login', wrap(async (req, res) => {
     if (!WX_APPID || !WX_SECRET) return res.status(503).json({ error: '服务端未配置 WX_APPID/WX_SECRET，暂不支持微信登录' });
