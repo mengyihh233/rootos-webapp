@@ -531,11 +531,15 @@ async function loadBackups() {
   const r = await api('/api/admin/backups');
   if (!r.ok) { box.innerHTML = '<span style="color:var(--red);">加载失败</span>'; return; }
   const list = r.body.list || [];
-  box.innerHTML = list.length
+  const cos = r.body.cos || {};
+  box.innerHTML = (cos.bucket
+      ? '<div style="margin-bottom:6px;color:var(--green);">☁️ 云存储双保险已启用：' + escapeHtml(cos.bucket) + '（' + escapeHtml(cos.region) + '），每日快照同步上传</div>'
+      : '<div style="margin-bottom:6px;color:var(--amber);">⚠️ 云存储双保险未启用：环境变量加 <b>COS_BUCKET</b>（如 rootos-1301234567）后每日快照同步上传云存储</div>')
+    + (list.length
     ? list.map(b => '<div style="margin:4px 0;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
         + '<span>#' + b.id + ' · ' + fmt(b.created_at) + ' · ' + fmtBytes(b.size_bytes) + '</span>'
         + '<a href="/api/admin/backups/' + b.id + '" download style="color:var(--accent);">下载</a></div>').join('')
-    : '<span style="color:var(--dim);">还没有备份，点「立即备份」生成第一份</span>';
+    : '<span style="color:var(--dim);">还没有备份，点「立即备份」生成第一份</span>');
 }
 /* 立即备份 */
 async function runBackupNow() {
