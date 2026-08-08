@@ -101,6 +101,9 @@ async function cloudProfileUpdatedAt(uid) {
 async function cloudProfileSet(uid, dataStr) {
   const obj = JSON.stringify({ data: dataStr, updatedAt: new Date().toISOString() });
   const res = await cloudApp().uploadFile({ cloudPath: cloudFilePath(uid), fileContent: Buffer.from(obj, 'utf8') });
+  /* 🔴 修复：上传失败必须抛错（上层 save() 会提示用户重试），不能假成功丢数据 */
+  if (!res) throw new Error('云存储上传无响应');
+  if (res.code && res.code !== 'SUCCESS' && res.code !== 0) throw new Error('云存储上传失败: ' + (res.message || res.code));
   /* 从上传返回的权威 fileID 提取 envId.bucketId 缓存（cloud://<env>.<bucket>/<path>） */
   if (res && res.fileID && /^cloud:\/\//.test(res.fileID)) {
     try {
@@ -842,6 +845,13 @@ async function userDelete(uid, username) {
       sqlite.prepare('DELETE FROM users WHERE id = ?').run(uid);
     });
     del();
+  }
+  /* 🔴 修复：云存储模式注销时同步删除 profiles/<uid>.json（否则隐私数据残留云存储） */
+  if (USE_CLOUD_STORAGE) {
+    try {
+      const fileID = cloudFileID(uid);
+      if (fileID) await cloudApp().deleteFile({ fileList: [fileID] });
+    } catch (e) { console.warn('⚠️ 注销删除云存储 profile 失败：', (e && e.message) || e); }
   }
 }
 

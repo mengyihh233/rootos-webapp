@@ -344,8 +344,12 @@ function scheduleReminders() {
   let lastSendKey = '';
   setInterval(async () => {
     const now = new Date();
-    if (now.getHours() === 20 && now.getMinutes() < 30) {
-      const key = now.toISOString().slice(0, 10) + (now.getDay() === 0 ? '-wk' : '-day');
+    /* 🔴 修复：云托管容器默认 UTC 时区，getHours() 是 UTC 小时 → 会凌晨 4 点发。
+     * 统一按东八区（北京）换算：北京 20:00-20:30 触发。 */
+    const beijing = new Date(now.getTime() + 8 * 3600 * 1000);
+    const bjHours = beijing.getUTCHours(); /* 东八区的小时 = UTC+8 的 UTC 小时 */
+    if (bjHours === 20 && beijing.getUTCMinutes() < 30) {
+      const key = beijing.toISOString().slice(0, 10) + (beijing.getUTCDay() === 0 ? '-wk' : '-day');
       if (key !== lastSendKey) { lastSendKey = key; try { await sendReminders(); } catch (e) { console.warn('⚠️ 提醒下发失败：', e.message); } }
     }
   }, 10 * 60 * 1000);
@@ -722,6 +726,14 @@ async function start() {
       const remark = String(order.remark || '').trim(); /* 用户付款时备注填用户名 */
       if (!remark) return res.json({ ec: 200, em: 'ok（备注为空，未解锁）' });
       if (await db.orderSeen(order.out_trade_no)) return res.json({ ec: 200, em: 'ok（重复订单，已处理）' });
+      /* 🔴 修复：金额校验——总金额必须 ≥ 解锁价（分），防止任意金额+备注用户名白嫖解锁。
+       * total_amount 单位为分（爱发电文档）。AFDIAN_DEBUG=1 联调时跳过。 */
+      const payFen = Number(order.total_amount);
+      const MIN_FEN = Number(process.env.AFDIAN_MIN_FEN) || 100; /* 默认 ¥1 = 100 分，可按需调 */
+      if (process.env.AFDIAN_DEBUG !== '1' && !(payFen > 0 && payFen >= MIN_FEN)) {
+        console.warn(`💰 爱发电回调：金额不足（${payFen}分 < ${MIN_FEN}分）跳过解锁 | 备注=${remark.slice(0,20)}`);
+        return res.json({ ec: 200, em: 'ok（金额不足，未解锁）' });
+      }
       const u = await db.userByName(remark);
       if (!u) { console.warn('💰 爱发电回调：备注「' + remark.replace(/[\r\n]/g, ' ').slice(0, 40) + '」未匹配到用户'); return res.json({ ec: 200, em: '未找到用户（付款备注需填用户名）' }); }
       const cur = u.unlock_until ? new Date(u.unlock_until).getTime() : 0;
@@ -1334,11 +1346,12 @@ async function start() {
         !Array.isArray(data.tags) || !Array.isArray(data.phases) || typeof data.daily !== 'object') {
       return res.status(400).json({ error: '模板数据不合法（缺 rules/cats/tags/phases/daily）' });
     }
-    /* 安全：只保留结构字段，剥离个人运行数据（打卡/事件/复盘/随笔），避免模板泄露隐私 */
+    /* 安全：只保留结构字段，剥离个人运行数据（打卡/事件/复盘/随笔），避免模板泄露隐私。
+     * 🔴 修复：retros（个人复盘随笔）属于隐私记录，绝不进社区模板 */
     const safe = {
       cats: data.cats, levels: data.levels || [], rules: data.rules,
       tags: data.tags, phases: data.phases, resources: data.resources || [],
-      retros: data.retros || [], daily: {},
+      retros: [], daily: {},
       meta: Object.assign({}, data.meta || {}, { _tpl: true })
     };
     /* 安全：id 白名单校验（防注入内联事件构造存储型 XSS），非法 id 拒绝入库 */

@@ -990,6 +990,10 @@ let savedTimer = null;
 let localSavedAt = Number(localStorage.getItem('pos_savedAt'))||0;  /* 【新增】本地最后保存时间戳，用于多端冲突判断 */
 let localDirty = false;  /* 本地有未推送改动标记：推送成功才清。silentSync 见 dirty 则跳过拉取，防旧服务端数据覆盖本地刚做的改动 */
 function markSaved(){
+  /* 🔴 修复：suppressSave 期间（loadFromServer/silentSync/merge 从服务端写入本地）不算"本地改动"，
+   * 不置 dirty、不写本地时钟——否则每次同步都把自己挡住（silentSync 恒被 localDirty 拦截=静默同步失效），
+   * 且客户端时钟混入 pos_savedAt 会误判"本地较新"永不拉取。 */
+  if(suppressSave) return;
   try{
     const el = $('#savedTag'); if(!el) return;
     el.textContent = '✓ '+new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'})+' 已存';
@@ -2733,10 +2737,20 @@ function mergeRemoteIntoLocal(srv){
   if(!srv || typeof srv!=='object') return;
   suppressSave=true;
   try{
-    /* daily：本地某天的记录可能更新，合并键级 */
-    const newDaily={}; 
-    Object.keys(srv.daily||{}).forEach(k=>{ newDaily[k]=srv.daily[k]; });
-    Object.keys(daily||{}).forEach(k=>{ newDaily[k]=daily[k]; });  /* 本地覆盖同天（本地刚操作过，以本地为准） */
+    /* daily：🔴 修复——同天也做「键级合并」（checks/tags/sleep/note 逐字段合并），
+     * 不能本地整键覆盖服务端（否则另一台设备同天的打卡会丢）。 */
+    const newDaily={};
+    Object.keys(srv.daily||{}).forEach(k=>{ newDaily[k]=JSON.parse(JSON.stringify(srv.daily[k])); });
+    Object.keys(daily||{}).forEach(k=>{
+      const s = newDaily[k] || {};
+      const l = daily[k] || {};
+      /* 本地以"天"为单位操作（同天刚改过），合并：checks 并集、tags 并集、本地有值的字段优先 */
+      newDaily[k] = {
+        ...s, ...l,
+        checks: Object.assign({}, (s.checks||{}), (l.checks||{})),
+        tags: Array.from(new Set([...(s.tags||[]), ...(l.tags||[])]))
+      };
+    });
     daily=newDaily;
     /* events：按 id 去重（本地新事件保留） */
     const evMap={};
@@ -2753,9 +2767,14 @@ function mergeRemoteIntoLocal(srv){
     (srv.rules||[]).forEach(r=>{ if(r&&r.id) ruMap[r.id]=r; });
     (rules||[]).forEach(r=>{ if(r&&r.id) ruMap[r.id]=r; });
     rules=Object.values(ruMap);
-    /* 其余结构以服务端为准（本地没在编辑时保持一致） */
-    cats=srv.cats||cats; levels=srv.levels||levels; tags=srv.tags||tags;
-    phases=srv.phases||phases; resources=srv.resources||resources;
+    /* 🔴 修复：结构字段也按 id 增量合并（本地新增的 cats/levels/tags/phases/resources 不因 409 被服务端覆盖丢弃） */
+    const mergeById = (arrA, arrB) => {
+      const m = {}; (arrA||[]).forEach(x=>{ if(x&&x.id) m[x.id]=x; }); (arrB||[]).forEach(x=>{ if(x&&x.id) m[x.id]=x; });
+      return Object.values(m);
+    };
+    cats=mergeById(srv.cats, cats); levels=mergeById(srv.levels, levels);
+    tags=mergeById(srv.tags, tags); phases=mergeById(srv.phases, phases);
+    resources=mergeById(srv.resources, resources);
     reviews=srv.reviews||reviews; meta=srv.meta||meta;
     /* 落盘 */
     store.set('cats',cats); store.set('levels',levels); store.set('rules',rules);
@@ -2801,7 +2820,16 @@ async function pushToServer(){
     if(!r.ok) throw new Error('http '+r.status);
     pendingPushData=null;
     localDirty=false;  /* 推送成功：本地改动已同步，允许 silentSync 拉取 */
-    try{ localStorage.removeItem('pos_pendingPush'); }catch(e){}
+    try{
+      localStorage.removeItem('pos_pendingPush');
+      /* 🔴 修复：推送成功后用服务端返回的 updatedAt 回写乐观锁基准，
+       * 否则 baseTs 陈旧 → 下一次保存必 409 无谓合并 */
+      const jj = await r.json().catch(()=>null);
+      if (jj && jj.updatedAt) {
+        const nt = Number(new Date(jj.updatedAt).getTime()) || 0;
+        if (nt) { localStorage.setItem('pos_serverTs', String(nt)); }
+      }
+    }catch(e){}
     return true;
   }catch(e){
     /* 失败不丢数据：暂存最新改动到 localStorage，30s 后自动重试并提示用户 */
@@ -3191,7 +3219,22 @@ async function afterLogin(){
     localStorage.removeItem('pos_serverTs');
   }catch(e){}
   localSavedAt=0;
-  try{ await loadFromServer(); }catch(e){ console.warn('加载数据失败', e); }
+  try{ await loadFromServer(); }
+  catch(e){
+    console.warn('加载数据失败，重试一次', e);
+    try{ await loadFromServer(); }
+    catch(e2){
+      /* 🔴 修复：加载失败也必须清掉旧账号残留并重置为默认数据——否则残留的上一个账号
+       * 数据会串到新账号（编辑时 baseTs=0 → 409 合并把旧 daily 并入新账号） */
+      console.warn('加载数据二次失败，重置本地', e2);
+      wipeLocalMirror();
+      cats = SEED_CATS.map(c=>({...c})); levels = SEED_LEVELS.map(l=>({...l}));
+      rules = SEED_RULES.map(r=>({...r})); tags = SEED_TAGS.map(t=>({...t}));
+      daily = {}; events = []; syncEventIds();
+      phases = SEED_PHASES.map(p=>({...p}));
+      reviews = {day:{},week:{},month:{}}; retros = []; resources = []; meta = {};
+    }
+  }
   suppressSave=false;
   showApp(); bootApp();
   /* 版本公告：登录后弹（版本变化才弹）。新手引导（onboarded 未置位）时先不弹，引导完成后再弹（见 obFinish） */
