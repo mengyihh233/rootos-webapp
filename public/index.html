@@ -2172,13 +2172,20 @@ async function shareMyPlan(){
     alert('✅ 分享链接已复制：\n'+url+'\n\n别人打开这个链接，即可一键套用你的规划结构（不含打卡数据）。');
   }).catch(()=>prompt('复制分享链接：',url));
 }
-/* 打开含 #share=xxx 的链接：拉取分享数据，确认后一键套用（保留当前打卡/事件/设置） */
+/* 打开含 #share=xxx 的链接：拉取分享数据，确认后一键套用（保留当前打卡/事件/设置）
+ * 未登录：先引导注册/登录，登录成功后自动弹出套用确认（分享落地 → 转化） */
 function handleShareHash(){
   const m=/#share=([A-Za-z0-9]+)/.exec(location.hash);
   if(!m) return;
   fetch('/api/share/'+m[1]).then(r=>r.json()).then(j=>{
     if(j.error) return alert('分享无效：'+j.error);
     if(!j.data || !Array.isArray(j.data.rules)) return alert('分享数据无效');
+    if(!SESSION){
+      try{ sessionStorage.setItem('pendingShare', JSON.stringify({ title: j.title||'一份规划', data: j.data })); }catch(e){}
+      alert('📥 你收到一份规划分享：「'+(j.title||'')+'」\n\n登录后即可一键套用（保留你的打卡记录）。');
+      showAuthLogin();
+      return;
+    }
     if(!confirm('📥 检测到一份分享的规划：「'+j.title+'」\n\n套用后将替换你的 规则/阶段/资源/笔记（保留打卡记录与账号设置）。\n确定套用吗？')) return;
     applySharedBag(j.data);
     toast('✅ 已套用分享：「'+j.title+'」');
@@ -2794,6 +2801,20 @@ async function afterLogin(){
   SESSION=true;
   try{ await loadFromServer(); }catch(e){ console.warn('加载数据失败', e); }
   showApp(); bootApp();
+  /* 分享落地：未登录时点分享链接 → 登录成功 → 自动弹套用确认 */
+  try{
+    const ps = sessionStorage.getItem('pendingShare');
+    if(ps){
+      sessionStorage.removeItem('pendingShare');
+      const j = JSON.parse(ps);
+      setTimeout(()=>{
+        if(confirm('📥 你收到的规划分享：「'+j.title+'」\n\n套用后将替换你的 规则/阶段/资源/笔记（保留打卡记录）。\n确定套用吗？')){
+          applySharedBag(j.data);
+          toast('✅ 已套用分享：「'+j.title+'」');
+        }
+      }, 300);
+    }
+  }catch(e){}
 }
 
 /* ================= 启动 ================= */
