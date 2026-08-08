@@ -314,6 +314,28 @@ async function adminUsers() {
   }));
 }
 
+/* 存储用量统计：数据库总大小 + 用户数据总大小 + 用户数（供看板展示容量） */
+async function dbStats() {
+  const stats = { dbBytes: 0, dataBytes: 0, users: 0 };
+  if (USE_PG) {
+    try {
+      const r = await pool.query('SELECT pg_database_size(current_database()) AS b');
+      stats.dbBytes = Number(r.rows[0] && r.rows[0].b) || 0;
+    } catch (e) { /* 无权限时忽略 */ }
+    const d = await pool.query('SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(data)),0) AS s FROM profiles');
+    stats.users = Number(d.rows[0].n) || 0;
+    stats.dataBytes = Number(d.rows[0].s) || 0;
+  } else {
+    const d = sqlite.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(LENGTH(data)),0) AS s FROM profiles').get();
+    stats.users = d.n || 0;
+    stats.dataBytes = d.s || 0;
+    const pc = sqlite.prepare('PRAGMA page_count').get();
+    const ps = sqlite.prepare('PRAGMA page_size').get();
+    stats.dbBytes = (pc.page_count || 0) * (ps.page_size || 0);
+  }
+  return stats;
+}
+
 /* ---------- 社区模板（需审核） ----------
  * status: 'pending'（待审） | 'approved'（已公开） | 'rejected'（已拒绝）
  * data / tags / counts 均以 JSON 字符串存储，列表接口解析后返回。 */
@@ -531,4 +553,4 @@ async function shareGet(id) {
   return sqlite.prepare(`SELECT id,owner,title,data FROM shares WHERE id=?`).get(id);
 }
 
-module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, profileGet, profileUpdatedAt, profileSet, adminUsers, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, USE_PG };
+module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, USE_PG };

@@ -717,6 +717,7 @@ async function start() {
   }));
 
   app.get('/api/admin/stats', requireAdmin, wrap(async (req, res) => {
+    const store = await db.dbStats();
     const rows = await db.adminUsers();
     const users = [];
     const regDays = {};
@@ -773,6 +774,14 @@ async function start() {
       registrationsByDay: Object.keys(regDays).sort().map(d => ({ date: d, count: regDays[d] })),
       users,
       tplStats,
+      /* 存储用量：当前占用 / 容量上限（env DATA_CAPACITY_MB，默认 500MB=Neon 免费档）/ 按平均还可容纳用户 */
+      storage: {
+        dbBytes: store.dbBytes,
+        dataBytes: store.dataBytes,
+        avgBytes: store.users ? Math.round(store.dataBytes / store.users) : 0,
+        capacityBytes: (Number(process.env.DATA_CAPACITY_MB) || 500) * 1048576,
+        remainUsers: store.avgBytes ? Math.max(0, Math.floor(((Number(process.env.DATA_CAPACITY_MB) || 500) * 1048576 - store.dataBytes) / store.avgBytes)) : null
+      },
       failureAnalysis: {
         totalCrashes: merged.totalCrashes,
         totalRecovered: merged.totalRecovered,
@@ -829,6 +838,15 @@ async function start() {
     };
     const id = await db.templateAdd({ author, title, desc, tags, counts, data });
     res.status(201).json({ ok: true, id, status: 'pending' });
+  }));
+
+  /* 个人数据占用（自己的 bag 大小 + 全站容量上限提示） */
+  app.get('/api/me/stats', requireAuth, wrap(async (req, res) => {
+    const row = await db.profileGet(req.session.userId);
+    res.json({
+      dataBytes: Buffer.byteLength(row || '{}', 'utf8'),
+      capacityBytes: (Number(process.env.DATA_CAPACITY_MB) || 500) * 1048576
+    });
   }));
 
   /* 已审核社区模板的数据（供套用/下载） */

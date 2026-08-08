@@ -133,6 +133,9 @@ async function dashboard() {
 function render() {
   const s = S;
   const ts = s.tplStats || { total:0, pending:0, approved:0, rejected:0 };
+  const st = s.storage || { dbBytes:0, dataBytes:0, avgBytes:0, capacityBytes:500*1048576, remainUsers:null };
+  const fmtBytes = b => b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : (b/1024).toFixed(1)+' KB';
+  const pct = (used, cap) => cap ? Math.round(used / cap * 100) : 0;
   app.innerHTML = `
     <div class="topbar">
       <div>
@@ -152,6 +155,8 @@ function render() {
       <div class="card hl"><div class="num" style="color:var(--accent);">${s.active7}</div><div class="lbl">近 7 天活跃</div><div class="hint">有数据更新的用户</div></div>
       <div class="card warn"><div class="num" style="color:var(--amber);">${ts.pending}</div><div class="lbl">待审模板</div><div class="hint">共 ${ts.total} 份提交</div></div>
       <div class="card"><div class="num" style="color:var(--green);">${ts.approved}</div><div class="lbl">已通过模板</div><div class="hint">已拒绝 ${ts.rejected}</div></div>
+      <div class="card hl"><div class="num" style="color:var(--accent);">${fmtBytes(st.dataBytes)}</div><div class="lbl">用户数据已用</div><div class="hint">数据库总 ${fmtBytes(st.dbBytes)}</div></div>
+      <div class="card"><div class="num" style="color:${st.dataBytes > st.capacityBytes * 0.8 ? 'var(--red)' : (st.dataBytes > st.capacityBytes * 0.5 ? 'var(--amber)' : 'var(--green)')};">${pct(st.dataBytes, st.capacityBytes)}%</div><div class="lbl">容量占用（上限 ${fmtBytes(st.capacityBytes)}）</div><div class="hint">平均每用户 ${fmtBytes(st.avgBytes)} · 按此还能注册约 ${st.remainUsers != null ? st.remainUsers : '—'} 人</div></div>
     </div>
 
     <div class="section">
