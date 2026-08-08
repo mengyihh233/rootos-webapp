@@ -2822,11 +2822,14 @@ async function silentSync(){
   const el=document.activeElement;
   if(el && /^(INPUT|TEXTAREA)$/.test(el.tagName)) return;
   try{
-    const r=await fetch('/api/data'); if(!r.ok) return;
-    const serverTs=Number(new Date(r.headers.get('X-Data-Updated')||0))||0;
+    /* 优化：先探测轻量 meta（几字节），服务端数据没变就不全量拉取（省流量/读次数） */
+    const mr=await fetch('/api/data/meta'); if(!mr.ok) return;
+    const mj=await mr.json();
+    const serverTs=Number(mj.updatedAt)||0;
     const localTs=Number(localStorage.getItem('pos_savedAt'))||0;
     if(serverTs<=localTs) return;
     if(localStorage.getItem('pos_pendingPush')) return;
+    const r=await fetch('/api/data'); if(!r.ok) return;
     const data=await r.json();
     suppressSave=true;
     cats=data.cats||SEED_CATS; levels=data.levels||SEED_LEVELS;
@@ -3130,7 +3133,7 @@ function bootApp(){
   renderQuickEvents();
   renderStreak(); checkWeeklyGuide();
   checkNight(); setInterval(checkNight,60000);
-  setInterval(silentSync,60000);  /* 【v0.5】60s 静默同步：其他端（小程序）的改动自动出现在本页 */
+  setInterval(silentSync,120000);  /* 【降消耗】120s 静默同步：先探测轻量 meta，服务端有更新才全量拉；无更新不产生全量请求 */
   $('#todayTask').addEventListener('input',()=>{ dayRec().task=$('#todayTask').value; saveDaily(); });
   $('#dayNote').addEventListener('input',()=>{ dayRec().note=$('#dayNote').value; saveDaily(); });
   $('#sleepHr').addEventListener('input',()=>{ const v=$('#sleepHr').value; dayRec().sleep = v===''?null:+v; saveDaily(); });

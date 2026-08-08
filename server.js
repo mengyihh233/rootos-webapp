@@ -874,6 +874,13 @@ async function start() {
   }));
 
   /* 读取数据 */
+  /* 轻量版本探测：只返回数据更新时间（几字节），供前端 60s 轮询判断是否需要全量拉取，
+   * 避免每次轮询都传整个 JSON 包（腾讯云按流量+读次数计费，这是降消耗的关键接口） */
+  app.get('/api/data/meta', requireAuth, wrap(async (req, res) => {
+    const updatedAt = await db.profileUpdatedAt(req.session.userId);
+    res.json({ updatedAt: updatedAt || 0 });
+  }));
+
   app.get('/api/data', requireAuth, wrap(async (req, res) => {
     const raw = await db.profileGet(req.session.userId);
     let data = {};
