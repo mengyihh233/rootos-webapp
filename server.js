@@ -313,9 +313,10 @@ async function sendSubMsg(openid, tplId, page, data) {
     return r.errcode === 0;
   } catch (e) { console.warn('⚠️ 订阅消息发送异常：', e.message); return false; }
 }
-/* 定时下发：每天 20:00 打卡提醒；周日 20:00 复盘提醒 */
+/* 定时下发：每天 20:00 打卡提醒；周日 20:00 复盘提醒
+ * 模板 ID：内置默认（可被环境变量 WX_SUB_TMPL_REMIND 覆盖；字段需含 thing1 内容 / time2 时间） */
 async function sendReminders() {
-  const tplRemind = process.env.WX_SUB_TMPL_REMIND;
+  const tplRemind = process.env.WX_SUB_TMPL_REMIND || '8fNCm2pRTLOEZPoio3uUm88iEER2VpchKRyTEjpVrzk';
   const tplWeekly = process.env.WX_SUB_TMPL_WEEKLY;
   if (!tplRemind && !tplWeekly) {
     console.warn('⏰ 订阅消息未启用：请配置环境变量 WX_SUB_TMPL_REMIND（打卡提醒模板 ID），可选 WX_SUB_TMPL_WEEKLY（周复盘模板 ID）');
