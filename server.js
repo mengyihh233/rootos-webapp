@@ -227,11 +227,15 @@ const CLOUD_ENV = process.env.TCB_ENV || process.env.TCB_ENV_ID || process.env.S
  * —— 云托管环境自动注入 TCB_ENV + 临时密钥，免手动配密钥；桶是环境自动分配（cloudbasestorage-<envId>）。
  * 非云托管环境（无 TCB_ENV，如本地开发）静默跳过，不影响数据库内备份。 */
 async function uploadSnapshotToCOS(snapshotStr, dateStr) {
-  const envId = CLOUD_ENV;
-  if (!envId) return '跳过（非云托管环境，仅存数据库内）';
+  if (!db.USE_CLOUD_STORAGE) return '跳过（未启用云存储引擎，仅存数据库内）';
   try {
     const cloudbase = require('@cloudbase/node-sdk');
-    const app = cloudbase.init({ env: envId });
+    const app = cloudbase.init({
+      env: CLOUD_ENV,
+      secretId: process.env.TENCENTCLOUD_SECRETID || undefined,
+      secretKey: process.env.TENCENTCLOUD_SECRETKEY || undefined,
+      sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined
+    });
     await app.uploadFile({
       cloudPath: 'rootos-backups/rootos-' + dateStr + '.json',
       fileContent: Buffer.from(snapshotStr, 'utf8')
@@ -760,7 +764,12 @@ async function start() {
       const rows = r.rows;
       let ok = 0, fail = 0, firstErr = '';
       const cloudbase = require('@cloudbase/node-sdk');
-      const app0 = cloudbase.init({ env: CLOUD_ENV });
+      const app0 = cloudbase.init({
+        env: CLOUD_ENV,
+        secretId: process.env.TENCENTCLOUD_SECRETID || undefined,
+        secretKey: process.env.TENCENTCLOUD_SECRETKEY || undefined,
+        sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined
+      });
       for (const row of rows) {
         try {
           /* 健壮日期解析：兼容 Date 对象 / ISO 串 / 'YYYY-MM-DD HH:MM:SS'（pg 各版本返回格式不同），失败兜底用当前时间 */
