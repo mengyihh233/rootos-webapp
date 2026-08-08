@@ -39,10 +39,35 @@ function cloudApp() {
   }
   return _cloudApp;
 }
-/* 云存储读取（官方用法：downloadFile({ fileID: 'cloud://<envId>/<path>' })，返回 res.fileContent） */
+/* 云存储读取（质疑后的自愈方案）：
+ * 官方 fileID 格式 = cloud://<envId>.<bucketId>/<path>（带 bucket 段）。
+ * 不能靠猜格式——首次上传返回的 fileID 是权威；缓存真实 envId+bucketId 供后续构造；
+ * 缓存为空时尝试 getUploadMetadata 拿 bucketId。 */
+let _cloudBucket = '';  /* 真实 bucketId（首次上传后缓存） */
+function cloudFilePath(uid) { return 'profiles/' + uid + '.json'; }
+function cloudFileID(uid) {
+  const env = CLOUD_ENV || '';
+  const bucket = _cloudBucket;
+  if (env && bucket) return 'cloud://' + env + '.' + bucket + '/' + cloudFilePath(uid);
+  return '';  /* 无法构造（尚未缓存）→ 走 getUploadMetadata 探测 */
+}
+async function ensureCloudBucket() {
+  if (_cloudBucket) return true;
+  try {
+    const meta = await cloudApp().getUploadMetadata({ cloudPath: cloudFilePath('__probe') });
+    const b = (meta && (meta.bucketId || meta.bucket)) || '';
+    if (b) { _cloudBucket = b; return true; }
+  } catch (e) { /* 继续走 fileID 缓存路径 */ }
+  return !!_cloudBucket;
+}
 async function cloudDownload(uid) {
   try {
-    const fileID = 'cloud://' + (CLOUD_ENV || '') + '/profiles/' + uid + '.json';
+    let fileID = cloudFileID(uid);
+    if (!fileID) {
+      if (!(await ensureCloudBucket())) return null;
+      fileID = cloudFileID(uid);
+      if (!fileID) return null;
+    }
     const r = await cloudApp().downloadFile({ fileID });
     if (!r || r.code !== 'SUCCESS') return null;
     const c = r.fileContent;
@@ -62,7 +87,15 @@ async function cloudProfileUpdatedAt(uid) {
 }
 async function cloudProfileSet(uid, dataStr) {
   const obj = JSON.stringify({ data: dataStr, updatedAt: new Date().toISOString() });
-  await cloudApp().uploadFile({ cloudPath: 'profiles/' + uid + '.json', fileContent: Buffer.from(obj, 'utf8') });
+  const res = await cloudApp().uploadFile({ cloudPath: cloudFilePath(uid), fileContent: Buffer.from(obj, 'utf8') });
+  /* 从上传返回的权威 fileID 提取 envId.bucketId 缓存（cloud://<env>.<bucket>/<path>） */
+  if (res && res.fileID && /^cloud:\/\//.test(res.fileID)) {
+    try {
+      const mid = res.fileID.replace('cloud://', '').split('/')[0]; /* envId.bucketId */
+      const dot = mid.indexOf('.');
+      if (dot > 0) _cloudBucket = mid.slice(dot + 1);
+    } catch (e) { /* 忽略 */ }
+  }
 }
 
 const SCHEMA_SQLITE = {
