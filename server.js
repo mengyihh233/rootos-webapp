@@ -867,6 +867,16 @@ async function start() {
     const out = {
       at: new Date().toISOString(),
       app: 'rootos-webapp',
+      diag: {
+        usePg: db.USE_PG,
+        useCloudStorage: db.USE_CLOUD_STORAGE,
+        cloudEnv: db.CLOUD_ENV || '(空)',
+        hasCloudCred: !!(process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY),
+        cloudStorageFlag: process.env.CLOUD_STORAGE || '(未设)',
+        hasDbUrl: !!process.env.DATABASE_URL,
+        dbConnected: db.isConnected(),
+        nodeEnv: process.env.NODE_ENV || ''
+      },
       count: users.length,
       users: users.map(u => ({
         id: u.id, username: u.username, display_name: u.display_name || '',
