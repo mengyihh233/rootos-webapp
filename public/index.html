@@ -1027,7 +1027,14 @@ function toast(msg){
 }
 const store = {
   get(k,d){ try{ const v=localStorage.getItem('pos_'+k); return v?JSON.parse(v):d; }catch(e){ return d; } },
-  set(k,v){ try{ localStorage.setItem('pos_'+k, JSON.stringify(v)); markSaved(); }catch(e){ console.warn('本地存储失败（可能已满）：', k, e); } }
+  set(k,v){ try{ localStorage.setItem('pos_'+k, JSON.stringify(v)); markSaved(); }catch(e){
+    /* 🔴 修复：本地存储失败不能静默——内存改动已发生，若不置 localDirty，silentSync 会用服务端旧数据覆盖内存（改动静默消失）。
+     * 置 dirty 挡住拉取 + 提示用户，数据留在内存等下次 pushToServer 直接带内存值推送（bagFromLocal 兜底）。 */
+    console.warn('本地存储失败（可能已满）：', k, e);
+    localDirty = true;
+    try{ if(SESSION) scheduleServerSave(); }catch(e2){}
+    try{ toast('⚠️ 本地存储异常，改动暂存内存，即将重试同步'); }catch(e3){}
+  } }
 };
 const EVT = { crash:'💥崩溃', recover:'✅恢复', relapse:'⚠️破戒', sleep:'🥱低能量', debug:'🔧调试', mile:'🏁里程碑', note:'📝随笔' };
 /* 【v9.2】快速事件自定义（存 meta.quickEvents，用户可增删改类型） */
@@ -2789,7 +2796,15 @@ function mergeRemoteIntoLocal(srv){
     cats=mergeById(srv.cats, cats); levels=mergeById(srv.levels, levels);
     tags=mergeById(srv.tags, tags); phases=mergeById(srv.phases, phases);
     resources=mergeById(srv.resources, resources);
-    reviews=srv.reviews||reviews;
+    /* 🔴 修复：reviews 键级合并（day/week/month 各自以本地为优先）——本地刚写的复盘不能因 409 被服务端旧值整体覆盖 */
+    {
+      const sr = srv.reviews || {}, lr = reviews || {};
+      reviews = {
+        day: Object.assign({}, sr.day || {}, lr.day || {}),
+        week: Object.assign({}, sr.week || {}, lr.week || {}),
+        month: Object.assign({}, sr.month || {}, lr.month || {})
+      };
+    }
     /* 🔴 修复：meta 以本地为准（onboarded/nightBar/todayView 本地刚设置的不被服务端旧值覆盖——防新手引导反复弹） */
     meta=Object.assign({}, srv.meta||{}, meta||{});
     /* 落盘 */
@@ -2866,7 +2881,13 @@ function scheduleServerSave(){ if(suppressSave) return; clearTimeout(serverTimer
 /* 清空本地镜像：切换账号 / 登出时必须调用，否则会串号 */
 function wipeLocalMirror(){
   suppressSave=true;
-  try{ Object.keys(localStorage).filter(k=>k.startsWith('pos_')).forEach(k=>localStorage.removeItem(k)); }catch(e){}
+  /* 🔴 修复：保留「显示状态」key（pos_noticeSeen 公告已读 / pos_guideDate 周日引导）——
+   * 它们不属于账号数据，被清会导致公告每次刷新都弹、周日引导反复问。
+   * 登出 doLogout 里再按需清（跨账号不共享显示状态）。 */
+  const KEEP = ['pos_noticeSeen', 'pos_guideDate'];
+  try{
+    Object.keys(localStorage).filter(k=>k.startsWith('pos_') && !KEEP.includes(k)).forEach(k=>localStorage.removeItem(k));
+  }catch(e){}
   suppressSave=false;
 }
 /* 【新增】启动/登出时先把本地镜像载入内存，作为多端同步的基线 */
