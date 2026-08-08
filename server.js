@@ -613,12 +613,17 @@ async function start() {
     res.json({ ok: true, enabled });
   }));
 
-  /* ============ 数据量限额 & 爱发电解锁（付费墙） ============
-   * 触发条件：数据量 > LICENSE_LIMIT_MB（默认 50MB）——规则数/使用天数不限，可一直免费使用
+  /* ============ 数据量限额 & 爱发电解锁（付费墙，默认关闭） ============
+   * 默认不限制（LICENSE_ENABLED 未设 = 关闭，所有人一直免费）。
+   * 启用：环境变量 LICENSE_ENABLED=true 时，数据量 > LICENSE_LIMIT_MB（默认 50MB）才锁定。
    * 解锁：爱发电 webhook（AFDIAN_TOKEN 验签）或管理员手动（/api/admin/unlock），解锁 30 天 */
+  const LICENSE_ENABLED = process.env.LICENSE_ENABLED === '1' || process.env.LICENSE_ENABLED === 'true';
   const LICENSE_MB = Number(process.env.LICENSE_LIMIT_MB) || 50;
   const LICENSE_UNLOCK_DAYS = Number(process.env.LICENSE_UNLOCK_DAYS) || 30;
   app.get('/api/license/status', requireAuth, wrap(async (req, res) => {
+    if (!LICENSE_ENABLED) {
+      return res.json({ limited: false, reasons: [], unlockUntil: null, usage: { rules: 0, dataBytes: 0, limitMB: LICENSE_MB, enabled: false } });
+    }
     const u = await db.userById(req.session.userId);
     const raw = await db.profileGet(req.session.userId);
     let data = {};
@@ -632,7 +637,7 @@ async function start() {
       limited: !unlocked && reasons.length > 0,
       reasons,
       unlockUntil: unlocked ? u.unlock_until : null,
-      usage: { rules, dataBytes, limitMB: LICENSE_MB }
+      usage: { rules, dataBytes, limitMB: LICENSE_MB, enabled: true }
     });
   }));
 
