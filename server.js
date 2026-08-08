@@ -991,7 +991,9 @@ async function start() {
     const result = sanitizeBag(req.body);
     if (result.error) return res.status(400).json({ error: result.error });
     await db.profileSet(req.session.userId, JSON.stringify(result.clean));
-    res.json({ ok: true });
+    /* 返回最新 updatedAt，供小程序端更新乐观锁基准（_bagTs） */
+    const after = await db.profileUpdatedAt(req.session.userId);
+    res.json({ ok: true, updatedAt: after || null });
   }));
 
   /* 二维码生成（小程序「打开网页版」弹层用）：GET /api/qr?url=https://... → PNG
