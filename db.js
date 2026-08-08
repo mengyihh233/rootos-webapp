@@ -13,12 +13,15 @@
  * ===================================================================== */
 const path = require('path');
 
-const USE_PG = !!process.env.DATABASE_URL;
 /* 云存储引擎启用条件：CLOUD_STORAGE=1 且 存在云凭证（TENCENTCLOUD_SECRETID 永久密钥，或 TENCENTCLOUD_SESSIONTOKEN 临时）。
  * 教训：容器型云托管不自动注入密钥，需手动配；无凭证时启用会连不上 → 视为未启用，本地开发安全。 */
 const CLOUD_ENV = process.env.TCB_ENV || process.env.TCB_ENV_ID || process.env.SCF_NAMESPACE || '';
 const HAS_CLOUD_CRED = !!(process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY);
 const USE_CLOUD_STORAGE = process.env.CLOUD_STORAGE === '1' && HAS_CLOUD_CRED;
+/* 🔴 方案 B（全迁云存储）：云存储模式下彻底不用 PG——
+ * users/profiles 走云存储；辅助表（模板/通知/评分/备份等低频可丢数据）走 SQLite 本地。
+ * 关键：避免 USE_PG=true（DATABASE_URL 残留）但 PG 连不上 → 数据静默丢失。 */
+const USE_PG = !!process.env.DATABASE_URL && !USE_CLOUD_STORAGE;
 let _cloudApp = null; /* @cloudbase/node-sdk app 实例（惰性初始化） */
 
 let sqlite = null;   // better-sqlite3 实例
@@ -119,6 +122,125 @@ async function cloudProfileSet(uid, dataStr) {
       if (dot > 0) _cloudBucket = mid.slice(dot + 1);
     } catch (e) { /* 忽略 */ }
   }
+}
+
+/* ================= users 表云存储层（方案 B：全迁云存储，弃 PG/SQLite） =================
+ * users 表存单个云存储文件 users.json：{"seq": <自增id>, "users": [ {id, username, pw_hash, ...} ]}
+ * - 内存缓存 _cloudUsers（减少读次数）；写时串行队列（防并发覆盖，单实例够用）
+ * - 所有 user* 函数在 USE_CLOUD_STORAGE 时走这里 */
+const CLOUD_USERS_FILE = 'users.json';
+let _cloudUsers = null;      /* {seq, users[]} 缓存 */
+let _cloudUsersLoading = null; /* 并发读去重 */
+let _cloudUsersWriteQ = Promise.resolve(); /* 串行写队列 */
+
+async function cloudUsersLoad() {
+  if (_cloudUsers) return _cloudUsers;
+  if (_cloudUsersLoading) return _cloudUsersLoading;
+  _cloudUsersLoading = (async () => {
+    try {
+      let fileID = cloudFileID0(CLOUD_USERS_FILE);
+      if (!fileID) {
+        if (!(await ensureCloudBucket())) throw new Error('云存储桶未就绪');
+        fileID = cloudFileID0(CLOUD_USERS_FILE);
+        if (!fileID) throw new Error('云存储 fileID 构造失败');
+      }
+      const r = await cloudApp().downloadFile({ fileID });
+      if (r && r.code === 'SUCCESS' && r.fileContent !== undefined && r.fileContent !== null) {
+        const raw = Buffer.isBuffer(r.fileContent) ? r.fileContent.toString('utf8') : String(r.fileContent);
+        const j = JSON.parse(raw);
+        if (j && Array.isArray(j.users)) { _cloudUsers = { seq: Number(j.seq) || 0, users: j.users }; return _cloudUsers; }
+      }
+      /* 文件不存在或损坏 → 初始化为空 */
+      _cloudUsers = { seq: 0, users: [] };
+      return _cloudUsers;
+    } catch (e) {
+      console.warn('⚠️ users.json 读取失败（初始化空）:', (e && e.message) || e);
+      _cloudUsers = { seq: 0, users: [] };
+      return _cloudUsers;
+    } finally { _cloudUsersLoading = null; }
+  })();
+  return _cloudUsersLoading;
+}
+
+function cloudFileID0(path) {
+  const env = CLOUD_ENV || '';
+  const bucket = _cloudBucket;
+  if (env && bucket) return 'cloud://' + env + '.' + bucket + '/' + path;
+  return '';
+}
+
+async function cloudUsersSave() {
+  if (!_cloudUsers) return;
+  const snapshot = JSON.stringify(_cloudUsers);
+  /* 串行化写，防并发覆盖（注册/改名等高频写） */
+  _cloudUsersWriteQ = _cloudUsersWriteQ.then(async () => {
+    const res = await cloudApp().uploadFile({ cloudPath: CLOUD_USERS_FILE, fileContent: Buffer.from(snapshot, 'utf8') });
+    if (!res) throw new Error('users.json 上传无响应');
+    if (res.code && res.code !== 'SUCCESS' && res.code !== 0) throw new Error('users.json 上传失败: ' + (res.message || res.code));
+  }).catch(e => { console.warn('⚠️ users.json 写入失败:', (e && e.message) || e); });
+  return _cloudUsersWriteQ;
+}
+
+async function cloudUserById(uid) {
+  const u = await cloudUsersLoad();
+  return u.users.find(x => Number(x.id) === Number(uid)) || null;
+}
+async function cloudUserByName(username) {
+  const u = await cloudUsersLoad();
+  return u.users.find(x => x.username === username) || null;
+}
+async function cloudUserByNameCI(username) {
+  const u = await cloudUsersLoad();
+  const lo = String(username).toLowerCase();
+  return u.users.find(x => String(x.username).toLowerCase() === lo) || null;
+}
+async function cloudUserByOpenid(openid) {
+  if (!openid) return null;
+  const u = await cloudUsersLoad();
+  return u.users.find(x => x.wx_openid === openid) || null;
+}
+async function cloudUserByEmail(email) {
+  if (!email) return null;
+  const u = await cloudUsersLoad();
+  const lo = String(email).toLowerCase();
+  return u.users.find(x => x.email && String(x.email).toLowerCase() === lo) || null;
+}
+async function cloudUserByWechat(name) {
+  if (!name) return null;
+  const u = await cloudUsersLoad();
+  const lo = String(name).toLowerCase();
+  return u.users.find(x => x.wechat && String(x.wechat).toLowerCase() === lo) || null;
+}
+async function cloudUserByDisplayName(name, exceptUid) {
+  const u = await cloudUsersLoad();
+  const lo = String(name).toLowerCase();
+  return u.users.find(x => x.display_name && String(x.display_name).toLowerCase() === lo && Number(x.id) !== Number(exceptUid || 0)) || null;
+}
+async function cloudCreateUser(username, pw_hash) {
+  const u = await cloudUsersLoad();
+  u.seq += 1;
+  const id = u.seq;
+  u.users.push({ id, username, pw_hash, email: null, email_verified: 0, wechat: null, wx_openid: null, display_name: null, unlock_until: null, is_dev: 0, created_at: new Date().toISOString() });
+  await cloudUsersSave();
+  return id;
+}
+async function cloudUserSet(uid, fields) {
+  const u = await cloudUsersLoad();
+  const x = u.users.find(v => Number(v.id) === Number(uid));
+  if (!x) return false;
+  Object.assign(x, fields);
+  await cloudUsersSave();
+  return true;
+}
+async function cloudUserAll() {
+  const u = await cloudUsersLoad();
+  return u.users.slice();
+}
+async function cloudWipeUsers() {
+  const n = _cloudUsers ? _cloudUsers.users.length : 0;
+  _cloudUsers = { seq: 0, users: [] };
+  await cloudUsersSave();
+  return n;
 }
 
 const SCHEMA_SQLITE = {
@@ -310,6 +432,24 @@ const SCHEMA_PG = {
 async function init() {
   /* 已连接则直接返回（支持 server 后台反复重试时幂等，避免重复建池） */
   if (connected) return;
+  /* 🔴 方案 B：云存储模式——users/profiles 走云存储，辅助表走本地 SQLite（低频可丢数据） */
+  if (USE_CLOUD_STORAGE) {
+    try {
+      if (!sqlite) {
+        const Database = require('better-sqlite3');
+        sqlite = new Database(path.join(__dirname, 'data.db'));
+      }
+      const tables = Object.values(SCHEMA_SQLITE);
+      sqlite.exec(tables.join(';'));
+      connected = true;
+      console.log('✅ 数据库：云存储模式（users/profiles 存云存储，辅助表本地 SQLite）');
+    } catch (e) {
+      console.warn('⚠️ 云存储模式 SQLite 初始化失败:', (e && e.message) || e);
+      connected = true; /* 即使辅助表失败也不阻塞核心云存储功能 */
+      console.log('✅ 数据库：云存储模式（users/profiles 存云存储，辅助表降级）');
+    }
+    return;
+  }
   if (USE_PG) {
     /* 诊断：把 DATABASE_URL 解析后的主机/库名打出来（隐去账号密码），
      * 便于在 Render 日志确认环境变量到底配置成了什么。
@@ -414,6 +554,7 @@ async function init() {
 function isConnected() { return connected; }
 
 async function userByName(username) {
+  if (USE_CLOUD_STORAGE) return cloudUserByName(username);
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
     return r.rows[0];
@@ -422,6 +563,7 @@ async function userByName(username) {
 }
 
 async function createUser(username, pw_hash) {
+  if (USE_CLOUD_STORAGE) return cloudCreateUser(username, pw_hash);
   if (USE_PG) {
     const r = await pool.query(
       'INSERT INTO users (username, pw_hash) VALUES ($1, $2) RETURNING id',
@@ -479,6 +621,28 @@ async function profileSet(uid, dataStr) {
 }
 
 async function adminUsers() {
+  /* 🔴 云存储模式（方案 B）：users 表也在云存储，直接读云存储 users.json + 并发补 profile */
+  if (USE_CLOUD_STORAGE) {
+    const users = await cloudUserAll();
+    const out = users.map(u => ({
+      id: u.id, username: u.username, display_name: u.display_name || '',
+      email: u.email || '', wechat: u.wechat || '',
+      is_dev: Number(u.is_dev) === 1 ? 1 : 0,
+      created_at: u.created_at, updated_at: null, data: null
+    }));
+    const CONC = 10;
+    for (let i = 0; i < out.length; i += CONC) {
+      const chunk = out.slice(i, i + CONC);
+      await Promise.all(chunk.map(async u => {
+        try {
+          const data = await cloudProfileGet(u.id);
+          const ts = await cloudProfileUpdatedAt(u.id, false);
+          if (data !== null) { u.data = data; u.updated_at = ts || u.updated_at; }
+        } catch (e) { /* 单个失败不影响其他 */ }
+      }));
+    }
+    return out;
+  }
   const sql = `SELECT u.id, u.username, u.display_name, u.email, u.wechat, u.is_dev, u.created_at, p.updated_at, p.data
                FROM users u LEFT JOIN profiles p ON p.user_id = u.id
                ORDER BY u.id`;
@@ -495,20 +659,6 @@ async function adminUsers() {
     is_dev: Number(row.is_dev) === 1 ? 1 : 0,
     created_at: row.created_at, updated_at: row.updated_at, data: row.data
   }));
-  /* 云存储模式：profiles 表为空，并发从云存储补 data/updated_at（比串行快 N 倍，用户多不卡） */
-  if (USE_CLOUD_STORAGE) {
-    const CONC = 10; /* 并发下载上限 */
-    for (let i = 0; i < out.length; i += CONC) {
-      const chunk = out.slice(i, i + CONC);
-      await Promise.all(chunk.map(async u => {
-        try {
-          const data = await cloudProfileGet(u.id);
-          const ts = await cloudProfileUpdatedAt(u.id);
-          if (data !== null) { u.data = data; u.updated_at = ts || u.updated_at; }
-        } catch (e) { /* 单个失败不影响其他 */ }
-      }));
-    }
-  }
   return out;
 }
 
@@ -517,10 +667,8 @@ async function dbStats() {
   const stats = { dbBytes: 0, dataBytes: 0, users: 0 };
   /* 云存储模式：users 数从 users 表取；数据量按云存储估算（每用户约 50KB 均值） */
   if (USE_CLOUD_STORAGE) {
-    const d = USE_PG
-      ? await pool.query('SELECT COUNT(*) AS n FROM users')
-      : sqlite.prepare('SELECT COUNT(*) AS n FROM users').get();
-    stats.users = Number(d.rows ? d.rows[0].n : d.n) || 0;
+    const users = await cloudUserAll();
+    stats.users = users.length;
     stats.dataBytes = stats.users * 51200; /* 云存储 profile 均值估算 ~50KB/人 */
     return stats;
   }
@@ -676,6 +824,7 @@ async function favoriteIs(templateId, userId) {
 
 /* ---------- 用户系统：邮箱 / 微信绑定（v1.2） ---------- */
 async function userById(uid) {
+  if (USE_CLOUD_STORAGE) return cloudUserById(uid);
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE id = $1', [uid]);
     return r.rows[0];
@@ -685,6 +834,7 @@ async function userById(uid) {
 
 /* 显示名唯一性检查：返回占用该名的用户（不含自身）；无则 null */
 async function userByDisplayName(name, exceptUid) {
+  if (USE_CLOUD_STORAGE) return cloudUserByDisplayName(name, exceptUid);
   if (USE_PG) {
     const r = await pool.query('SELECT id, username, display_name FROM users WHERE display_name = $1 AND ($2::int IS NULL OR id <> $2)', [name, exceptUid || null]);
     return r.rows[0] || null;
@@ -696,6 +846,7 @@ async function userByDisplayName(name, exceptUid) {
 /* 按微信号查用户（不区分大小写）——用于网页端「微信号+密码」接入 wx_ 账号。
  * 🔴 wechat 字段全局唯一：应用层校验（SQLite ALTER 加列无 UNIQUE 约束，PG 用 UNIQUE INDEX）。 */
 async function userByWechat(name) {
+  if (USE_CLOUD_STORAGE) return cloudUserByWechat(name);
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE LOWER(wechat) = LOWER($1) LIMIT 1', [name]);
     return r.rows[0] || null;
@@ -712,6 +863,7 @@ async function wechatTaken(name, exceptUid) {
 
 /* 设置显示名（唯一）：成功返回 true；已被占用返回 false（不抛错，让上层给友好提示） */
 async function userSetDisplayName(uid, name) {
+  if (USE_CLOUD_STORAGE) return cloudUserSet(uid, { display_name: name || null });
   if (USE_PG) {
     try {
       const r = await pool.query('UPDATE users SET display_name = $1 WHERE id = $2 RETURNING id', [name, uid]);
@@ -743,6 +895,7 @@ async function setDisplayNameWithRetry(uid, username) {
 
 /* 解锁：设置 unlock_until（ISO 时间串；null/空 = 未解锁） */
 async function userUnlock(uid, untilISO) {
+  if (USE_CLOUD_STORAGE) return cloudUserSet(uid, { unlock_until: untilISO || null });
   if (USE_PG) {
     await pool.query('UPDATE users SET unlock_until = $1 WHERE id = $2', [untilISO, uid]);
   } else {
@@ -752,6 +905,7 @@ async function userUnlock(uid, untilISO) {
 
 /* 大小写不敏感查找（用于开发者设置等管理场景，兼容输入大小写不一致） */
 async function userByNameCI(username) {
+  if (USE_CLOUD_STORAGE) return cloudUserByNameCI(username);
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1', [username]);
     return r.rows[0];
@@ -761,6 +915,7 @@ async function userByNameCI(username) {
 
 /* 开发者标记：is_dev=1 免付费墙 + 可直接登录管理后台 */
 async function userSetDev(uid, isDev) {
+  if (USE_CLOUD_STORAGE) return cloudUserSet(uid, { is_dev: isDev ? 1 : 0 });
   if (USE_PG) {
     await pool.query('UPDATE users SET is_dev = $1 WHERE id = $2', [isDev ? 1 : 0, uid]);
   } else {
@@ -823,6 +978,7 @@ async function orderSeen(outTradeNo) {
 }
 
 async function userFindByEmail(email) {
+  if (USE_CLOUD_STORAGE) return cloudUserByEmail(email);
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
     return r.rows[0];
@@ -831,6 +987,7 @@ async function userFindByEmail(email) {
 }
 
 async function userFindByOpenid(openid) {
+  if (USE_CLOUD_STORAGE) return cloudUserByOpenid(openid);
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE wx_openid = $1', [openid]);
     return r.rows[0];
@@ -839,6 +996,7 @@ async function userFindByOpenid(openid) {
 }
 
 async function userBindEmail(uid, email) {
+  if (USE_CLOUD_STORAGE) return cloudUserSet(uid, { email: (email||'').toLowerCase() || null });
   if (USE_PG) {
     await pool.query('UPDATE users SET email = $1, email_verified = 0 WHERE id = $2', [email, uid]);
     return;
@@ -847,6 +1005,7 @@ async function userBindEmail(uid, email) {
 }
 
 async function userVerifyEmail(uid) {
+  if (USE_CLOUD_STORAGE) return cloudUserSet(uid, { email_verified: 1 });
   if (USE_PG) {
     await pool.query('UPDATE users SET email_verified = 1 WHERE id = $1', [uid]);
     return;
@@ -855,6 +1014,7 @@ async function userVerifyEmail(uid) {
 }
 
 async function userSetWechat(uid, wechat) {
+  if (USE_CLOUD_STORAGE) return cloudUserSet(uid, { wechat: wechat || null });
   if (USE_PG) {
     await pool.query('UPDATE users SET wechat = $1 WHERE id = $2', [wechat, uid]);
     return;
@@ -863,6 +1023,7 @@ async function userSetWechat(uid, wechat) {
 }
 
 async function userBindOpenid(uid, openid) {
+  if (USE_CLOUD_STORAGE) return cloudUserSet(uid, { wx_openid: openid || null });
   if (USE_PG) {
     await pool.query('UPDATE users SET wx_openid = $1 WHERE id = $2', [openid, uid]);
     return;
@@ -871,6 +1032,7 @@ async function userBindOpenid(uid, openid) {
 }
 
 async function userSetPassword(uid, pw_hash) {
+  if (USE_CLOUD_STORAGE) return cloudUserSet(uid, { pw_hash });
   if (USE_PG) {
     await pool.query('UPDATE users SET pw_hash = $1 WHERE id = $2', [pw_hash, uid]);
     return;
@@ -908,6 +1070,7 @@ async function orphanWxAccount(uid) {
       const fileID = cloudFileID(uid);
       if (fileID) await cloudApp().deleteFile({ fileList: [fileID] });
     } catch (e) { console.warn('⚠️ 孤儿清理删云存储 profile 失败：', (e && e.message) || e); }
+    return cloudUserSet(uid, { wechat: null, display_name: null, email: null, wx_openid: null, pw_hash: cryptoRandomHash() });
   }
   if (USE_PG) {
     await pool.query(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = $1 WHERE id = $2`, [cryptoRandomHash(), uid]);
@@ -927,6 +1090,17 @@ function cryptoRandomHash() {
 /* 注销账号（PIPL 第 47 条 + 微信审核硬项）：删除该用户全部关联数据与账号行
  * templates 按 author 字符串关联（无 owner 列），故需传入 username */
 async function userDelete(uid, username) {
+  /* 云存储模式：删 profile 文件 + 从 users.json 移除该用户 */
+  if (USE_CLOUD_STORAGE) {
+    try {
+      const fileID = cloudFileID(uid);
+      if (fileID) await cloudApp().deleteFile({ fileList: [fileID] });
+    } catch (e) { console.warn('⚠️ 注销删 profile 失败:', (e && e.message) || e); }
+    const u = await cloudUsersLoad();
+    u.users = u.users.filter(x => Number(x.id) !== Number(uid));
+    await cloudUsersSave();
+    return;
+  }
   const T = (sql) => USE_PG ? sql.replace(/\?/g, '$1') : sql;
   if (USE_PG) {
     await pool.query('BEGIN');
@@ -968,6 +1142,18 @@ async function userDelete(uid, username) {
 /* 🔴 清空全部用户数据（重新上架前使用）：清空 users 及所有关联表 + 云存储 profile/备份。
  * 返回删除数量。注意：sent_logs 保留（防提醒重复发送逻辑不受影响）。 */
 async function wipeAllUsers() {
+  /* 🔴 云存储模式（方案 B）：删所有 profile 文件 + 重置 users.json */
+  if (USE_CLOUD_STORAGE) {
+    const all = await cloudUserAll();
+    const n = all.length;
+    try {
+      const fileList = all.map(u => cloudFilePath(u.id));
+      if (fileList.length) await cloudApp().deleteFile({ fileList });
+    } catch (e) { console.warn('⚠️ wipe: 云存储 profile 删除失败:', (e && e.message) || e); }
+    await cloudWipeUsers();
+    console.log('  🗑️ 云存储 users.json 已重置, profile 清理:', n);
+    return n;
+  }
   /* 子表先删，主表最后（无外键，但保持合理顺序）；逐个 try/catch——某表失败不阻塞其他 */
   const tables = ['notifications', 'ratings', 'favorites', 'shares', 'subscriptions', 'pay_orders', 'backups', 'templates', 'profiles', 'users'];
   let deleted = 0;
