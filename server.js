@@ -789,6 +789,31 @@ async function start() {
       await pg.end();
     }
   }));
+  /* 迁移诊断：返回当前代码版本 + env 状态 + 待迁移数据的真实形态（排障用，不需点迁移按钮） */
+  app.get('/api/admin/migrate-diag', requireAdmin, wrap(async (req, res) => {
+    const out = {
+      commitHint: '本构建代码日期特征：迁移接口含【健壮日期解析】(d98cd4f)',
+      cloudStorage: db.USE_CLOUD_STORAGE ? 'on' : 'off',
+      cloudEnv: CLOUD_ENV || '(未探测到)',
+      hasDbUrl: !!process.env.DATABASE_URL,
+      pgSamples: []
+    };
+    if (process.env.DATABASE_URL) {
+      try {
+        const { Pool } = require('pg');
+        const pg = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 1 });
+        const r = await pg.query('SELECT user_id, updated_at FROM profiles ORDER BY user_id LIMIT 3');
+        out.pgSamples = r.rows.map(x => ({
+          user_id: x.user_id,
+          type: x.updated_at === null ? 'null' : typeof x.updated_at,
+          isDate: x.updated_at instanceof Date,
+          value: x.updated_at === null ? null : (x.updated_at instanceof Date ? x.updated_at.toISOString() : String(x.updated_at))
+        }));
+        await pg.end();
+      } catch (e) { out.pgErr = e.message; }
+    }
+    res.json(out);
+  }));
   /* 下载某份备份（完整 JSON，含所有用户数据） */
   app.get('/api/admin/backups/:id', requireAdmin, wrap(async (req, res) => {
     const id = Number(req.params.id);

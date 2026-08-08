@@ -227,6 +227,7 @@ function render() {
       <p style="color:var(--dim);font-size:.8rem;">每天 0 点自动全库快照（含所有用户数据），自动保留最近 7 份。点击列表中的「下载」可备份到本地。</p>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);">
         <button class="ok" onclick="migrateProfiles()">🚀 一键迁移 profile 到云存储</button>
+        <button class="ghost" onclick="migrateDiag()">🔍 迁移诊断</button>
         <span id="migrateMsg" style="color:var(--green);font-size:.85rem;margin-left:8px;"></span>
         <p style="color:var(--dim);font-size:.8rem;margin-top:6px;">方案3：把用户大 JSON 从 PG 搬进云存储，PG 只剩 users 小表 → 省掉 PG 常驻资源点（每月省约 6 万点）。幂等可重复执行，原 PG 数据保留作备份。</p>
       </div>
@@ -572,6 +573,27 @@ async function migrateProfiles() {
     msg.textContent = '❌ 请求失败';
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🚀 一键迁移 profile 到云存储'; }
+  }
+}
+/* 迁移诊断：不点迁移，直接看代码版本 + env + 数据形态 */
+async function migrateDiag() {
+  const msg = document.getElementById('migrateMsg');
+  msg.style.color = 'var(--green)';
+  msg.textContent = '诊断中…';
+  try {
+    const r = await api('/api/admin/migrate-diag');
+    if (!r.ok || !r.body) { msg.textContent = '❌ 诊断失败'; return; }
+    const b = r.body;
+    msg.style.color = 'var(--accent)';
+    msg.innerHTML = '🔍 代码含健壮日期解析: <b>' + (b.commitHint.includes('健壮') ? '✅' : '❌') + '</b>'
+      + ' | 云存储引擎: <b>' + b.cloudStorage + '</b>'
+      + ' | 环境ID: <b>' + (b.cloudEnv || '无') + '</b>'
+      + ' | DATABASE_URL: <b>' + (b.hasDbUrl ? '✅' : '❌') + '</b>'
+      + (b.pgErr ? ' | PG读取: <b style="color:var(--red)">' + b.pgErr + '</b>' : '')
+      + (b.pgSamples && b.pgSamples.length ? ' | 样本: ' + b.pgSamples.map(x => '#' + x.user_id + '=' + x.type + (x.isDate ? '(Date)' : '') + ':' + String(x.value).slice(0, 25)).join(' | ') : '');
+  } catch (e) {
+    msg.style.color = 'var(--red)';
+    msg.textContent = '❌ 诊断请求失败';
   }
 }
 function fmtBytes(b) { return b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : (b/1024).toFixed(1)+' KB'; }
