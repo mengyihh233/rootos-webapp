@@ -835,8 +835,9 @@ async function start() {
     catch (e) { console.warn('⚠️ cron/backup 失败：', e && e.message); res.json({ ok: false, error: e && e.message || 'backup failed' }); }
   }));
 
-  /* 导出全部用户数据（删库前保全）：管理员用，返回完整 users + profiles（含 daily 等全部字段） */
-  app.get('/api/admin/export-users', requireAdmin, wrap(async (req, res) => {
+  /* 导出全部用户数据（删库前保全）：ADMIN_TOKEN（Bearer）鉴权，返回完整 users + profiles */
+  app.get('/api/admin/export-users', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
     const users = await db.adminUsers();
     const out = {
       at: new Date().toISOString(),
@@ -854,8 +855,10 @@ async function start() {
     res.send(JSON.stringify(out, null, 2));
   }));
 
-  /* 🔴 清空全部用户数据（重新上架前）：必须传 confirm='DELETE-ALL' 二次确认，防误触 */
-  app.post('/api/admin/wipe-users', requireAdmin, wrap(async (req, res) => {
+  /* 🔴 清空全部用户数据（重新上架前）：必须传 confirm='DELETE-ALL' 二次确认，防误触。
+   * 鉴权用 ADMIN_TOKEN（Bearer），与导出/inject 一致（requireAdmin 是 session 鉴权，脚本/curl 用不了） */
+  app.post('/api/admin/wipe-users', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
     if (String((req.body && req.body.confirm) || '') !== 'DELETE-ALL') return res.status(400).json({ error: '需传 confirm=DELETE-ALL 二次确认' });
     const n = await db.wipeAllUsers();
     console.log('🗑️ 已清空全部用户数据：', n, '个账号（重新上架前清理）');
