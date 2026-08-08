@@ -265,8 +265,32 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 <body>
 <!-- ================= 登录 / 注册 / 找回密码 ================= -->
 <div id="auth" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);">
-  <div class="card" style="width:340px;max-width:92vw;">
-    <!-- 登录 / 注册 -->
+  <!-- 落地页（未登录默认显示：价值主张 + 特点 + 模板预览，提升转化） -->
+  <div id="authLanding" style="max-height:100vh;overflow-y:auto;width:100%;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;">
+    <div class="card" style="width:720px;max-width:100%;">
+      <h1 style="margin:0 0 6px;">🧠 ROOT-OS 个人操作系统</h1>
+      <p style="margin:0 0 18px;color:var(--dim);font-size:1.05rem;">把「想变好」变成一套<strong style="color:var(--text);">可运行、可迭代</strong>的系统 —— 不是打鸡血，是装系统。</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
+        <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">🌳 规则树 × 三层级</div><small style="color:var(--dim);line-height:1.6;">根部保命、中层推进、顶层冲刺。崩溃走支链不扣分，永远有 B 计划。</small></div>
+        <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">💥 崩溃即调试</div><small style="color:var(--dim);line-height:1.6;">崩了不是失败，是系统报错。迭代台记录 → 改规则 → 次日重启，闭环迭代。</small></div>
+        <div class="card" style="margin:0;padding:14px;"><div style="font-size:1.2rem;">📤 AI 周报</div><small style="color:var(--dim);line-height:1.6;">每周数据打包喂给 AI，得到"改哪条规则"的具体建议，越用越适合你。</small></div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <div style="font-size:.9rem;color:var(--dim);margin-bottom:8px;">🎯 官方模板一键套用：</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🎓 高中三年高考向</span>
+          <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🧠 Huberman 脑科学 30 天</span>
+          <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">💪 自制力系统</span>
+          <span style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:4px 10px;font-size:.85rem;">🎒 CS 学生</span>
+        </div>
+      </div>
+      <button class="ok" style="width:100%;" onclick="showAuthLogin()">🚀 免费开始 · 注册即用（数据存云端）</button>
+      <button class="ghost" style="width:100%;margin-top:8px;" onclick="showAuthLogin()">已有账号？登录</button>
+      <p style="text-align:center;margin:10px 0 0;color:var(--dim);font-size:.8rem;">网页版 + 微信小程序双端同步 · 每天自动备份</p>
+    </div>
+  </div>
+  <!-- 登录 / 注册 -->
+  <div id="authBox" class="card" style="width:340px;max-width:92vw;display:none;">
     <div id="authLogin">
       <h2 style="margin-top:0;">🧠 ROOT-OS 个人操作系统</h2>
       <p><small>把「想变好」变成一套可运行、可迭代的系统。注册即用，数据存云端。</small></p>
@@ -2649,6 +2673,11 @@ async function silentSync(){
 }
 function showApp(){ const a=document.getElementById('auth'); if(a) a.style.display='none'; }
 function showAuth(msg){ const a=document.getElementById('auth'); if(a){ a.style.display='flex'; if(msg) document.getElementById('authMsg').textContent=msg; } }
+/* 落地页 → 登录框切换 */
+function showAuthLogin(){
+  const l=document.getElementById('authLanding'); if(l) l.style.display='none';
+  const b=document.getElementById('authBox'); if(b) b.style.display='block';
+}
 async function doRegister(){
   const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
   if(u.length<2){ showAuth('用户名至少 2 个字符'); return; }
