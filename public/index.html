@@ -2089,6 +2089,7 @@ function obFinish(){
   meta.onboarded = true;
   try{ store.set('meta', meta); }catch(e){}
   scheduleServerSave();   /* 把"已引导"标记同步到云端，换设备也不再弹 */
+  setTimeout(fetchNotice, 300);  /* 引导完成 → 补弹版本公告（新手也能看到） */
 }
 
 /* ================= 计时器 ================= */
@@ -2874,8 +2875,8 @@ async function afterLogin(){
   SESSION=true;
   try{ await loadFromServer(); }catch(e){ console.warn('加载数据失败', e); }
   showApp(); bootApp();
-  /* 版本公告：登录后弹（版本变化才弹） */
-  setTimeout(fetchNotice, 500);
+  /* 版本公告：登录后弹（版本变化才弹）。新手引导（onboarded 未置位）时先不弹，引导完成后再弹（见 obFinish） */
+  if(meta && meta.onboarded) setTimeout(fetchNotice, 500);
   /* 分享落地：未登录时点分享链接 → 登录成功 → 自动弹套用确认 */
   try{
     const ps = sessionStorage.getItem('pendingShare');
