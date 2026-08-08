@@ -240,6 +240,18 @@ async function uploadSnapshotToCOS(snapshotStr, dateStr) {
       cloudPath: 'rootos-backups/rootos-' + dateStr + '.json',
       fileContent: Buffer.from(snapshotStr, 'utf8')
     });
+    /* 清理过期备份文件：保留最近 BACKUP_KEEP 天，删更早的（fileID 需 bucket 已缓存；失败静默） */
+    if (db._cloudBucket && CLOUD_ENV) {
+      try {
+        const ids = [];
+        for (let i = BACKUP_KEEP; i < 60; i++) {
+          const d = new Date(Date.now() - i * 86400000);
+          const key = 'rootos-backups/rootos-' + d.toISOString().slice(0, 10) + '.json';
+          ids.push('cloud://' + CLOUD_ENV + '.' + db._cloudBucket + '/' + key);
+        }
+        if (ids.length) await app.deleteFile({ fileList: ids });
+      } catch (e) { console.warn('⚠️ 云存储旧备份清理跳过：', (e && e.message) || e); }
+    }
     return '已上传云存储';
   } catch (e) {
     console.warn('⚠️ 云存储备份上传失败（不影响数据库内备份）：', (e && e.message) || e);
@@ -371,24 +383,16 @@ async function start() {
   app.use(require('compression')());
 
   app.use(express.json({ limit: '60mb' }));
-  /* 会话持久化：配置了 DATABASE_URL（Neon）时把 session 存数据库——
-   * 云托管实例重启/闲置回收后网页登录态不丢（不用每次刷新重新登录）。
-   * 本地 SQLite 开发模式仍用内存 store。 */
+  /* 会话持久化：默认内存 store（单实例够用）。
+   * ⚠️ 方案3 后：不再用 connect-pg-simple 存 session——它会把每次请求的 session 读写打进 PG，
+   * 破坏"PG 只剩 users 小表"的省钱目标。内存 store 代价：云托管实例重启后需重新登录（冷启动本就少见，可接受）。
+   * 未来多实例/要高可用时再换 Redis（env SESSION_STORE=redis 预留）。 */
   const sessConf = {
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 30 * 24 * 3600 * 1000 }
   };
-  if (process.env.DATABASE_URL) {
-    const { Pool } = require('pg');
-    const PgSession = require('connect-pg-simple')(session);
-    sessConf.store = new PgSession({
-      pool: new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 3 }),
-      tableName: 'session',
-      createTableIfMissing: true
-    });
-  }
   app.use(session(sessConf));
 
   /* DB 未就绪时，/api 请求返回 503（而非 500 崩溃），避免未连接状态下的异常扩散。

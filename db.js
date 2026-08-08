@@ -80,7 +80,20 @@ async function cloudProfileGet(uid) {
   if (!raw) return null;
   try { const j = JSON.parse(raw); return j && j.data ? j.data : null; } catch (e) { return null; }
 }
+/* 探测 updatedAt：优先 getFileInfo（HEAD 请求，不下载 body，省流量/读次数）。
+ * 文件内也存 updatedAt 作为兜底（getFileInfo 失败时）。 */
 async function cloudProfileUpdatedAt(uid) {
+  try {
+    const fileID = cloudFileID(uid);
+    if (fileID) {
+      const fi = await cloudApp().getFileInfo({ fileList: [fileID] });
+      const item = (fi && fi.fileList && fi.fileList[0]) || {};
+      if (item.code === 'SUCCESS' && item.lastModified) {
+        const d = new Date(item.lastModified);
+        if (!isNaN(d.getTime())) return d.toISOString();
+      }
+    }
+  } catch (e) { /* 走 body 兜底 */ }
   const raw = await cloudDownload(uid);
   if (!raw) return null;
   try { const j = JSON.parse(raw); return j && j.updatedAt ? j.updatedAt : null; } catch (e) { return null; }
@@ -832,7 +845,7 @@ async function userDelete(uid, username) {
   }
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG, USE_CLOUD_STORAGE };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {
