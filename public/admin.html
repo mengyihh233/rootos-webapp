@@ -217,6 +217,17 @@ function render() {
     </div>
 
     <div class="section">
+      <h2>💾 数据备份（全库快照）</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button class="ok" onclick="runBackupNow()">立即备份</button>
+        <button class="ghost" onclick="loadBackups()">刷新列表</button>
+        <span id="backupMsg" style="color:var(--green);font-size:.85rem;"></span>
+      </div>
+      <div id="backupList" style="margin-top:10px;font-size:.85rem;"></div>
+      <p style="color:var(--dim);font-size:.8rem;">每天 0 点自动全库快照（含所有用户数据），自动保留最近 7 份。点击列表中的「下载」可备份到本地。</p>
+    </div>
+
+    <div class="section">
       <h2>📥 注入规划数据（个人模板私有导入）</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
         <input id="injUser" placeholder="目标用户名" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
@@ -262,6 +273,7 @@ function render() {
   if (us) us.addEventListener('input', () => { userFilter = us.value.trim(); renderUserTableOnly(); });
   loadTplReview();
   renderDevList();
+  loadBackups();
 }
 
 /* 只重渲染用户表（搜索输入时调用，避免整页闪烁） */
@@ -460,6 +472,27 @@ function renderDevList() {
     ? '<b style="color:var(--green);">当前开发者（' + devs.length + '）：</b> ' + devs.map(u => '<span style="color:var(--accent);">' + escapeHtml(u.username) + '</span>').join('、')
     : '<span style="color:var(--dim);">当前还没有开发者账号</span>';
 }
+/* 备份：列出最近备份 */
+async function loadBackups() {
+  const box = document.getElementById('backupList');
+  if (!box) return;
+  const r = await api('/api/admin/backups');
+  if (!r.ok) { box.innerHTML = '<span style="color:var(--red);">加载失败</span>'; return; }
+  const list = r.body.list || [];
+  box.innerHTML = list.length
+    ? list.map(b => '<div style="margin:4px 0;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+        + '<span>#' + b.id + ' · ' + fmt(b.created_at) + ' · ' + fmtBytes(b.size_bytes) + '</span>'
+        + '<a href="/api/admin/backups/' + b.id + '" download style="color:var(--accent);">下载</a></div>').join('')
+    : '<span style="color:var(--dim);">还没有备份，点「立即备份」生成第一份</span>';
+}
+/* 立即备份 */
+async function runBackupNow() {
+  document.getElementById('backupMsg').textContent = '备份中…';
+  const r = await api('/api/admin/backup', { method: 'POST', body: '{}' });
+  document.getElementById('backupMsg').textContent = r.ok ? '✅ 已备份' : '❌ ' + ((r.body && r.body.error) || '失败');
+  loadBackups();
+}
+function fmtBytes(b) { return b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : (b/1024).toFixed(1)+' KB'; }
 /* 注入规划数据（需要 ADMIN_TOKEN，弹窗输入一次） */
 async function injectPlan(mode) {
   const username = document.getElementById('injUser').value.trim();

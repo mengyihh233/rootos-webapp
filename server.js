@@ -216,10 +216,39 @@ function computeFailureAnalysis(d0) {
 }
 
 /* ---------- Express ---------- */
-/* 自动备份：已停用（原 CloudBase 云存储方案依赖 @cloudbase/node-sdk，体积大已移除）。
- * 数据库可靠性依赖部署平台的托管备份（Neon Postgres 自带按时间点恢复；
- * 云托管本地 SQLite 场景建议定期人工导出或后续接入 COS/SCF 定时方案）。
- * 前端「每日自动备份」宣传文案已同步修改为平台托管备份说明。 */
+/* 自动备份：每日把全库快照写入 backups 表（数据库内持久，零依赖零凭证）。
+ * 保留最近 BACKUP_KEEP 份（默认 7）；配合 Neon PITR 双重保险。
+ * admin 可随时「立即备份」/下载（见 /api/admin/backup*）。 */
+const BACKUP_KEEP = Math.max(1, Math.min(30, Number(process.env.BACKUP_KEEP) || 7));
+async function runAutoBackup() {
+  if (!db.isConnected()) return;
+  try {
+    const rows = await db.adminUsers();
+    const snapshot = {
+      at: new Date().toISOString(),
+      app: 'rootos-webapp',
+      users: rows.map(r => ({
+        id: r.id, username: r.username,
+        email: r.email || null, wechat: r.wechat || null, wx_openid: r.wx_openid || null,
+        is_dev: r.is_dev || 0,
+        created_at: r.created_at, updated_at: r.updated_at,
+        data: (() => { try { return JSON.parse(r.data || '{}'); } catch (e) { return {}; } })()
+      }))
+    };
+    await db.backupSave(JSON.stringify(snapshot));
+    await db.backupTrim(BACKUP_KEEP);
+    console.log('✅ 自动备份完成：', new Date().toISOString());
+  } catch (e) {
+    console.warn('⚠️ 自动备份失败：', (e && e.message) || e);
+  }
+}
+function scheduleAutoBackup() {
+  /* 启动后先跑一次（数据库就绪时），再每天 0 点执行 */
+  setTimeout(() => runAutoBackup(), 30 * 1000);
+  const now = new Date();
+  const msToMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 1, 0).getTime() - now.getTime();
+  setTimeout(() => { runAutoBackup(); setInterval(runAutoBackup, 24 * 3600 * 1000); }, Math.max(msToMidnight, 60000));
+}
 
 /* ============ 微信订阅消息（每日打卡提醒 / 周日复盘提醒） ============
  * 启用条件：环境变量 WX_APPID/WX_SECRET（已有）+ WX_SUB_TMPL_REMIND（打卡提醒模板 ID）
@@ -680,6 +709,27 @@ async function start() {
     const until = new Date(Date.now() + days * 86400000).toISOString();
     await db.userUnlock(u.id, until);
     res.json({ ok: true, username, unlockUntil: until });
+  }));
+
+  /* ---- 数据备份（全库快照存 backups 表） ---- */
+  app.get('/api/admin/backups', requireAdmin, wrap(async (req, res) => {
+    const list = await db.backupList(Number(req.query.limit) || 10);
+    res.json({ ok: true, keep: BACKUP_KEEP, list });
+  }));
+  /* 立即备份（管理员手动触发） */
+  app.post('/api/admin/backup', requireAdmin, wrap(async (req, res) => {
+    await runAutoBackup();
+    const list = await db.backupList(5);
+    res.json({ ok: true, list });
+  }));
+  /* 下载某份备份（完整 JSON，含所有用户数据） */
+  app.get('/api/admin/backups/:id', requireAdmin, wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    const snap = await db.backupGet(id);
+    if (snap === null) return res.status(404).json({ error: '备份不存在' });
+    res.set('Content-Type', 'application/json');
+    res.set('Content-Disposition', 'attachment; filename="rootos-backup-' + id + '.json"');
+    res.send(snap);
   }));
 
   /* ---- 开发者账户（免付费墙 + 可登录管理后台） ---- */
@@ -1289,6 +1339,8 @@ async function start() {
 
   /* 后台异步连接数据库：失败不退出，5s 后重试，直到 Neon 唤醒。 */
   connectDBLoop();
+  /* 每日自动备份（写入 backups 表，admin 可下载） */
+  scheduleAutoBackup();
   /* 订阅消息定时提醒（未配置模板 ID 时仅日志提示） */
   scheduleReminders();
 }

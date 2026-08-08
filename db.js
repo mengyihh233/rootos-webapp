@@ -92,6 +92,13 @@ const SCHEMA_SQLITE = {
       user_id      INTEGER NOT NULL DEFAULT 0,
       amount       TEXT NOT NULL DEFAULT '',
       created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+  backups: `
+    CREATE TABLE IF NOT EXISTS backups (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshot   TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`
 };
 
@@ -173,6 +180,13 @@ const SCHEMA_PG = {
       user_id      INTEGER NOT NULL DEFAULT 0,
       amount       TEXT NOT NULL DEFAULT '',
       created_at   TEXT NOT NULL DEFAULT NOW()
+    )`,
+  backups: `
+    CREATE TABLE IF NOT EXISTS backups (
+      id         SERIAL PRIMARY KEY,
+      snapshot   TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT NOW()
     )`
 };
 
@@ -212,6 +226,7 @@ async function init() {
       await pool.query(SCHEMA_PG.favorites);
       await pool.query(SCHEMA_PG.shares);
       await pool.query(SCHEMA_PG.pay_orders);
+      await pool.query(SCHEMA_PG.backups);
       /* 既有库迁移：为旧 users 表补新列（幂等，已存在则跳过） */
       for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT', 'unlock_until TEXT', 'is_dev INTEGER NOT NULL DEFAULT 0']) {
         const name = col.split(' ')[0];
@@ -266,6 +281,7 @@ async function init() {
     if (!cols.includes('is_dev')) sqlite.exec(`ALTER TABLE users ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0`);
     sqlite.exec(SCHEMA_SQLITE.shares);
     sqlite.exec(SCHEMA_SQLITE.pay_orders);
+    sqlite.exec(SCHEMA_SQLITE.backups);
     connected = true;
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
   }
@@ -539,6 +555,40 @@ async function userSetDev(uid, isDev) {
   }
 }
 
+/* 备份（全库快照存 backups 表）：save 写入，list 列出（新→旧），trim 保留最近 keep 份 */
+async function backupSave(snapshot) {
+  const bytes = Buffer.byteLength(snapshot, 'utf8');
+  if (USE_PG) {
+    await pool.query('INSERT INTO backups (snapshot, size_bytes, created_at) VALUES ($1,$2,NOW())', [snapshot, bytes]);
+  } else {
+    sqlite.prepare('INSERT INTO backups (snapshot, size_bytes, created_at) VALUES (?,?,datetime(\'now\'))').run(snapshot, bytes);
+  }
+}
+async function backupList(limit) {
+  const n = Math.max(1, Math.min(30, Number(limit) || 10));
+  if (USE_PG) {
+    const r = await pool.query('SELECT id, size_bytes, created_at FROM backups ORDER BY id DESC LIMIT $1', [n]);
+    return r.rows;
+  }
+  return sqlite.prepare('SELECT id, size_bytes, created_at FROM backups ORDER BY id DESC LIMIT ?').all(n);
+}
+async function backupGet(id) {
+  if (USE_PG) {
+    const r = await pool.query('SELECT snapshot FROM backups WHERE id = $1', [id]);
+    return r.rows[0] ? r.rows[0].snapshot : null;
+  }
+  const row = sqlite.prepare('SELECT snapshot FROM backups WHERE id = ?').get(id);
+  return row ? row.snapshot : null;
+}
+async function backupTrim(keep) {
+  const n = Math.max(1, Math.min(30, Number(keep) || 7));
+  if (USE_PG) {
+    await pool.query('DELETE FROM backups WHERE id NOT IN (SELECT id FROM backups ORDER BY id DESC LIMIT $1)', [n]);
+  } else {
+    sqlite.prepare('DELETE FROM backups WHERE id NOT IN (SELECT id FROM backups ORDER BY id DESC LIMIT ?)').run(n);
+  }
+}
+
 /* 支付订单幂等（防 webhook 重放无限解锁）：已处理过该订单号返回 true */
 async function orderSeen(outTradeNo) {
   if (!outTradeNo) return true;
@@ -670,7 +720,7 @@ async function userDelete(uid, username) {
   }
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {
