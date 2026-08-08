@@ -346,9 +346,9 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
     <div id="authLogin">
       <h2 style="margin-top:0;">🧠 ROOT-OS 个人操作系统</h2>
       <p><small>把「想变好」变成一套可运行、可迭代的系统。注册即用，数据存云端。</small></p>
-      <input id="auUser" type="text" placeholder="账号（邮箱或用户名，≥2 字符）" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
-      <input id="auPass" type="password" placeholder="密码（≥6 位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
-      <input id="auName" type="text" placeholder="显示名（注册时填，2-16 位中文/字母/数字）" style="width:100%;margin-bottom:10px;box-sizing:border-box;display:none;" onkeydown="if(event.key==='Enter')doRegister()">
+      <input id="auUser" type="text" placeholder="账号（邮箱或用户名，≥2 字符）" autocomplete="username" onkeydown="if(event.key==='Enter')submitAuth()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+      <input id="auPass" type="password" placeholder="密码（≥6 位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitAuth()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
+      <input id="auName" type="text" placeholder="显示名（注册时填，2-16 位中文/字母/数字）" style="width:100%;margin-bottom:10px;box-sizing:border-box;display:none;" onkeydown="if(event.key==='Enter')submitAuth()">
       <p id="auHint" style="font-size:.78rem;color:var(--dim);margin:0 0 10px;display:none;">💡 建议同时绑定邮箱（可找回密码）或微信号，方便以后找回账号。</p>
       <button class="ok" style="width:100%;" onclick="doLogin()">登录</button>
       <button class="ghost" style="width:100%;margin-top:8px;" onclick="toggleRegMode()">注册新账号</button>
@@ -3073,6 +3073,7 @@ function openSupport(){
 function closeSupport(){ const m=document.getElementById('supportModal'); if(m) m.style.display='none'; }
 function closeLicense(){ const m=document.getElementById('licenseModal'); if(m) m.style.display='none'; }
 let _regMode = false;
+function submitAuth(){ _regMode ? doRegister() : doLogin(); }
 function toggleRegMode(){
   _regMode = !_regMode;
   $('#auName').style.display = _regMode ? 'block' : 'none';
