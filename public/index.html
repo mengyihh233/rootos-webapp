@@ -2789,7 +2789,9 @@ function mergeRemoteIntoLocal(srv){
     cats=mergeById(srv.cats, cats); levels=mergeById(srv.levels, levels);
     tags=mergeById(srv.tags, tags); phases=mergeById(srv.phases, phases);
     resources=mergeById(srv.resources, resources);
-    reviews=srv.reviews||reviews; meta=srv.meta||meta;
+    reviews=srv.reviews||reviews;
+    /* 🔴 修复：meta 以本地为准（onboarded/nightBar/todayView 本地刚设置的不被服务端旧值覆盖——防新手引导反复弹） */
+    meta=Object.assign({}, srv.meta||{}, meta||{});
     /* 落盘 */
     store.set('cats',cats); store.set('levels',levels); store.set('rules',rules);
     store.set('tags',tags); store.set('daily',daily); store.set('events',events);
