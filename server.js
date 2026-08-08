@@ -1072,6 +1072,20 @@ async function start() {
     res.json({ ok: true, msg: '密码已更新' });
   }));
 
+  /* ⑦b 微信自动注册账号首次设置密码（随机密码不可知，无需旧密码）——
+   * 设置后该 wx_ 账号即可被网页端「接入微信账号」用 账号+密码 合并 */
+  app.post('/api/password/set-first', requireAuth, wrap(async (req, res) => {
+    const u = await db.userById(req.session.userId);
+    if (!u) return res.status(401).json({ error: '未登录' });
+    if (!/^wx_/.test(String(u.username || ''))) return res.status(400).json({ error: '该功能仅限微信自动注册账号设置初始密码' });
+    const nextPw = String(req.body.next || '');
+    if (nextPw.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
+    if (nextPw.length > 64) return res.status(400).json({ error: '密码过长' });
+    await db.userSetPassword(u.id, bcrypt.hashSync(nextPw, 10));
+    res.json({ ok: true, msg: '密码已设置，可凭 账号+' + '密码 从网页端接入合并' });
+  }));
+
+
   /* ⑧ 绑定已有网页账号（v1.4：微信自动注册账号 → 并入已有网页账号，数据合并）
    * 场景：用户先用微信登录生成了 wx_ 账号，想把数据并到原来的网页账号（如邮箱注册的），
    * 之后微信登录直接进网页账号。 */
@@ -1133,6 +1147,54 @@ async function start() {
     if (cur.display_name && !target.display_name) await db.userSetDisplayName(target.id, cur.display_name);
     console.log('✅ 账号合并：', cur.username, '→', target.username);
     res.json({ ok: true, token: issueWxToken(target.id), username: target.username, display_name: (await db.userById(target.id)).display_name || '', need_name: !(await db.userById(target.id)).display_name, msg: '已绑定并合并数据' });
+  }));
+
+  /* ⑧b 网页端接入微信账号（反向合并）：网页账号当前登录 → 输入 wx_ 账号 + 密码 → 微信数据并入网页账号。
+   * 场景：用户网页端用邮箱注册，之前在小程序用过 wx_ 账号（设过密码），现在想把两边数据合在一起。 */
+  app.post('/api/account/attach-wx', requireAuth, wrap(async (req, res) => {
+    const username = String((req.body || {}).username || '').trim();
+    const password = String((req.body || {}).password || '');
+    const wx = await db.userByName(username);
+    if (!wx || !/^wx_/.test(String(wx.username || ''))) return res.status(401).json({ error: '账号或密码错误' });
+    if (!bcrypt.compareSync(password, wx.pw_hash)) return res.status(401).json({ error: '账号或密码错误' });
+    if (wx.id === req.session.userId) return res.status(400).json({ error: '当前已是该账号，无需绑定' });
+    /* 该 wx_ 账号必须持有 openid（才能把微信登录导向网页账号） */
+    if (!wx.wx_openid) return res.status(400).json({ error: '该微信账号未绑定微信登录，无法接入' });
+    const target = await db.userById(req.session.userId);
+    /* 数据合并：与 merge-web 同一套（目标=网页账号，源=wx_ 账号） */
+    const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
+    const isDefaultBag = d => (d && d.meta && d.meta._seed) || !d.rules || !Array.isArray(d.rules) || d.rules.length === 0;
+    const srcData = parse(await db.profileGet(wx.id));
+    const tgtData = parse(await db.profileGet(target.id));
+    const srcReal = !isDefaultBag(srcData), tgtReal = !isDefaultBag(tgtData);
+    if (!tgtReal && srcReal) {
+      const merged = Object.assign({}, srcData);
+      merged.daily = Object.assign({}, srcData.daily || {}, tgtData.daily || {});
+      merged.events = [...(srcData.events || []), ...(tgtData.events || [])];
+      await db.profileSet(target.id, JSON.stringify(merged));
+    } else {
+      const byId = list => { const m = {}; (list || []).forEach(x => { if (x && x.id) m[x.id] = x; }); return Object.values(m); };
+      ['cats', 'levels', 'rules', 'tags', 'phases', 'resources'].forEach(k => {
+        tgtData[k] = byId([...(srcData[k] || []), ...(tgtData[k] || [])]);
+      });
+      const sr = srcData.reviews || {}, tr = tgtData.reviews || {};
+      tgtData.reviews = { day: Object.assign({}, sr.day || {}, tr.day || {}), week: Object.assign({}, sr.week || {}, tr.week || {}), month: Object.assign({}, sr.month || {}, tr.month || {}) };
+      tgtData.retros = byId([...(srcData.retros || []), ...(tgtData.retros || [])]);
+      const newDaily = Object.assign({}, srcData.daily || {});
+      Object.keys(tgtData.daily || {}).forEach(k => {
+        const s = newDaily[k] || {}, t = tgtData.daily[k] || {};
+        newDaily[k] = Object.assign({}, s, t, { checks: Object.assign({}, (s.checks || {}), (t.checks || {})), tags: Array.from(new Set([...(s.tags || []), ...(t.tags || [])])) });
+      });
+      tgtData.daily = newDaily;
+      tgtData.events = [...(srcData.events || []), ...(tgtData.events || [])];
+      await db.profileSet(target.id, JSON.stringify(tgtData));
+    }
+    /* openid 转给网页账号；wx_ 账号解除绑定（下次微信登录直接进网页账号） */
+    await db.userBindOpenid(target.id, wx.wx_openid);
+    await db.userBindOpenid(wx.id, null);
+    if (wx.display_name && !target.display_name) await db.userSetDisplayName(target.id, wx.display_name);
+    console.log('✅ 网页接入微信：', wx.username, '→', target.username);
+    res.json({ ok: true, token: issueWxToken(target.id), username: target.username, display_name: (await db.userById(target.id)).display_name || '', msg: '已接入并合并数据' });
   }));
 
   /* 当前用户自己的失败模式分析（崩溃最多的定式 + 支链恢复率），人人可见，仅看自己 */

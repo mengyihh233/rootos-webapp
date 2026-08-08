@@ -3206,6 +3206,12 @@ async function renderSettings(){
           +'<button class="ghost mini" onclick="unbindWechat()">解绑</button></div>'
       : '<div class="row" style="margin-top:8px;"><input type="text" id="setWechat" placeholder="微信号" style="flex:1;min-width:140px;">'
           +'<button class="ok mini" onclick="bindWechat()">绑定</button></div>')
+    +'<div><b style="font-size:.9rem;">接入微信小程序账号 <small style="color:var(--dim);font-weight:normal;">（把小程序端数据合并到本账号）</small></b>'
+    +'<div style="margin-top:6px;"><small style="color:var(--dim);">在小程序「我的 → 设置账号密码」设好密码后，在此输入小程序端账号+密码，两边数据合并。</small></div>'
+    +'<div class="row" style="margin-top:8px;"><input type="text" id="attachWxUser" placeholder="小程序端账号（wx_ 开头）" style="flex:1;min-width:140px;">'
+    +'<input type="password" id="attachWxPass" placeholder="小程序端密码" style="flex:1;min-width:140px;" onkeydown="if(event.key===\'Enter\')attachWx()">'
+    +'<button class="ok mini" onclick="attachWx()">接入合并</button></div>'
+    +'<small id="attachWxMsg" style="color:var(--dim);"></small></div>'
     +'<div><b style="font-size:.9rem;">修改密码</b>'
     +'<div class="row" style="margin-top:6px;"><input type="password" id="setOldPw" placeholder="当前密码" style="flex:1;min-width:100px;">'
     +'<input type="password" id="setNewPw" placeholder="新密码（≥6 位）" style="flex:1;min-width:100px;">'
@@ -3260,6 +3266,21 @@ async function bindWechat(){
   const wechat=(document.getElementById('setWechat').value||'').trim();
   const j=await apiPost('/api/wechat/bind',{wechat});
   if(j.ok){ toast('微信'+(j.wechat?'绑定已更新':'绑定成功')); renderSettings(); } else toast(j.error||'操作失败');
+}
+/* 接入微信小程序账号：输入 wx_ 账号 + 密码 → 数据合并到当前账号 */
+async function attachWx(){
+  const user=(document.getElementById('attachWxUser').value||'').trim();
+  const pass=document.getElementById('attachWxPass').value||'';
+  const msg=document.getElementById('attachWxMsg');
+  if(!user || !pass){ msg.textContent='请输入小程序端账号和密码'; msg.style.color='var(--warn)'; return; }
+  if(!/^wx_/.test(user)){ msg.textContent='小程序端账号以 wx_ 开头（见小程序「我的」页登录账号）'; msg.style.color='var(--warn)'; return; }
+  const j=await apiPost('/api/account/attach-wx',{username:user,password:pass});
+  if(j.ok){
+    msg.textContent='✅ 已接入合并！刷新后数据同步';
+    msg.style.color='var(--ok)';
+    SESSION=true;
+    setTimeout(()=>location.reload(), 1200);
+  } else { msg.textContent=j.error||'接入失败'; msg.style.color='var(--danger)'; }
 }
 async function unbindWechat(){
   if(!confirm('确定解绑微信号？（仅清除此处的「微信号」文字标识，不影响小程序 openid 关联）')) return;
