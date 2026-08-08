@@ -160,6 +160,17 @@ function render() {
     </div>
 
     <div class="section">
+      <h2>🔓 用户解锁（付费墙启用时用）</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="unlockUser" placeholder="用户名（爱发电付款备注填的那个）" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+        <input id="unlockDays" type="number" value="30" min="1" style="width:80px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+        <button class="ok" onclick="unlockUser()">解锁</button>
+        <span id="unlockMsg" style="color:var(--amber);font-size:.85rem;"></span>
+      </div>
+      <p style="color:var(--dim);font-size:.8rem;">当前付费墙默认关闭（LICENSE_ENABLED 未启用），此工具为未来启用后使用；配好爱发电回调后付款会自动解锁。</p>
+    </div>
+
+    <div class="section">
       <h2>注册趋势（按天）</h2>
       <div class="trend-toggle">
         ${['all','90','30','7'].map(k => `<button class="${trendRange===k?'active':''}" onclick="setTrend('${k}')">${k==='all'?'全部':k+'天'}</button>`).join('')}
@@ -352,6 +363,16 @@ async function refreshStats() {
   toast('已刷新');
 }
 function refreshStatsSilent() { api('/api/admin/stats').then(r => { if (r.ok) S = r.body; }).catch(()=>{}); }
+/* 手动解锁用户（付费墙启用时用） */
+async function unlockUser() {
+  const username = document.getElementById('unlockUser').value.trim();
+  const days = Number(document.getElementById('unlockDays').value) || 30;
+  if (!username) { document.getElementById('unlockMsg').textContent = '请输入用户名'; return; }
+  document.getElementById('unlockMsg').textContent = '解锁中…';
+  const r = await api('/api/admin/unlock', { method: 'POST', body: JSON.stringify({ username, days }) });
+  document.getElementById('unlockMsg').textContent = r.ok ? `✅ 已解锁 ${username} ${days} 天` : (r.body && r.body.error) || '解锁失败';
+  document.getElementById('unlockUser').value = '';
+}
 function toast(msg) {
   let t = document.getElementById('adminToast');
   if (!t) { t = document.createElement('div'); t.id='adminToast';
