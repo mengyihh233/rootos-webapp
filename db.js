@@ -243,6 +243,7 @@ async function init() {
     if (!cols.includes('email_verified')) sqlite.exec(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`);
     if (!cols.includes('wechat')) sqlite.exec(`ALTER TABLE users ADD COLUMN wechat TEXT`);
     if (!cols.includes('wx_openid')) sqlite.exec(`ALTER TABLE users ADD COLUMN wx_openid TEXT`);
+    if (!cols.includes('unlock_until')) sqlite.exec(`ALTER TABLE users ADD COLUMN unlock_until TEXT`);
     sqlite.exec(SCHEMA_SQLITE.shares);
     connected = true;
     console.log('✅ 数据库：已连接本地 SQLite（data.db）');
@@ -490,6 +491,15 @@ async function userById(uid) {
   return sqlite.prepare('SELECT * FROM users WHERE id = ?').get(uid);
 }
 
+/* 解锁：设置 unlock_until（ISO 时间串；null/空 = 未解锁） */
+async function userUnlock(uid, untilISO) {
+  if (USE_PG) {
+    await pool.query('UPDATE users SET unlock_until = $1 WHERE id = $2', [untilISO, uid]);
+  } else {
+    sqlite.prepare('UPDATE users SET unlock_until = ? WHERE id = ?').run(untilISO, uid);
+  }
+}
+
 async function userFindByEmail(email) {
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
@@ -567,7 +577,7 @@ async function shareGet(id) {
   return sqlite.prepare(`SELECT id,owner,title,data FROM shares WHERE id=?`).get(id);
 }
 
-module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
+module.exports = { init, isConnected, userByName, userById, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, USE_PG };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {

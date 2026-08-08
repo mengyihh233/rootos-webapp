@@ -613,6 +613,67 @@ async function start() {
     res.json({ ok: true, enabled });
   }));
 
+  /* ============ 用量限制 & 爱发电解锁（付费墙） ============
+   * 触发条件（任一超限）：规则数 > LICENSE_LIMIT_RULES（默认 30）
+   *   或 注册天数 > LICENSE_TRIAL_DAYS（默认 30）或 数据量 > LICENSE_LIMIT_MB（默认 50）
+   * 解锁：爱发电 webhook（AFDIAN_TOKEN 验签）或管理员手动（/api/admin/unlock），解锁 30 天 */
+  const LICENSE_RULES = Number(process.env.LICENSE_LIMIT_RULES) || 30;
+  const LICENSE_DAYS = Number(process.env.LICENSE_TRIAL_DAYS) || 30;
+  const LICENSE_MB = Number(process.env.LICENSE_LIMIT_MB) || 50;
+  const LICENSE_UNLOCK_DAYS = Number(process.env.LICENSE_UNLOCK_DAYS) || 30;
+  app.get('/api/license/status', requireAuth, wrap(async (req, res) => {
+    const u = await db.userById(req.session.userId);
+    const raw = await db.profileGet(req.session.userId);
+    let data = {};
+    try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
+    const rules = Array.isArray(data.rules) ? data.rules.length : 0;
+    const dataBytes = raw ? Buffer.byteLength(raw, 'utf8') : 0;
+    const regDays = u.created_at ? Math.floor((Date.now() - new Date(u.created_at).getTime()) / 86400000) : 0;
+    const unlocked = u.unlock_until && new Date(u.unlock_until).getTime() > Date.now();
+    const reasons = [];
+    if (rules > LICENSE_RULES) reasons.push('规则数 ' + rules + ' 条（免费上限 ' + LICENSE_RULES + ' 条）');
+    if (regDays > LICENSE_DAYS) reasons.push('已使用 ' + regDays + ' 天（免费试用 ' + LICENSE_DAYS + ' 天）');
+    if (dataBytes > LICENSE_MB * 1048576) reasons.push('数据量已超 ' + LICENSE_MB + ' MB');
+    res.json({
+      limited: !unlocked && reasons.length > 0,
+      reasons,
+      unlockUntil: unlocked ? u.unlock_until : null,
+      usage: { rules, regDays, dataBytes, limitRules: LICENSE_RULES, trialDays: LICENSE_DAYS, limitMB: LICENSE_MB }
+    });
+  }));
+
+  /* 爱发电支付回调（创作中心 → 通知设置 → 回调 URL 填本接口；AFDIAN_TOKEN 为签名 token） */
+  app.post('/api/payment/afdian', wrap(async (req, res) => {
+    const token = process.env.AFDIAN_TOKEN;
+    if (!token) { console.warn('💰 爱发电回调未启用：请配置环境变量 AFDIAN_TOKEN'); return res.json({ ec: 400, em: '未配置' }); }
+    try {
+      const body = req.body || {};
+      /* 验签：拼接 params 与 token，再与 sign 比对（爱发电签名规则） */
+      const calc = crypto.createHash('md5').update(String(body.params || '') + token).digest('hex');
+      if (calc !== body.sign) return res.status(403).json({ ec: 403, em: '验签失败' });
+      const params = typeof body.params === 'string' ? JSON.parse(body.params) : body.params;
+      const remark = String(params.remark || params.out_trade_no || '').trim(); /* 用户付款时备注填用户名 */
+      const u = await db.userByName(remark);
+      if (!u) return res.json({ ec: 200, em: '未找到用户（备注需填用户名）' });
+      const until = new Date(Date.now() + LICENSE_UNLOCK_DAYS * 86400000).toISOString();
+      await db.userUnlock(u.id, until);
+      console.log(`💰 爱发电回调：用户 ${u.username} 解锁 ${LICENSE_UNLOCK_DAYS} 天`);
+      res.json({ ec: 200, em: 'ok' });
+    } catch (e) { console.warn('⚠️ 爱发电回调处理失败：', e.message); res.json({ ec: 500, em: 'error' }); }
+  }));
+
+  /* 管理员手动解锁（备用通道）：POST /api/admin/unlock { username, days } */
+  app.post('/api/admin/unlock', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    const username = String(req.body.username || '').trim();
+    const days = Math.max(1, Math.min(3650, Number(req.body.days) || LICENSE_UNLOCK_DAYS));
+    const u = await db.userByName(username);
+    if (!u) return res.status(404).json({ error: '用户不存在' });
+    const until = new Date(Date.now() + days * 86400000).toISOString();
+    await db.userUnlock(u.id, until);
+    res.json({ ok: true, username, unlockUntil: until });
+  }));
+
   /* ⑦ 修改密码（需旧密码） */
   app.post('/api/password/change', requireAuth, wrap(async (req, res) => {
     const oldPw = String(req.body.old || '');
