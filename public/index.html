@@ -2722,13 +2722,77 @@ const bagKeys=['cats','levels','rules','tags','daily','events','phases','reviews
 function bagFromLocal(){
   const o={}; bagKeys.forEach(k=>{ const v=store.get(k); if(v!==null && v!==undefined) o[k]=v; }); return o;
 }
+/* 乐观锁冲突合并：把服务端最新数据与本地合并。
+ * 策略：daily（按日期键，本地已有的天保留本地、新日期取服务端）、events/retros（按 id 去重合并）、
+ * rules（同 id 保留本地，新增取服务端）、其余结构（cats/levels/tags/phases/resources）以服务端为准。 */
+function mergeRemoteIntoLocal(srv){
+  if(!srv || typeof srv!=='object') return;
+  suppressSave=true;
+  try{
+    /* daily：本地某天的记录可能更新，合并键级 */
+    const newDaily={}; 
+    Object.keys(srv.daily||{}).forEach(k=>{ newDaily[k]=srv.daily[k]; });
+    Object.keys(daily||{}).forEach(k=>{ newDaily[k]=daily[k]; });  /* 本地覆盖同天（本地刚操作过，以本地为准） */
+    daily=newDaily;
+    /* events：按 id 去重（本地新事件保留） */
+    const evMap={};
+    (srv.events||[]).forEach(e=>{ if(e&&e.id) evMap[e.id]=e; });
+    (events||[]).forEach(e=>{ if(e&&e.id) evMap[e.id]=e; });
+    events=Object.values(evMap); syncEventIds();
+    /* retros：按 id 去重合并 */
+    const rtMap={};
+    (srv.retros||[]).forEach(r=>{ if(r&&r.id) rtMap[r.id]=r; });
+    (retros||[]).forEach(r=>{ if(r&&r.id) rtMap[r.id]=r; });
+    retros=Object.values(rtMap);
+    /* rules：同 id 保留本地（本地编辑中），服务端新增的补进来 */
+    const ruMap={};
+    (srv.rules||[]).forEach(r=>{ if(r&&r.id) ruMap[r.id]=r; });
+    (rules||[]).forEach(r=>{ if(r&&r.id) ruMap[r.id]=r; });
+    rules=Object.values(ruMap);
+    /* 其余结构以服务端为准（本地没在编辑时保持一致） */
+    cats=srv.cats||cats; levels=srv.levels||levels; tags=srv.tags||tags;
+    phases=srv.phases||phases; resources=srv.resources||resources;
+    reviews=srv.reviews||reviews; meta=srv.meta||meta;
+    /* 落盘 */
+    store.set('cats',cats); store.set('levels',levels); store.set('rules',rules);
+    store.set('tags',tags); store.set('daily',daily); store.set('events',events);
+    store.set('phases',phases); store.set('reviews',reviews); store.set('retros',retros);
+    store.set('resources',resources); store.set('meta',meta);
+  }catch(e){ console.warn('合并失败，以服务端为准', e); }
+  suppressSave=false;
+}
 async function pushToServer(){
   if(!SESSION) return;
   try{
-    /* 显式把本地时间戳注入 body.meta（bagFromLocal 取自 localStorage，不会含内存中刚赋值的字段） */
+    /* 显式把本地时间戳注入 body.meta（bagFromLocal 取自 localStorage，不会含内存中刚赋值的字段）；
+     * _baseTs = 本地读取服务端数据时的 updated_at（乐观锁，防双端同时写互相覆盖） */
     const bag=bagFromLocal();
     bag.meta=Object.assign({}, bag.meta||{}, { savedAt: localSavedAt });
+    bag._baseTs = Number(localStorage.getItem('pos_serverTs')) || 0;
     const r=await fetch('/api/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(bag)});
+    if(r.status===409){
+      /* 乐观锁冲突：另一端先写入了。拉最新数据，把本地新增/变更合并进去再重试一次 */
+      try{
+        const j=await r.json();
+        if(j && j.latest){
+          suppressSave=true;
+          mergeRemoteIntoLocal(j.latest);   /* 合并：保留本地 daily/events 增量，结构以服务端为准 */
+          suppressSave=false;
+          const bag2=bagFromLocal();
+          bag2.meta=Object.assign({}, bag2.meta||{}, { savedAt: localSavedAt });
+          bag2._baseTs = Number(new Date(j.updatedAt||0).getTime()) || 0;
+          const r2=await fetch('/api/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(bag2)});
+          if(!r2.ok) throw new Error('http '+r2.status);
+          pendingPushData=null;
+          try{ localStorage.removeItem('pos_pendingPush'); }catch(e){}
+          /* 更新服务端时间戳，后续轮询不再重复拉取 */
+          const nt=Number(new Date(j.updatedAt||0).getTime())||0;
+          if(nt){ try{ localStorage.setItem('pos_serverTs',String(nt)); localStorage.setItem('pos_savedAt',String(nt)); }catch(e2){} }
+          return true;
+        }
+      }catch(e2){ console.warn('409 合并重试失败', e2); }
+      throw new Error('conflict');
+    }
     if(!r.ok) throw new Error('http '+r.status);
     pendingPushData=null;
     try{ localStorage.removeItem('pos_pendingPush'); }catch(e){}
@@ -2801,7 +2865,10 @@ async function loadFromServer(){
   store.set('resources',resources); store.set('meta',meta);
   /* 本地时间戳与服务端对齐，避免后续误判为"本地较新" */
   localSavedAt = serverTs || Date.now();
-  try{ localStorage.setItem('pos_savedAt', String(localSavedAt)); }catch(e){}
+  try{
+    localStorage.setItem('pos_savedAt', String(localSavedAt));
+    localStorage.setItem('pos_serverTs', String(serverTs));  /* 乐观锁基准：服务端更新时间 */
+  }catch(e){}
 }
 async function apiPost(url, body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -2845,7 +2912,10 @@ async function silentSync(){
     store.set('resources',resources); store.set('meta',meta);
     suppressSave=false;
     localSavedAt=serverTs||Date.now();
-    try{ localStorage.setItem('pos_savedAt',String(localSavedAt)); }catch(e){}
+    try{
+      localStorage.setItem('pos_savedAt',String(localSavedAt));
+      localStorage.setItem('pos_serverTs',String(serverTs));
+    }catch(e){}
     /* 轻量重渲染当前视图 */
     const cur=document.querySelector('.section.active');
     const id=cur?cur.id:'today';
