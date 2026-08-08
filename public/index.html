@@ -350,7 +350,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <input id="auPass" type="password" placeholder="密码（≥6 位）" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitAuth()" style="width:100%;margin-bottom:10px;box-sizing:border-box;">
       <input id="auName" type="text" placeholder="显示名（注册时填，2-16 位中文/字母/数字）" style="width:100%;margin-bottom:10px;box-sizing:border-box;display:none;" onkeydown="if(event.key==='Enter')submitAuth()">
       <p id="auHint" style="font-size:.78rem;color:var(--dim);margin:0 0 10px;display:none;">💡 建议同时绑定邮箱（可找回密码）或微信号，方便以后找回账号。</p>
-      <button class="ok" style="width:100%;" onclick="doLogin()">登录</button>
+      <button class="ok" style="width:100%;" onclick="submitAuth()">登录</button>
       <button class="ghost" style="width:100%;margin-top:8px;" onclick="toggleRegMode()">注册新账号</button>
       <p id="authMsg" style="color:var(--danger);min-height:1.2em;"></p>
       <p style="text-align:center;margin:6px 0 0;"><a href="javascript:void(0)" onclick="showForgot()" style="color:var(--accent);font-size:.8rem;">忘记密码？用邮箱找回</a></p>
