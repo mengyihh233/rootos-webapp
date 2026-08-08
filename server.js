@@ -667,15 +667,28 @@ async function start() {
        * 视为可合并——把临时账号的数据并入目标账号、openid 转移，否则才是真冲突 */
       if (!/^wx_/.test(String(holder.username || ''))) return res.status(409).json({ error: '该微信已绑定其他账号' });
       const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
+      const isDefaultBag = d => !d.rules || !Array.isArray(d.rules) || d.rules.length === 0;
       const hData = parse(await db.profileGet(holder.id));
       const tData = parse(await db.profileGet(u.id));
-      ['cats', 'levels', 'rules', 'tags', 'phases', 'reviews', 'retros', 'resources'].forEach(k => {
-        const v = tData[k];
-        if (!v || (Array.isArray(v) && !v.length)) tData[k] = hData[k];
-      });
-      tData.daily = Object.assign({}, hData.daily || {}, tData.daily || {});
-      tData.events = [...(hData.events || []), ...(tData.events || [])];
-      await db.profileSet(u.id, JSON.stringify(tData));
+      const hReal = !isDefaultBag(hData), tReal = !isDefaultBag(tData);
+      if (!tReal && hReal) {
+        /* 网页账号是空默认 → 直接用微信账号数据（真实数据保留） */
+        const merged = Object.assign({}, hData);
+        merged.daily = Object.assign({}, hData.daily || {}, tData.daily || {});
+        merged.events = [...(hData.events || []), ...(tData.events || [])];
+        await db.profileSet(u.id, JSON.stringify(merged));
+      } else {
+        const byId = list => { const m = {}; (list || []).forEach(x => { if (x && x.id) m[x.id] = x; }); return Object.values(m); };
+        ['cats', 'levels', 'rules', 'tags', 'phases', 'resources'].forEach(k => {
+          tData[k] = byId([...(hData[k] || []), ...(tData[k] || [])]);
+        });
+        const sr = hData.reviews || {}, tr = tData.reviews || {};
+        tData.reviews = { day: Object.assign({}, sr.day || {}, tr.day || {}), week: Object.assign({}, sr.week || {}, tr.week || {}), month: Object.assign({}, sr.month || {}, tr.month || {}) };
+        tData.retros = byId([...(hData.retros || []), ...(tData.retros || [])]);
+        tData.daily = Object.assign({}, hData.daily || {}, tData.daily || {});
+        tData.events = [...(hData.events || []), ...(tData.events || [])];
+        await db.profileSet(u.id, JSON.stringify(tData));
+      }
       await db.userBindOpenid(holder.id, null);
     }
     await db.userBindOpenid(u.id, openid);
@@ -994,17 +1007,34 @@ async function start() {
     /* 只禁止：openid 已被【其他账号】绑定。当前账号自己持有 openid 是正常情况（就是要转给目标账号） */
     const holder = await db.userFindByOpenid(cur.wx_openid);
     if (holder && holder.id !== req.session.userId && holder.id !== target.id) return res.status(409).json({ error: '该微信已绑定其他账号' });
-    /* 数据合并：目标账号为主，当前微信账号补缺失结构 + 合并 daily/events */
+    /* 数据合并：🔴 修复方向 bug——不能"网页账号优先+空才补"：
+     * 新账号的 profileGet 会返回 defaultBag（SEED 规则非空），导致 wx_ 真实数据被默认值顶掉。
+     * 正确：按「非默认」判断——有真实数据的一方保留，双方都有则结构字段 id 级并集、daily/events 合并。 */
     const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
+    const isDefaultBag = d => !d.rules || !Array.isArray(d.rules) || d.rules.length === 0;
     const curData = parse(await db.profileGet(req.session.userId));
     const tgtData = parse(await db.profileGet(target.id));
-    ['cats', 'levels', 'rules', 'tags', 'phases', 'reviews', 'retros', 'resources'].forEach(k => {
-      const v = tgtData[k];
-      if (!v || (Array.isArray(v) && !v.length)) tgtData[k] = curData[k];
-    });
-    tgtData.daily = Object.assign({}, curData.daily || {}, tgtData.daily || {});
-    tgtData.events = [...(curData.events || []), ...(tgtData.events || [])];
-    await db.profileSet(target.id, JSON.stringify(tgtData));
+    const curReal = !isDefaultBag(curData), tgtReal = !isDefaultBag(tgtData);
+    if (!tgtReal && curReal) {
+      /* 目标账号是空默认 → 直接用微信账号数据（真实数据保留） */
+      const merged = Object.assign({}, curData);
+      merged.daily = Object.assign({}, curData.daily || {}, tgtData.daily || {});
+      merged.events = [...(curData.events || []), ...(tgtData.events || [])];
+      await db.profileSet(target.id, JSON.stringify(merged));
+    } else {
+      /* 双方都有数据（或只有目标有）→ 结构字段 id 级并集（本地空补对方，非空保留双方），daily/events 合并 */
+      const byId = list => { const m = {}; (list || []).forEach(x => { if (x && x.id) m[x.id] = x; }); return Object.values(m); };
+      ['cats', 'levels', 'rules', 'tags', 'phases', 'resources'].forEach(k => {
+        tgtData[k] = byId([...(curData[k] || []), ...(tgtData[k] || [])]);
+      });
+      /* reviews 键级合并；retros 按 id */
+      const sr = curData.reviews || {}, tr = tgtData.reviews || {};
+      tgtData.reviews = { day: Object.assign({}, sr.day || {}, tr.day || {}), week: Object.assign({}, sr.week || {}, tr.week || {}), month: Object.assign({}, sr.month || {}, tr.month || {}) };
+      tgtData.retros = byId([...(curData.retros || []), ...(tgtData.retros || [])]);
+      tgtData.daily = Object.assign({}, curData.daily || {}, tgtData.daily || {});
+      tgtData.events = [...(curData.events || []), ...(tgtData.events || [])];
+      await db.profileSet(target.id, JSON.stringify(tgtData));
+    }
     /* openid 转给目标账号；当前 wx_ 账号解除（下次微信登录直接进目标账号） */
     await db.userBindOpenid(target.id, cur.wx_openid);
     await db.userBindOpenid(req.session.userId, null);
