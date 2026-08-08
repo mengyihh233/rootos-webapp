@@ -713,6 +713,19 @@ async function start() {
     res.json({ ok: true });
   }));
 
+  /* 二维码生成（小程序「打开网页版」弹层用）：GET /api/qr?url=https://... → PNG */
+  app.get('/api/qr', wrap(async (req, res) => {
+    const url = String(req.query.url || '').slice(0, 500);
+    if (!/^https?:\/\//.test(url)) return res.status(400).json({ error: '无效链接' });
+    try {
+      const QR = require('qrcode');
+      const png = await QR.toBuffer(url, { width: 300, margin: 1 });
+      res.set('Content-Type', 'image/png').send(png);
+    } catch (e) {
+      res.status(500).json({ error: '二维码生成失败' });
+    }
+  }));
+
   /* 站内公告：登录后两端弹窗展示（版本变化才弹）。内容维护在 public/notice.json，大版本更新改那里即可 */
   app.get('/api/notice', wrap(async (req, res) => {
     try {

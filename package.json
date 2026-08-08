@@ -17,6 +17,7 @@
     "express-session": "^1.18.0",
     "mammoth": "^1.12.0",
     "nodemailer": "^9.0.5",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "qrcode": "^1.5.4"
   }
 }
