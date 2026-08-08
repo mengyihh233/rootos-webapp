@@ -613,12 +613,9 @@ async function start() {
     res.json({ ok: true, enabled });
   }));
 
-  /* ============ 用量限制 & 爱发电解锁（付费墙） ============
-   * 触发条件（任一超限）：规则数 > LICENSE_LIMIT_RULES（默认 30）
-   *   或 注册天数 > LICENSE_TRIAL_DAYS（默认 30）或 数据量 > LICENSE_LIMIT_MB（默认 50）
+  /* ============ 数据量限额 & 爱发电解锁（付费墙） ============
+   * 触发条件：数据量 > LICENSE_LIMIT_MB（默认 50MB）——规则数/使用天数不限，可一直免费使用
    * 解锁：爱发电 webhook（AFDIAN_TOKEN 验签）或管理员手动（/api/admin/unlock），解锁 30 天 */
-  const LICENSE_RULES = Number(process.env.LICENSE_LIMIT_RULES) || 30;
-  const LICENSE_DAYS = Number(process.env.LICENSE_TRIAL_DAYS) || 30;
   const LICENSE_MB = Number(process.env.LICENSE_LIMIT_MB) || 50;
   const LICENSE_UNLOCK_DAYS = Number(process.env.LICENSE_UNLOCK_DAYS) || 30;
   app.get('/api/license/status', requireAuth, wrap(async (req, res) => {
@@ -628,17 +625,14 @@ async function start() {
     try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
     const rules = Array.isArray(data.rules) ? data.rules.length : 0;
     const dataBytes = raw ? Buffer.byteLength(raw, 'utf8') : 0;
-    const regDays = u.created_at ? Math.floor((Date.now() - new Date(u.created_at).getTime()) / 86400000) : 0;
     const unlocked = u.unlock_until && new Date(u.unlock_until).getTime() > Date.now();
     const reasons = [];
-    if (rules > LICENSE_RULES) reasons.push('规则数 ' + rules + ' 条（免费上限 ' + LICENSE_RULES + ' 条）');
-    if (regDays > LICENSE_DAYS) reasons.push('已使用 ' + regDays + ' 天（免费试用 ' + LICENSE_DAYS + ' 天）');
-    if (dataBytes > LICENSE_MB * 1048576) reasons.push('数据量已超 ' + LICENSE_MB + ' MB');
+    if (dataBytes > LICENSE_MB * 1048576) reasons.push('数据量 ' + (dataBytes / 1048576).toFixed(1) + ' MB，超过免费额度 ' + LICENSE_MB + ' MB');
     res.json({
       limited: !unlocked && reasons.length > 0,
       reasons,
       unlockUntil: unlocked ? u.unlock_until : null,
-      usage: { rules, regDays, dataBytes, limitRules: LICENSE_RULES, trialDays: LICENSE_DAYS, limitMB: LICENSE_MB }
+      usage: { rules, dataBytes, limitMB: LICENSE_MB }
     });
   }));
 
