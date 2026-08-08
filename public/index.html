@@ -765,6 +765,18 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 </div>
 
 <!-- 套用模板：合并 / 仅追加阶段资源 / 覆盖 选择 -->
+<div class="modal-mask" id="supportModal" style="display:none;z-index:260;" onclick="if(event.target===this)closeSupport()">
+  <div class="modal" style="max-width:340px;text-align:center;">
+    <h3 style="margin:0 0 8px;">☕ 支持作者</h3>
+    <p style="color:var(--dim);font-size:.85rem;margin:0 0 12px;">喜欢 ROOT-OS 的话，请作者喝杯咖啡，支持持续开发 💪</p>
+    <div id="supportQrBox" style="display:none;margin:0 auto 12px;">
+      <img id="supportQr" src="/support-qr.png" style="width:220px;height:220px;border-radius:10px;display:block;margin:0 auto;" onerror="document.getElementById('supportQrBox').style.display='none'">
+      <div style="color:var(--dim);font-size:.78rem;margin-top:4px;">微信 / 支付宝 扫码打赏</div>
+    </div>
+    <a class="ok" href="https://afdian.com/a/yanshuo_selfness" target="_blank" style="display:block;width:100%;text-align:center;text-decoration:none;box-sizing:border-box;padding:10px 0;">❤️ 爱发电支持（月供 / 一次性）</a>
+    <button class="ghost" style="width:100%;margin-top:8px;" onclick="closeSupport()">关闭</button>
+  </div>
+</div>
 <div class="modal-mask" id="noticeModal" style="display:none;z-index:260;" onclick="if(event.target===this)closeNotice()">
   <div class="modal" style="max-width:480px;text-align:left;">
     <h3 id="noticeTitle" style="margin:0 0 10px;color:var(--accent);"></h3>
@@ -2750,6 +2762,15 @@ function fetchNotice(){
   }).catch(()=>{});
 }
 function closeNotice(){ const m=document.getElementById('noticeModal'); if(m) m.style.display='none'; }
+/* ===== 支持作者弹层（收款码 + 爱发电） ===== */
+function openSupport(){
+  const m=document.getElementById('supportModal'); if(!m) return;
+  /* 收款码图片存在时显示（图片加载失败自动隐藏，不阻塞） */
+  const q=document.getElementById('supportQrBox');
+  if(q){ q.style.display='block'; const img=document.getElementById('supportQr'); if(img) img.src='/support-qr.png?v='+Date.now(); }
+  m.style.display='flex';
+}
+function closeSupport(){ const m=document.getElementById('supportModal'); if(m) m.style.display='none'; }
 async function doRegister(){
   const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
   if(u.length<2){ showAuth('用户名至少 2 个字符'); return; }
@@ -2823,7 +2844,7 @@ async function renderSettings(){
     +'<button class="ok mini" onclick="changePassword()">修改</button></div></div>'
     +'<div><small style="color:var(--dim);">忘记密码？登录页点「忘记密码」用绑定邮箱找回；邮箱需先在本页验证绑定。</small></div>'
     +'<div><button class="ghost" onclick="doLogout()">退出登录</button> '
-    +'<a href="https://afdian.com/a/yanshuo_selfness" target="_blank" class="ghost" style="display:inline-block;text-decoration:none;margin-left:8px;">☕ 支持作者（爱发电）</a></div>'
+    +'<button class="ghost" onclick="openSupport()" style="margin-left:8px;">☕ 支持作者</button></div>'
     +'</div>';
 }
 async function sendBindCode(){
