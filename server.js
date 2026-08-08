@@ -309,6 +309,9 @@ async function start() {
     next();
   });
 
+  /* Gzip 压缩（性能）：整包 JSON（/api/data 等）文本压缩率高，显著降流量与传输时间 */
+  app.use(require('compression')());
+
   app.use(express.json({ limit: '60mb' }));
   /* 会话持久化：配置了 DATABASE_URL（Neon）时把 session 存数据库——
    * 云托管实例重启/闲置回收后网页登录态不丢（不用每次刷新重新登录）。
@@ -1021,13 +1024,22 @@ async function start() {
   }));
 
   /* ---- 模板市场：社区模板（需审核后公开） ---- */
-  app.get('/api/templates', wrap(async (req, res) => {
+  let builtinTplCache = null, builtinTplCacheAt = 0;
+  function loadBuiltinTemplates() {
+    const now = Date.now();
+    /* 30s 内存缓存，减少每次磁盘读（模板文件变更后最多延迟 30s 生效，可接受） */
+    if (builtinTplCache && now - builtinTplCacheAt < 30000) return builtinTplCache;
     let builtin = [];
     try {
       const fs = require('fs');
       const idxPath = path.join(__dirname, 'public', 'templates', 'index.json');
       if (fs.existsSync(idxPath)) builtin = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
     } catch (e) { builtin = []; }
+    builtinTplCache = builtin; builtinTplCacheAt = now;
+    return builtin;
+  }
+  app.get('/api/templates', wrap(async (req, res) => {
+    const builtin = loadBuiltinTemplates();
     const community = await db.templateListApproved();
     const uid = req.session.userId || null;
     const enriched = await Promise.all(community.map(async t => {
