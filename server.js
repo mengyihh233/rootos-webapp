@@ -685,7 +685,19 @@ async function start() {
         const sr = hData.reviews || {}, tr = tData.reviews || {};
         tData.reviews = { day: Object.assign({}, sr.day || {}, tr.day || {}), week: Object.assign({}, sr.week || {}, tr.week || {}), month: Object.assign({}, sr.month || {}, tr.month || {}) };
         tData.retros = byId([...(hData.retros || []), ...(tData.retros || [])]);
-        tData.daily = Object.assign({}, hData.daily || {}, tData.daily || {});
+        /* 🔴 daily 同天键级合并（修：不能再 Object.assign 覆盖 wx_ 真实打卡） */
+      {
+        const newDaily = Object.assign({}, hData.daily || {});
+        Object.keys(tData.daily || {}).forEach(k => {
+          const h = newDaily[k] || {};
+          const t = tData.daily[k] || {};
+          newDaily[k] = Object.assign({}, h, t, {
+            checks: Object.assign({}, (h.checks || {}), (t.checks || {})),
+            tags: Array.from(new Set([...(h.tags || []), ...(t.tags || [])]))
+          });
+        });
+        tData.daily = newDaily;
+      }
         tData.events = [...(hData.events || []), ...(tData.events || [])];
         await db.profileSet(u.id, JSON.stringify(tData));
       }
@@ -1031,7 +1043,19 @@ async function start() {
       const sr = curData.reviews || {}, tr = tgtData.reviews || {};
       tgtData.reviews = { day: Object.assign({}, sr.day || {}, tr.day || {}), week: Object.assign({}, sr.week || {}, tr.week || {}), month: Object.assign({}, sr.month || {}, tr.month || {}) };
       tgtData.retros = byId([...(curData.retros || []), ...(tgtData.retros || [])]);
-      tgtData.daily = Object.assign({}, curData.daily || {}, tgtData.daily || {});
+      /* 🔴 修复 daily 合并：同天键级合并（checks/tags 并集+本地有值优先），不能再用 Object.assign 整键覆盖——曾导致 wx_ 真实打卡被网页账号空 daily 覆盖（数据"没了"） */
+      {
+        const newDaily = Object.assign({}, curData.daily || {});
+        Object.keys(tgtData.daily || {}).forEach(k => {
+          const s = newDaily[k] || {};
+          const t = tgtData.daily[k] || {};
+          newDaily[k] = Object.assign({}, s, t, {
+            checks: Object.assign({}, (s.checks || {}), (t.checks || {})),
+            tags: Array.from(new Set([...(s.tags || []), ...(t.tags || [])]))
+          });
+        });
+        tgtData.daily = newDaily;
+      }
       tgtData.events = [...(curData.events || []), ...(tgtData.events || [])];
       await db.profileSet(target.id, JSON.stringify(tgtData));
     }
