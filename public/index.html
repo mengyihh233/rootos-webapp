@@ -271,7 +271,14 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
         <a href="javascript:void(0)" onclick="showAuthLogin()" style="color:var(--accent);font-size:.9rem;text-decoration:none;">已有账号？<b>登录 →</b></a>
       </div>
-      <div class="card">
+      <!-- 落地页标签栏 -->
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="ghost" id="lpTabHome" onclick="toggleLandingTab('home')" style="flex:1;border-color:var(--accent);color:var(--accent);">🏠 首页</button>
+        <button class="ghost" id="lpTabPhil" onclick="toggleLandingTab('phil')" style="flex:1;">🧭 系统哲学</button>
+        <button class="ghost" id="lpTabStart" onclick="toggleLandingTab('start')" style="flex:1;">🚀 三步上手</button>
+      </div>
+      <!-- ① 首页 -->
+      <div id="lpHome" class="card">
         <h1 style="margin:0 0 6px;">🧠 ROOT-OS 个人操作系统</h1>
         <p style="margin:0 0 18px;color:var(--dim);font-size:1.05rem;">把「想变好」变成一套<strong style="color:var(--text);">可运行、可迭代</strong>的系统 —— 不是打鸡血，是装系统。</p>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
@@ -291,23 +298,40 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
         <button class="ok" style="width:100%;" onclick="showAuthLogin()">🚀 免费开始 · 注册即用（数据存云端）</button>
         <button class="ghost" style="width:100%;margin-top:8px;" onclick="showAuthLogin()">已有账号？登录</button>
       </div>
-      <div class="card">
-        <h3 style="margin:0 0 10px;">🧭 系统哲学：负反馈自控</h3>
-        <div style="color:var(--dim);font-size:.92rem;line-height:1.9;">
-          <p style="margin:0 0 8px;">你不是缺意志力，你是缺一套<strong style="color:var(--text);">可迭代的系统</strong>。<br>
-          这套「规则树 × 三层级 × 支链降级 × 三级复盘」的思想，源自知乎答主 <strong style="color:var(--accent);">edmond</strong> 的<a href="https://www.zhihu.com/question/19888447/answer/1930799480401293785" target="_blank" style="color:var(--accent);text-decoration:underline;">《底层创造者OS》</a>，在此致谢。</p>
-          <p style="margin:0;">核心理念：<br>
-          · <b>崩塌即调试</b>——崩溃是系统报错，不是道德失败<br>
-          · <b>环境 > 意志力</b>——设计环境，而不是考验自己<br>
-          · <b>胜于易胜</b>——根部定式小到不可能失败</p>
+      <!-- ② 系统哲学（edmond 原文思想） -->
+      <div id="lpPhil" class="card" style="display:none;">
+        <h3 style="margin:0 0 10px;">🧭 系统哲学：多尺度稳态工程</h3>
+        <div style="color:var(--dim);font-size:.92rem;line-height:1.95;">
+          <p style="margin:0 0 10px;">这套系统的思想，源自知乎答主 <strong style="color:var(--accent);">edmond</strong> 的<a href="https://www.zhihu.com/question/19888447/answer/1930799480401293785" target="_blank" style="color:var(--accent);text-decoration:underline;">《底层创造者OS》</a>——把自控从「意志力对抗」重构为<strong style="color:var(--text);">多尺度稳态工程</strong>。</p>
+          <p style="margin:0 0 10px;"><b>🌳 规则树 × 三层级</b><br>
+          · 根部：傻瓜级保命定式，维护成本极低，「穿越牛熊」<br>
+          · 中层：战术定式，回溯分解找到杠杆率最高的干预节点<br>
+          · 顶层：战略目标——下层稳态改善后自然捅破，而非强行硬攻</p>
+          <p style="margin:0 0 10px;"><b>💥 崩溃即调试 · 不归零</b><br>
+          · 崩溃不是失败，是系统报错：「现在还不是时候」<br>
+          · 储君继承制——主链崩溃，支链自动顶上，不归零<br>
+          · 水密隔舱——不可抗力时冻结，系统不可能全面崩塌<br>
+          · 下必为例——例外永久合法化，拒绝侥幸磨损</p>
+          <p style="margin:0 0 10px;"><b>🎯 胜于易胜</b><br>
+          每一个大尺度负面稳态，都对应一个小尺度有效干预节点——在「不可逃逸区」形成之前介入，用极小成本撬动全局。</p>
+          <p style="margin:0;border-left:3px solid var(--accent);padding-left:10px;color:var(--text);">
+          「我们并不是用某一段时间下棋，也不是用某一个行为下棋，而是用系统的<strong>边界条件</strong>作为棋子在下棋。」<br>
+          <span style="color:var(--dim);font-size:.8rem;">—— edmond《底层创造者OS》</span></p>
         </div>
+        <button class="ok" style="width:100%;margin-top:14px;" onclick="showAuthLogin()">🚀 免费开始 · 注册即用（数据存云端）</button>
+        <button class="ghost" style="width:100%;margin-top:8px;" onclick="showAuthLogin()">已有账号？登录</button>
       </div>
-      <div class="card">
+      <!-- ③ 三步上手 -->
+      <div id="lpStart" class="card" style="display:none;">
         <h3 style="margin:0 0 10px;">🚀 三步上手</h3>
         <div style="color:var(--dim);font-size:.92rem;line-height:2;">
-          ① 注册 / 微信登录 → ② 一键套用模板（或从零建规则树）→ ③ 每天打卡，周日复盘迭代<br>
-          <span style="color:var(--text);">网页版 + 微信小程序双端同步 · 数据存云端 · 每日自动备份</span>
+          ① 注册 / 微信登录（网页版 + 小程序双端同步）<br>
+          ② 一键套用模板（或从零建自己的规则树）<br>
+          ③ 每天打卡 → 崩溃走支链 → 周日复盘迭代<br>
+          <span style="color:var(--text);">数据存云端 · 每日自动备份 · 微信打卡提醒</span>
         </div>
+        <button class="ok" style="width:100%;margin-top:14px;" onclick="showAuthLogin()">🚀 免费开始 · 注册即用</button>
+        <button class="ghost" style="width:100%;margin-top:8px;" onclick="showAuthLogin()">已有账号？登录</button>
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);color:var(--dim);font-size:.85rem;">
           📮 反馈 / 建议 / 合作：<b style="color:var(--accent);">yanshuo_selfness</b> · ☕ 支持作者：<a href="https://afdian.com/a/yanshuo_selfness" target="_blank" style="color:var(--accent);text-decoration:underline;">爱发电主页 →</a>
         </div>
@@ -2710,6 +2734,16 @@ function showAuth(msg){ const a=document.getElementById('auth'); if(a){ a.style.
 function showAuthLogin(){
   const l=document.getElementById('authLanding'); if(l) l.style.display='none';
   const b=document.getElementById('authBox'); if(b) b.style.display='block';
+}
+/* 落地页标签切换：首页 / 系统哲学 / 三步上手 */
+function toggleLandingTab(t){
+  const map={home:['lpHome','lpTabHome'], phil:['lpPhil','lpTabPhil'], start:['lpStart','lpTabStart']};
+  Object.keys(map).forEach(k=>{
+    const body=document.getElementById(map[k][0]);
+    if(body) body.style.display = (k===t) ? 'block' : 'none';
+    const tab=document.getElementById(map[k][1]);
+    if(tab){ tab.style.borderColor = (k===t) ? 'var(--accent)' : ''; tab.style.color = (k===t) ? 'var(--accent)' : ''; }
+  });
 }
 /* ===== 连续记录激励：从今天（今天无记录则从昨天）向前数连续有 daily 记录的天数 ===== */
 function countStreak(){
