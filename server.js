@@ -172,7 +172,7 @@ function defaultBag() {
     resources: [
       { id: 'res0', title: '新手手册：这套系统怎么用', body: '规则树：根部=保命定式，中层=推进动作，顶层=冲刺目标。\n标记：社交日/低能量日打上后自动降级（只保根部，不追责）。\n迭代：崩了 → 回溯迭代台 → 改规则 → 次日重启。\n数据都在云端，网页和小程序实时同步。', tags: ['新手'], updatedAt: '' }
     ],
-    meta: { version: 'webapp-1.0' }
+    meta: { version: 'webapp-1.0', _seed: true } /* _seed 标记=默认数据，账号绑定/合并时用于识别临时账号 */
   };
 }
 
@@ -667,7 +667,7 @@ async function start() {
        * 视为可合并——把临时账号的数据并入目标账号、openid 转移，否则才是真冲突 */
       if (!/^wx_/.test(String(holder.username || ''))) return res.status(409).json({ error: '该微信已绑定其他账号' });
       const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
-      const isDefaultBag = d => !d.rules || !Array.isArray(d.rules) || d.rules.length === 0;
+      const isDefaultBag = d => (d && d.meta && d.meta._seed) || !d.rules || !Array.isArray(d.rules) || d.rules.length === 0; /* 🔴 _seed 标记优先：defaultBag 恒含种子规则，仅判 length 会误判临时账号为真实数据 */
       const hData = parse(await db.profileGet(holder.id));
       const tData = parse(await db.profileGet(u.id));
       const hReal = !isDefaultBag(hData), tReal = !isDefaultBag(tData);
@@ -852,6 +852,14 @@ async function start() {
     res.set('Content-Type', 'application/json');
     res.set('Content-Disposition', 'attachment; filename="rootos-full-export-' + new Date().toISOString().slice(0, 10) + '.json"');
     res.send(JSON.stringify(out, null, 2));
+  }));
+
+  /* 🔴 清空全部用户数据（重新上架前）：必须传 confirm='DELETE-ALL' 二次确认，防误触 */
+  app.post('/api/admin/wipe-users', requireAdmin, wrap(async (req, res) => {
+    if (String((req.body && req.body.confirm) || '') !== 'DELETE-ALL') return res.status(400).json({ error: '需传 confirm=DELETE-ALL 二次确认' });
+    const n = await db.wipeAllUsers();
+    console.log('🗑️ 已清空全部用户数据：', n, '个账号（重新上架前清理）');
+    res.json({ ok: true, deleted: n });
   }));
 
   /* ---- 数据备份（全库快照存 backups 表） ---- */
@@ -1061,7 +1069,7 @@ async function start() {
      * 新账号的 profileGet 会返回 defaultBag（SEED 规则非空），导致 wx_ 真实数据被默认值顶掉。
      * 正确：按「非默认」判断——有真实数据的一方保留，双方都有则结构字段 id 级并集、daily/events 合并。 */
     const parse = s => { try { return JSON.parse(s || '{}'); } catch (e) { return {}; } };
-    const isDefaultBag = d => !d.rules || !Array.isArray(d.rules) || d.rules.length === 0;
+    const isDefaultBag = d => (d && d.meta && d.meta._seed) || !d.rules || !Array.isArray(d.rules) || d.rules.length === 0; /* 🔴 _seed 标记优先：defaultBag 恒含种子规则，仅判 length 会误判临时账号为真实数据 */
     const curData = parse(await db.profileGet(req.session.userId));
     const tgtData = parse(await db.profileGet(target.id));
     const curReal = !isDefaultBag(curData), tgtReal = !isDefaultBag(tgtData);
@@ -1198,7 +1206,45 @@ async function start() {
     if (Array.isArray(clean.retros)) clean.retros = clean.retros.slice(0, 200).map(r => ({
       ...r, text: trimStr(r.text || '', MAX_RETRO_TEXT)
     }));
-    if (clean.daily && typeof clean.daily === 'object') clean.daily = clean.daily;
+    if (Array.isArray(clean.events)) clean.events = clean.events.slice(-1500).map(e => ({
+      ...e, text: trimStr(e.text || '', 300), retro: trimStr(e.retro || '', 300), ts: trimStr(e.ts || '', 40)
+    }));
+    /* 🔴 修复：daily 键白名单（防脏数据）——只保留 YYYY-MM-DD 日期键，文本/checks 限长 */
+    if (clean.daily && typeof clean.daily === 'object') {
+      const dk = /^\d{4}-\d{2}-\d{2}$/;
+      const nd = {};
+      Object.keys(clean.daily).slice(0, 4000).forEach(k => {
+        if (!dk.test(k)) return;
+        const rec = clean.daily[k] || {};
+        const nr = { ...rec };
+        if (typeof nr.note === 'string') nr.note = trimStr(nr.note, 500);
+        if (typeof nr.sleep === 'number') nr.sleep = Math.max(0, Math.min(24, nr.sleep));
+        if (rec.checks && typeof rec.checks === 'object') {
+          const ck = {};
+          Object.keys(rec.checks).slice(0, 2000).forEach(id => { ck[id] = !!rec.checks[id]; });
+          nr.checks = ck;
+        }
+        if (Array.isArray(rec.tags)) nr.tags = rec.tags.slice(0, 50).map(t => trimStr(t, 30));
+        nd[k] = nr;
+      });
+      clean.daily = nd;
+    }
+    /* reviews 文本限长 */
+    if (clean.reviews && typeof clean.reviews === 'object') {
+      const nr = { day: {}, week: {}, month: {} };
+      ['day', 'week', 'month'].forEach(t => {
+        const src = clean.reviews[t] || {};
+        Object.keys(src).slice(0, 1000).forEach(k => { nr[t][k] = trimStr(src[k], 2000); });
+      });
+      clean.reviews = nr;
+    }
+    if (clean.meta && typeof clean.meta === 'object') {
+      if (clean.meta.quickEvents && typeof clean.meta.quickEvents === 'object') {
+        const qe = {};
+        Object.keys(clean.meta.quickEvents).slice(0, 30).forEach(k => { qe[k] = trimStr(clean.meta.quickEvents[k], 20); });
+        clean.meta.quickEvents = qe;
+      }
+    }
     return { ok: true, clean };
   }
 

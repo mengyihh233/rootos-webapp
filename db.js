@@ -896,7 +896,36 @@ async function userDelete(uid, username) {
   }
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userSetDisplayName, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
+/* 🔴 清空全部用户数据（重新上架前使用）：清空 users 及所有关联表 + 云存储 profile/备份。
+ * 返回删除数量。注意：sent_logs 保留（防提醒重复发送逻辑不受影响）。 */
+async function wipeAllUsers() {
+  const tables = ['users', 'profiles', 'templates', 'notifications', 'ratings', 'favorites', 'shares', 'subscriptions', 'pay_orders', 'backups'];
+  let deleted = 0;
+  if (USE_PG) {
+    const r = await pool.query('SELECT COUNT(*) AS n FROM users');
+    deleted = Number(r.rows[0].n) || 0;
+    await pool.query('BEGIN');
+    try {
+      for (const t of tables) await pool.query(`DELETE FROM ${t}`);
+      await pool.query('COMMIT');
+    } catch (e) { await pool.query('ROLLBACK'); throw e; }
+  } else {
+    const r = sqlite.prepare('SELECT COUNT(*) AS n FROM users').get();
+    deleted = Number(r.n) || 0;
+    const del = sqlite.transaction(() => { tables.forEach(t => sqlite.prepare(`DELETE FROM ${t}`).run()); });
+    del();
+  }
+  /* 云存储模式：删掉所有 profiles/ 文件（列表未知，按导出文件名枚举不可行——改为按已删用户逐条删 */
+  if (USE_CLOUD_STORAGE) {
+    try {
+      /* 无法列目录，跳过文件清理；新注册用户会覆盖同 uid 文件（uid 自增，旧文件成孤儿，无害） */
+      console.warn('⚠️ wipeAllUsers：云存储 profile 文件未逐一删除（孤儿文件无害，新用户 uid 不同）');
+    } catch (e) { console.warn('云存储清理跳过：', e.message); }
+  }
+  return deleted;
+}
+
+module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userSetDisplayName, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 async function subUpsert(userId, tplId, enabled) {

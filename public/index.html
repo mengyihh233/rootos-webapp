@@ -2837,12 +2837,13 @@ async function pushToServer(){
           bag2._baseTs = Number(new Date(j.updatedAt||0).getTime()) || 0;
           const r2=await fetch('/api/data',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(bag2)});
           if(!r2.ok) throw new Error('http '+r2.status);
+          /* 🔴 修复：重试成功后必须用【重试响应】的 updatedAt 回写基准——用 409 的旧 updatedAt 会导致 baseTs 陈旧、下次保存必 409（无限合并） */
+          const rj = await r2.json().catch(()=>null);
+          const newTs = Number(new Date((rj && rj.updatedAt) || 0).getTime()) || 0;
           pendingPushData=null;
           localDirty=false;  /* 合并重试成功：本地改动已同步 */
           try{ localStorage.removeItem('pos_pendingPush'); }catch(e){}
-          /* 更新服务端时间戳，后续轮询不再重复拉取 */
-          const nt=Number(new Date(j.updatedAt||0).getTime())||0;
-          if(nt){ try{ localStorage.setItem('pos_serverTs',String(nt)); localStorage.setItem('pos_savedAt',String(nt)); }catch(e2){} }
+          if(newTs){ try{ localStorage.setItem('pos_serverTs',String(newTs)); localStorage.setItem('pos_savedAt',String(newTs)); }catch(e2){} }
           return true;
         }
       }catch(e2){ console.warn('409 合并重试失败', e2); }
