@@ -883,6 +883,23 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   </div>
 </div>
 
+<!-- 门类管理面板：增删改规则+层级管理 -->
+<div class="modal-mask" id="catMgrModal" style="display:none;z-index:260;" onclick="if(event.target===this)closeCatMgr()">
+  <div class="modal" style="max-width:600px;max-height:88vh;" onclick="event.stopPropagation()">
+    <h3 id="catMgrTitle" style="margin:0 0 8px;"></h3>
+    <div class="form-row"><label>名字</label><input id="catMgrName" placeholder="门类名" onchange="saveCatMgr()"></div>
+    <div class="form-row"><label>颜色</label><select id="catMgrColor" onchange="saveCatMgr()"><option value="#4fc1ff">蓝</option><option value="#4ec9b0">绿</option><option value="#f44747">红</option><option value="#e8912d">橙</option><option value="#dcdcaa">金</option><option value="#c586c0">紫</option></select></div>
+    <button class="mini ghost" style="color:#f44747;margin-top:8px;" onclick="delCatMgr()">✕ 删除此门类</button>
+    <hr style="margin:14px 0;border-color:var(--line);">
+    <h4 style="margin:0 0 6px;">本门类规则 <button class="mini ghost" onclick="addCatRule()" style="font-size:12px;">＋新增</button></h4>
+    <div id="catMgrRules"></div>
+    <hr style="margin:14px 0;border-color:var(--line);">
+    <h4 style="margin:0 0 6px;">层级管理 <button class="mini ghost" onclick="addLvWeb()" style="font-size:12px;">＋新增</button></h4>
+    <div id="catMgrLevels"></div>
+    <button class="ghost" onclick="closeCatMgr()" style="margin-top:14px;">完成</button>
+  </div>
+</div>
+
 <!-- 计时器弹窗 -->
 <div class="modal-mask" id="timerModal">
   <div class="modal">
@@ -1288,7 +1305,8 @@ function renderTodayRules(){
     if(!rs.length) return '';
     const mains = rs.filter(r=>!r.parent).sort((a,b)=>lvIdx(a.lv)-lvIdx(b.lv)||bySeq(a,b));
     if(!mains.length) return '';
-    return '<div class="grp-title" style="color:'+(color||'var(--dim)')+';">'+title+'</div>'
+    return '<div class="grp-title" style="color:'+(color||'var(--dim)')+';">'+title
+      +' <small class="cat-mgr-link" onclick="event.stopPropagation();openCatMgr(\''+(rs[0]&&rs[0].cat||'')+'\')" title="管理本门类" style="cursor:pointer;color:var(--muted);font-size:14px;margin-left:6px;">⚙</small></div>'
       + mains.map(r=>item(r,false)).join('')
       + '<details class="chain-detail"><summary>链路详情</summary><div class="path">'+chainPath(rs,rec)+'</div></details>';
   };
@@ -2603,6 +2621,76 @@ async function markAllNotifRead(){
   }catch(e){ alert('操作失败'); }
 }
 function closeNotif(){ const m = document.getElementById('notifModal'); if (m) m.style.display = 'none'; }
+
+/* 🔴 网页端门类管理面板 */
+let _catMgrId = null;
+function openCatMgr(catId){
+  _catMgrId = catId;
+  const cat = cats.find(c=>c.id===catId); if(!cat)return;
+  document.getElementById('catMgrTitle').innerHTML = '⚙ 「'+esc(cat.name)+'」设置';
+  document.getElementById('catMgrName').value = cat.name;
+  document.getElementById('catMgrColor').value = cat.color;
+  /* 本门类规则列表 */
+  const catRules = rules.filter(r=>r.cat===catId);
+  let rh = catRules.map(r=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line);">
+    <span style="flex:1;min-width:0;font-size:13px;">${esc(r.t)}</span>
+    <input type="checkbox" ${r.on!==false?'checked':''} onchange="toggleWebRule('${r.id}',this.checked)">
+    <button class="x" onclick="editWebRule('${r.id}')" title="编辑">✎</button>
+    <button class="x" onclick="delWebRule('${r.id}')" title="删除">×</button>
+  </div>`).join('')||'<small class="dim">本门类暂无规则</small>';
+  document.getElementById('catMgrRules').innerHTML = rh;
+  /* 层级管理 */
+  let lh = levels.map(l=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--line);">
+    <input style="flex:1;background:none;border:none;color:var(--text);font-size:13px;padding:4px 8px;border:1px solid var(--line);border-radius:4px;" value="${esc(l.name)}" onchange="_renameLv('${l.id}',this.value)">
+    <button class="x" onclick="delLvWeb('${l.id}')" title="删除">×</button>
+  </div>`).join('');
+  document.getElementById('catMgrLevels').innerHTML = lh + `<div style="display:flex;gap:8px;margin-top:8px;">
+    <input id="newLvName" placeholder="新层级名" style="flex:1;background:none;border:1px solid var(--line);border-radius:4px;color:var(--text);font-size:13px;padding:4px 8px;">
+    <button class="mini ghost" onclick="addLvWeb()">＋ 添加</button>
+  </div>`;
+  document.getElementById('catMgrModal').style.display='flex';
+}
+function closeCatMgr(){ document.getElementById('catMgrModal').style.display='none'; _catMgrId=null; }
+function saveCatMgr(){
+  const cat=cats.find(c=>c.id===_catMgrId); if(!cat)return;
+  cat.name=document.getElementById('catMgrName').value;
+  cat.color=document.getElementById('catMgrColor').value;
+  store.set('cats',cats); renderTodayRules(); renderCatMgrAfterChange();
+}
+function delCatMgr(){
+  if(!confirm('删除此门类？其下所有规则一并删除。'))return;
+  cats=cats.filter(c=>c.id!==_catMgrId);
+  rules=rules.filter(r=>r.cat!==_catMgrId);
+  store.set('cats',cats); store.set('rules',rules);
+  closeCatMgr(); renderTodayRules();
+}
+function addCatRule(){
+  const id='u'+Date.now().toString(36); const catId=_catMgrId;
+  const lvId=levels.length?levels[levels.length-1].id:'lv_root';
+  rules.push({id,cat:catId,lv:lvId,t:'新规则',on:true,parent:null,seq:rules.filter(r=>r.cat===catId).length+1});
+  store.set('rules',rules); renderCatMgrAfterChange();
+}
+function editWebRule(id){
+  const r=rules.find(r=>r.id===id); if(!r)return;
+  const t=prompt('编辑规则内容',r.t); if(t!==null&&t.trim()){r.t=t.trim();store.set('rules',rules);renderCatMgrAfterChange();}
+}
+function delWebRule(id){
+  if(!confirm('删除此规则？'))return;
+  rules=rules.filter(r=>r.id!==id); store.set('rules',rules); renderCatMgrAfterChange();
+}
+function toggleWebRule(id,on){ const r=rules.find(r=>r.id===id); if(r){r.on=on;store.set('rules',rules);} }
+function addLvWeb(){
+  const inp=document.getElementById('newLvName'); const name=(inp?inp.value:'').trim();
+  if(!name)return alert('请输入层级名');
+  const id='lv'+Date.now().toString(36); levels.push({id,name});
+  store.set('levels',levels); renderCatMgrAfterChange();
+}
+function delLvWeb(id){
+  if(rules.some(r=>r.lv===id))return alert('该层级有规则在用，无法删除');
+  levels=levels.filter(l=>l.id!==id); store.set('levels',levels); renderCatMgrAfterChange();
+}
+function _renameLv(id,val){ const l=levels.find(l=>l.id===id); if(l)l.name=val; store.set('levels',levels); }
+function renderCatMgrAfterChange(){ if(_catMgrId){ renderTodayRules(); openCatMgr(_catMgrId); } }
 
 async function applyTemplate(file,title,mode,choices){
   try{
