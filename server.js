@@ -1408,9 +1408,22 @@ async function start() {
       clean.reviews = nr;
     }
     if (clean.meta && typeof clean.meta === 'object') {
-      if (clean.meta.quickEvents && typeof clean.meta.quickEvents === 'object') {
-        const qe = {};
-        Object.keys(clean.meta.quickEvents).slice(0, 30).forEach(k => { qe[k] = trimStr(clean.meta.quickEvents[k], 20); });
+      /* 🔴 修复：quickEvents 是【数组】（网页/小程序端一致：{type,label,color}[]）——
+       * 原把数组当对象处理（Object.keys → '0','1'）→ 数据损坏 → 颜色/事件错乱。
+       * 改为：数组 → 裁剪数量 + 每项字段裁剪 */
+      if (Array.isArray(clean.meta.quickEvents)) {
+        clean.meta.quickEvents = clean.meta.quickEvents.slice(0, 30).map(q => ({
+          type: trimStr(q && q.type || '', 20),
+          label: trimStr(q && q.label || '', 20),
+          color: trimStr(q && q.color || '', 20)
+        }));
+      } else if (clean.meta.quickEvents && typeof clean.meta.quickEvents === 'object') {
+        /* 兼容旧数据（对象形式）→ 转数组 */
+        const qe = [];
+        Object.keys(clean.meta.quickEvents).slice(0, 30).forEach(k => {
+          const v = clean.meta.quickEvents[k];
+          qe.push(typeof v === 'string' ? { type: k, label: v, color: '' } : v);
+        });
         clean.meta.quickEvents = qe;
       }
     }
