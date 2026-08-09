@@ -43,7 +43,10 @@ function cloudApp() {
       env: CLOUD_ENV,
       secretId: process.env.TENCENTCLOUD_SECRETID || undefined,
       secretKey: process.env.TENCENTCLOUD_SECRETKEY || undefined,
-      sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined
+      sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined,
+      /* 🔴 云开发 API Key（CLOUDBASE_APIKEY 环境变量，JWT 格式）——
+       * 云托管容器若无自动注入临时凭证（sessionToken=false），用 API Key 认证访问同账号云存储 */
+      accessKey: process.env.CLOUDBASE_APIKEY || undefined
     });
   }
   return _cloudApp;

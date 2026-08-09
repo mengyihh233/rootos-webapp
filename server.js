@@ -243,7 +243,8 @@ async function uploadSnapshotToCOS(snapshotStr, dateStr) {
       env: CLOUD_ENV,
       secretId: process.env.TENCENTCLOUD_SECRETID || undefined,
       secretKey: process.env.TENCENTCLOUD_SECRETKEY || undefined,
-      sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined
+      sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined,
+      accessKey: process.env.CLOUDBASE_APIKEY || undefined
     });
     await app.uploadFile({
       cloudPath: 'rootos-backups/rootos-' + dateStr + '.json',
@@ -951,7 +952,8 @@ async function start() {
         env: CLOUD_ENV,
         secretId: process.env.TENCENTCLOUD_SECRETID || undefined,
         secretKey: process.env.TENCENTCLOUD_SECRETKEY || undefined,
-        sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined
+        sessionToken: process.env.TENCENTCLOUD_SESSIONTOKEN || undefined,
+        accessKey: process.env.CLOUDBASE_APIKEY || undefined
       });
       for (const row of rows) {
         try {
