@@ -15,8 +15,14 @@ const path = require('path');
 
 /* 云存储引擎启用条件：CLOUD_STORAGE=1 且 存在云凭证（TENCENTCLOUD_SECRETID 永久密钥，或 TENCENTCLOUD_SESSIONTOKEN 临时）。
  * 教训：容器型云托管不自动注入密钥，需手动配；无凭证时启用会连不上 → 视为未启用，本地开发安全。 */
+/* 🔴 云凭证判定（方案B 教训）：云存储启用条件 = CLOUD_STORAGE=1 且 具备任一凭证来源：
+ * ① 永久密钥（TENCENTCLOUD_SECRETID+SECRETKEY）
+ * ② 云开发 API Key（CLOUDBASE_APIKEY）
+ * ③ 云开发环境（TCB_ENV/SCF_NAMESPACE 存在）→ SDK getCredentialsOnDemand 动态获取容器临时凭证
+ * 教训：CloudBase Run 容器自动注入临时凭证（SDK 动态获取），不要手动配永久密钥覆盖；
+ * 删除永久密钥后不能因此禁用云存储（否则退化为 SQLite 临时盘，重启丢数据）。 */
 const CLOUD_ENV = process.env.TCB_ENV || process.env.TCB_ENV_ID || process.env.SCF_NAMESPACE || '';
-const HAS_CLOUD_CRED = !!(process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY);
+const HAS_CLOUD_CRED = !!(process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY) || !!process.env.CLOUDBASE_APIKEY || !!CLOUD_ENV;
 const USE_CLOUD_STORAGE = process.env.CLOUD_STORAGE === '1' && HAS_CLOUD_CRED;
 /* 🔴 方案 B（全迁云存储）：云存储模式下彻底不用 PG——
  * users/profiles 走云存储；辅助表（模板/通知/评分/备份等低频可丢数据）走 SQLite 本地。

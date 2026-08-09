@@ -428,7 +428,11 @@ async function start() {
   const wrap = (fn) => (req, res) =>
     Promise.resolve(fn(req, res)).catch((err) => {
       console.error('❌ 路由错误：', err);
-      if (!res.headersSent) res.status(500).json({ error: '服务器内部错误' });
+      /* 🔴 开发期诊断：非生产返回 detail（定位云存储/逻辑错误）；生产仍隐藏细节 */
+      if (!res.headersSent) {
+        if (process.env.NODE_ENV !== 'production') res.status(500).json({ error: '服务器内部错误', detail: (err && err.message) || String(err) });
+        else res.status(500).json({ error: '服务器内部错误' });
+      }
     });
 
   /* 登录 / 注册爆破防护：同一 IP 在 15 分钟内失败超过 20 次即限流（返回 429）。
@@ -890,8 +894,9 @@ async function start() {
         usePg: db.USE_PG,
         useCloudStorage: db.USE_CLOUD_STORAGE,
         cloudEnv: db.CLOUD_ENV || '(空)',
-        hasCloudCred: !!(process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY),
+        hasCloudCred: !!(process.env.TENCENTCLOUD_SECRETID && process.env.TENCENTCLOUD_SECRETKEY) || !!process.env.TENCENTCLOUD_SESSIONTOKEN,
         cloudStorageFlag: process.env.CLOUD_STORAGE || '(未设)',
+        sessionToken: !!process.env.TENCENTCLOUD_SESSIONTOKEN, /* 容器自动注入的临时凭证是否存在 */
         hasDbUrl: !!process.env.DATABASE_URL,
         dbConnected: db.isConnected(),
         nodeEnv: process.env.NODE_ENV || ''
@@ -1097,6 +1102,11 @@ async function start() {
       counts: { rules: (cur.rules||[]).length, phases: (cur.phases||[]).length, resources: (cur.resources||[]).length } });
   }));
 
+  /* 🔴 诊断：inject-plan 失败时返回真实错误（便于定位云存储/逻辑问题） */
+  app.use('/api/admin/inject-plan', (err, req, res, next) => {
+    console.error('❌ inject-plan 错误:', err && err.stack || err);
+    if (!res.headersSent) res.status(500).json({ error: '服务器内部错误', detail: (err && err.message) || String(err) });
+  });
   /* ⑦ 修改密码（需旧密码） */
   app.post('/api/password/change', requireAuth, wrap(async (req, res) => {
     const oldPw = String(req.body.old || '');
