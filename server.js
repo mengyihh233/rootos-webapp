@@ -429,10 +429,9 @@ async function start() {
   const wrap = (fn) => (req, res) =>
     Promise.resolve(fn(req, res)).catch((err) => {
       console.error('❌ 路由错误：', err);
-      /* 🔴 开发期诊断：非生产返回 detail（定位云存储/逻辑错误）；生产仍隐藏细节 */
+      /* 🔴 诊断期（临时）：生产也返回 detail——定位 merge-web 绑定 500 的确切错误；定位后收紧回隐藏 */
       if (!res.headersSent) {
-        if (process.env.NODE_ENV !== 'production') res.status(500).json({ error: '服务器内部错误', detail: (err && err.message) || String(err) });
-        else res.status(500).json({ error: '服务器内部错误' });
+        res.status(500).json({ error: '服务器内部错误', detail: (err && err.message) || String(err) });
       }
     });
 
