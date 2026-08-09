@@ -67,6 +67,20 @@
   .modal .kv b { color:var(--muted); font-weight:500; }
   .modal pre { background:#0c0e12; border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; overflow-x:auto; max-height:320px; overflow-y:auto; white-space:pre-wrap; }
   .empty { color:var(--muted); font-size:13px; }
+  /* tab 导航 */
+  .tab-nav { display:flex; gap:4px; margin-bottom:18px; border-bottom:2px solid var(--line); }
+  .tab-nav button { background:transparent; color:var(--muted); border:none; border-bottom:2px solid transparent; border-radius:0; padding:10px 20px; font-size:14px; font-weight:500; margin-bottom:-2px; cursor:pointer; transition:all .2s; }
+  .tab-nav button.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tab-panel { display:none; }
+  .tab-panel.active { display:block; }
+  /* 模板编辑表单 */
+  .edit-row { display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap; }
+  .edit-row label { color:var(--muted); font-size:13px; width:70px; flex-shrink:0; }
+  .edit-row input, .edit-row textarea { flex:1; min-width:200px; padding:8px 10px; border-radius:6px; border:1px solid var(--line); background:#0c0e12; color:var(--text); font-size:13px; }
+  .edit-row textarea { min-height:80px; font-family:monospace; font-size:12px; }
+  .tags-input { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
+  .tags-input .tag-chip { background:var(--accent); color:#06121c; padding:2px 10px; border-radius:999px; font-size:12px; display:flex; align-items:center; gap:4px; }
+  .tags-input .tag-chip .rm { cursor:pointer; font-weight:bold; }
   @media (max-width:600px){
     body { padding:14px; }
     .cards { grid-template-columns:repeat(2,1fr); gap:10px; }
@@ -168,96 +182,41 @@ function render() {
       </div>
       <div class="right">
         <a href="https://console.cloud.tencent.com/tcb" target="_blank" class="ghost" style="text-decoration:none;">☁️ 腾讯云托管</a>
-        <a href="https://mp.weixin.qq.com" target="_blank" class="ghost" style="text-decoration:none;">💬 微信公众平台</a>
         <button class="ghost" onclick="refreshStats()">⟳ 刷新</button>
         <button class="ghost" onclick="doLogout()">退出登录</button>
       </div>
     </div>
 
+    <div class="tab-nav">
+      <button class="active" onclick="switchTab('overview')">📊 总览</button>
+      <button onclick="switchTab('users')">👥 用户管理</button>
+      <button onclick="switchTab('templates')">📦 模板市场</button>
+      <button onclick="switchTab('tools')">🛠 数据工具</button>
+    </div>
+
+    <!-- Tab: 总览 -->
+    <div class="tab-panel active" id="tab-overview">
     <div class="section" style="margin-top:14px;">
       <h2>🖥 服务器运行状态</h2>
       <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(130px,1fr));">
         <div class="card"><div class="num" style="font-size:18px;">${s.sys ? fmtUptime(s.sys.uptimeSec) : '—'}</div><div class="lbl">运行时长</div></div>
         <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.node : '—'}</div><div class="lbl">Node 版本</div></div>
-        <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.memoryMB + ' MB' : '—'}</div><div class="lbl">内存占用 (RSS)</div></div>
-        <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.heapMB + ' MB' : '—'}</div><div class="lbl">堆内存 (Heap)</div></div>
+        <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.memoryMB + ' MB' : '—'}</div><div class="lbl">内存占用</div></div>
         <div class="card"><div class="num" style="font-size:18px;">${s.sys ? s.sys.dbEngine : '—'}</div><div class="lbl">数据库引擎</div></div>
         <div class="card"><div class="num" style="font-size:18px;color:${s.sys && s.sys.dbConnected ? 'var(--green)' : 'var(--red)'};">${s.sys && s.sys.dbConnected ? '✅ 已连接' : '❌ 未连接'}</div><div class="lbl">数据库状态</div></div>
       </div>
-      <p style="color:var(--dim);font-size:.78rem;margin:8px 0 0;">PID ${s.sys ? s.sys.pid : '—'} · ${s.sys ? s.sys.arch : ''} · 启动于 ${s.sys ? fmt(s.sys.startedAt) : '—'} · 环境 ${s.sys ? s.sys.env : '—'}</p>
+      <p style="color:var(--dim);font-size:.78rem;margin:8px 0 0;">PID ${s.sys ? s.sys.pid : '—'} · 环境 ${s.sys ? s.sys.env : '—'}</p>
     </div>
 
     <div class="cards">
       <div class="card"><div class="num">${s.totalUsers}</div><div class="lbl">总用户数</div></div>
       <div class="card"><div class="num" style="color:var(--green);">+${s.last7}</div><div class="lbl">近 7 天新增</div></div>
       <div class="card"><div class="num" style="color:var(--amber);">+${s.last30}</div><div class="lbl">近 30 天新增</div></div>
-      <div class="card hl"><div class="num" style="color:var(--accent);">${s.active7}</div><div class="lbl">近 7 天活跃</div><div class="hint">有数据更新的用户</div></div>
-      <div class="card warn"><div class="num" style="color:var(--amber);">${ts.pending}</div><div class="lbl">待审模板</div><div class="hint">共 ${ts.total} 份提交</div></div>
-      <div class="card"><div class="num" style="color:var(--green);">${ts.approved}</div><div class="lbl">已通过模板</div><div class="hint">已拒绝 ${ts.rejected}</div></div>
-      <div class="card hl"><div class="num" style="color:var(--accent);">${fmtBytes(st.dataBytes)}</div><div class="lbl">用户数据已用</div><div class="hint">数据库总 ${fmtBytes(st.dbBytes)}</div></div>
-      <div class="card"><div class="num" style="color:${st.dataBytes > st.capacityBytes * 0.8 ? 'var(--red)' : (st.dataBytes > st.capacityBytes * 0.5 ? 'var(--amber)' : 'var(--green)')};">${pct(st.dataBytes, st.capacityBytes)}%</div><div class="lbl">容量占用（上限 ${fmtBytes(st.capacityBytes)}）</div><div class="hint">平均每用户 ${fmtBytes(st.avgBytes)} · 按此还能注册约 ${st.remainUsers != null ? st.remainUsers : '—'} 人</div></div>
-    </div>
-
-    <div class="section">
-      <h2>🔓 用户解锁（付费墙启用时用）</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input id="unlockUser" placeholder="用户名（爱发电付款备注填的那个）" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
-        <input id="unlockDays" type="number" value="30" min="1" style="width:80px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
-        <button class="ok" onclick="unlockUser()">解锁</button>
-        <span id="unlockMsg" style="color:var(--amber);font-size:.85rem;"></span>
-      </div>
-      <p style="color:var(--dim);font-size:.8rem;">当前付费墙默认关闭（LICENSE_ENABLED 未启用），此工具为未来启用后使用；配好爱发电回调后付款会自动解锁。</p>
-    </div>
-
-    <div class="section">
-      <h2>👑 开发者账户（免付费墙 + 可直接登录本后台）</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <input id="devUser" placeholder="用户名（多个用逗号分隔）" style="flex:1;min-width:180px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
-        <button class="ok" onclick="setDev(true)">设为开发者</button>
-        <button class="ghost" onclick="setDev(false)">取消开发者</button>
-        <span id="devMsg" style="color:var(--amber);font-size:.85rem;"></span>
-      </div>
-      <p style="color:var(--dim);font-size:.8rem;">开发者账号：付费墙永不锁定；可用自己的用户名+密码在登录页直接进入本后台。<b style="color:var(--amber);">支持批量</b>（如 yanshuo_selfness,wx_abc123,partner）。</p>
-      <div id="devList" style="margin-top:8px;font-size:.8rem;"></div>
-    </div>
-
-    <div class="section">
-      <h2>💾 数据备份（全库快照）</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <button class="ok" onclick="runBackupNow()">立即备份</button>
-        <button class="ghost" onclick="loadBackups()">刷新列表</button>
-        <span id="backupMsg" style="color:var(--green);font-size:.85rem;"></span>
-      </div>
-      <div id="backupList" style="margin-top:10px;font-size:.85rem;"></div>
-      <p style="color:var(--dim);font-size:.8rem;">每天 0 点自动全库快照（含所有用户数据），自动保留最近 7 份。点击列表中的「下载」可备份到本地。</p>
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);">
-        <button class="ok" onclick="migrateProfiles()">🚀 一键迁移 profile 到云存储</button>
-        <button class="ghost" onclick="migrateDiag()">🔍 迁移诊断</button>
-        <span id="migrateMsg" style="color:var(--green);font-size:.85rem;margin-left:8px;"></span>
-        <p style="color:var(--dim);font-size:.8rem;margin-top:6px;">方案3：把用户大 JSON 从 PG 搬进云存储，PG 只剩 users 小表 → 省掉 PG 常驻资源点（每月省约 6 万点）。幂等可重复执行，原 PG 数据保留作备份。</p>
-      </div>
-    </div>
-
-    <div class="section">
-      <h2>📊 用量估算（云开发资源点）</h2>
-      <div id="usagePanel" style="font-size:.85rem;line-height:1.7;">加载中…</div>
-      <p style="color:var(--dim);font-size:.8rem;">
-        ⚠️ 这只是 <b>本服务</b> 请求/数据库读写的实时计数（按经验系数估算），非云开发官方计费。<br>
-        准确消耗请到 <a href="https://console.cloud.tencent.com/tcb" target="_blank" style="color:var(--accent);">腾讯云开发控制台 → 用量统计</a> 查看「资源点」曲线并校准系数。<br>
-        <b>19.9 元基础版约含 1 万资源点/月</b>（云控制台套餐页可查）——超过就会停服务，需续费或升级。
-      </p>
-    </div>
-
-    <div class="section">
-      <h2>📥 注入规划数据（个人模板私有导入）</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
-        <input id="injUser" placeholder="目标用户名" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
-        <button class="ok" onclick="injectPlan('merge')">合并注入</button>
-        <button class="danger" onclick="injectPlan('overwrite')">覆盖注入</button>
-        <span id="injMsg" style="color:var(--amber);font-size:.85rem;"></span>
-      </div>
-      <textarea id="injPlan" placeholder='粘贴完整 bag JSON（如 learning_plan_模板.json 的内容）' style="width:100%;height:140px;box-sizing:border-box;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:monospace;font-size:12px;"></textarea>
-      <p style="color:var(--dim);font-size:.8rem;">合并 = 在用户现有数据上按 id 去重追加规则/阶段/资源/复盘；覆盖 = 完全替换该用户全部数据（先导出备份！）。数据只经你浏览器传到服务器，不落任何公共文件。</p>
+      <div class="card hl"><div class="num" style="color:var(--accent);">${s.active7}</div><div class="lbl">近 7 天活跃</div></div>
+      <div class="card warn"><div class="num" style="color:var(--amber);">${ts.pending}</div><div class="lbl">待审模板</div></div>
+      <div class="card"><div class="num" style="color:var(--green);">${ts.approved}</div><div class="lbl">已通过模板</div></div>
+      <div class="card hl"><div class="num" style="color:var(--accent);">${fmtBytes(st.dataBytes)}</div><div class="lbl">用户数据已用</div></div>
+      <div class="card"><div class="num">${pct(st.dataBytes, st.capacityBytes)}%</div><div class="lbl">容量占用</div></div>
     </div>
 
     <div class="section">
@@ -269,30 +228,99 @@ function render() {
     </div>
 
     <div class="section">
+      <h2>失败模式分析 · 崩溃最多的定式</h2>
+      <div class="cards" style="margin-bottom:12px;">
+        <div class="card"><div class="num">${s.failureAnalysis.totalCrashes}</div><div class="lbl">总崩溃次数</div></div>
+        <div class="card"><div class="num" style="color:${s.failureAnalysis.branchRate>=50?'var(--green)':'var(--amber)'};">${s.failureAnalysis.branchRate}%</div><div class="lbl">支链恢复率</div></div>
+      </div>
+      <div id="faBox">${faHTML()}</div>
+    </div>
+    </div>
+
+    <!-- Tab: 用户管理 -->
+    <div class="tab-panel" id="tab-users">
+    <div class="section">
+      <h2>🔓 用户解锁</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="unlockUser" placeholder="用户名" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+        <input id="unlockDays" type="number" value="30" min="1" style="width:80px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+        <button class="ok" onclick="unlockUser()">解锁</button>
+        <span id="unlockMsg" style="color:var(--amber);font-size:.85rem;"></span>
+      </div>
+    </div>
+    <div class="section">
+      <h2>👑 开发者账户</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input id="devUser" placeholder="用户名（多个用逗号分隔）" style="flex:1;min-width:180px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+        <button class="ok" onclick="setDev(true)">设为开发者</button>
+        <button class="ghost" onclick="setDev(false)">取消开发者</button>
+        <span id="devMsg" style="color:var(--amber);font-size:.85rem;"></span>
+      </div>
+      <div id="devList" style="margin-top:8px;font-size:.8rem;"></div>
+    </div>
+    <div class="section">
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
         <h2 style="margin:0;">用户明细（${s.users.length}）</h2>
         <input class="search" id="userSearch" placeholder="🔍 按 用户名/显示名/邮箱/微信号 过滤…" value="${escapeHtml(userFilter)}">
       </div>
       <div id="userTable">${usersHTML()}</div>
     </div>
-
-    <div class="section">
-      <h2>失败模式分析 · 崩溃最多的定式（全站汇总）</h2>
-      <div class="cards" style="margin-bottom:12px;">
-        <div class="card"><div class="num">${s.failureAnalysis.totalCrashes}</div><div class="lbl">总崩溃次数</div></div>
-        <div class="card"><div class="num" style="color:${s.failureAnalysis.branchRate>=50?'var(--green)':'var(--amber)'};">${s.failureAnalysis.branchRate}%</div><div class="lbl">崩溃后支链恢复率</div></div>
-      </div>
-      <div id="faBox">${faHTML()}</div>
     </div>
 
+    <!-- Tab: 模板市场 -->
+    <div class="tab-panel" id="tab-templates">
     <div class="section">
-      <h2>社区模板审核（待审优先）</h2>
-      <div id="tplReviewBody"><div class="sub">加载中…</div></div>
+      <h2>📦 模板市场管理</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+        <input id="tplSearch" placeholder="🔍 搜索模板…" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:13px;">
+        <select id="tplFilter" onchange="loadTplMarket()" style="background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:13px;">
+          <option value="">全部状态</option><option value="pending">待审核</option><option value="approved">已上架</option><option value="rejected">已拒绝</option>
+        </select>
+        <select id="tplCatFilter" onchange="loadTplMarket()" style="background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:13px;">
+          <option value="">全部分类</option>
+        </select>
+        <button class="ok" onclick="refreshStats()">⟳ 刷新</button>
+      </div>
+      <div id="tplMarketBody"><div class="sub">加载中…</div></div>
+    </div>
+    </div>
+
+    <!-- Tab: 数据工具 -->
+    <div class="tab-panel" id="tab-tools">
+    <div class="section">
+      <h2>💾 数据备份</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button class="ok" onclick="runBackupNow()">立即备份</button>
+        <button class="ghost" onclick="loadBackups()">刷新列表</button>
+        <span id="backupMsg" style="color:var(--green);font-size:.85rem;"></span>
+      </div>
+      <div id="backupList" style="margin-top:10px;font-size:.85rem;"></div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);">
+        <button class="ok" onclick="migrateProfiles()">🚀 一键迁移 profile 到云存储</button>
+        <span id="migrateMsg" style="color:var(--green);font-size:.85rem;margin-left:8px;"></span>
+      </div>
+    </div>
+    <div class="section">
+      <h2>📊 用量估算</h2>
+      <div id="usagePanel" style="font-size:.85rem;line-height:1.7;">加载中…</div>
+    </div>
+    <div class="section">
+      <h2>📥 注入规划数据</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+        <input id="injUser" placeholder="目标用户名" style="flex:1;min-width:160px;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;">
+        <button class="ok" onclick="injectPlan('merge')">合并注入</button>
+        <button class="danger" onclick="injectPlan('overwrite')">覆盖注入</button>
+        <span id="injMsg" style="color:var(--amber);font-size:.85rem;"></span>
+      </div>
+      <textarea id="injPlan" placeholder='粘贴完整 bag JSON' style="width:100%;height:140px;box-sizing:border-box;background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-family:monospace;font-size:12px;"></textarea>
+    </div>
     </div>`;
 
   const us = document.getElementById('userSearch');
   if (us) us.addEventListener('input', () => { userFilter = us.value.trim(); renderUserTableOnly(); });
-  loadTplReview();
+  const ts = document.getElementById('tplSearch');
+  if (ts) ts.addEventListener('input', () => loadTplMarket());
+  loadTplMarket();
   renderDevList();
   loadBackups();
   renderUsage();
@@ -389,40 +417,151 @@ function faHTML() {
   </table>`;
 }
 
-/* ---------- 模板审核 ---------- */
-async function loadTplReview() {
-  const box = document.getElementById('tplReviewBody');
+/* ---------- Tab 切换 ---------- */
+function switchTab(name) {
+  document.querySelectorAll('.tab-nav button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  const btn = document.querySelector(`.tab-nav button[onclick*="${name}"]`);
+  if (btn) btn.classList.add('active');
+  const panel = document.getElementById('tab-' + name);
+  if (panel) panel.classList.add('active');
+  /* 切换到模板 tab 时刷新列表 */
+  if (name === 'templates') loadTplMarket();
+}
+
+/* ---------- 模板市场管理（完整 CRUD） ---------- */
+async function loadTplMarket() {
+  const box = document.getElementById('tplMarketBody');
   if (!box) return;
   const r = await api('/api/admin/templates');
-  if (!r.ok) { box.innerHTML = '<div class="empty">无权限或加载失败</div>'; return; }
-  const list = r.body || [];
-  if (!list.length) { box.innerHTML = '<div class="empty">暂无模板提交</div>'; return; }
-  /* 待审优先，其次按创建时间倒序 */
+  if (!r.ok) { box.innerHTML = '<div class="empty">加载失败</div>'; return; }
+  let list = r.body || [];
+  /* 筛选 */
+  const fStatus = document.getElementById('tplFilter')?.value || '';
+  const fCat = document.getElementById('tplCatFilter')?.value || '';
+  const kw = (document.getElementById('tplSearch')?.value || '').toLowerCase();
+  if (fStatus) list = list.filter(t => t.status === fStatus);
+  if (fCat) list = list.filter(t => t.category === fCat);
+  if (kw) list = list.filter(t => (t.title||'').toLowerCase().includes(kw) || (t.author||'').toLowerCase().includes(kw));
+  /* 分类下拉 */
+  const cats = [...new Set((r.body||[]).map(t => t.category).filter(Boolean))];
+  const catSel = document.getElementById('tplCatFilter');
+  if (catSel) {
+    const curVal = catSel.value;
+    catSel.innerHTML = '<option value="">全部分类</option>' + cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+    catSel.value = curVal;
+  }
+  /* 排序：待审优先 */
   const order = { pending:0, approved:1, rejected:2 };
   list.sort((a,b) => (order[a.status]-order[b.status]) || (new Date(b.created_at)-new Date(a.created_at)));
+  if (!list.length) { box.innerHTML = '<div class="empty">暂无匹配模板</div>'; return; }
   box.innerHTML = list.map(t => {
-    const badge = t.status === 'approved' ? '<span class="badge">已通过</span>'
+    const c = t.counts || {};
+    const badge = t.status === 'approved' ? '<span class="badge">已上架</span>'
       : t.status === 'rejected' ? '<span class="badge" style="background:#322;color:#f88;">已拒绝</span>'
       : '<span class="badge" style="background:#332;color:#fd8;">待审核</span>';
-    const c = t.counts || {};
-    const actions = t.status === 'approved'
-      ? `<button class="mini ghost" onclick="viewTpl(${t.id})">查看</button>`
-      : `<button class="mini ghost" onclick="viewTpl(${t.id})">查看</button> <button class="mini ok" onclick="tplAct(${t.id},'approve')">通过</button> <button class="mini danger" onclick="tplAct(${t.id},'reject')">拒绝</button>`;
-    return `<div class="tpl-card">
-      <div style="min-width:0;">
-        <b>${escapeHtml(t.title)}</b> ${badge}
-        <div class="sub">作者：${escapeHtml(t.author)} · 含 ${c.rules||0} 规则 / ${c.phases||0} 阶段 / ${c.resources||0} 资源 · ${fmt(t.created_at)}</div>
-        <div class="sub">${escapeHtml(t.desc || '')}</div>
+    const catTag = t.category ? `<span class="badge" style="background:#223;color:var(--accent);">${escapeHtml(t.category)}</span>` : '';
+    return `<div class="tpl-card" id="tpl-row-${t.id}">
+      <div style="min-width:0;flex:1;">
+        <b>#${t.id} ${escapeHtml(t.title)}</b> ${badge} ${catTag}
+        <div class="sub">作者：${escapeHtml(t.author)} · ${c.rules||0}规则/${c.phases||0}阶段/${c.resources||0}资源 · ${fmt(t.created_at)}</div>
+        <div class="sub">${escapeHtml((t.desc||'').slice(0,80))}${(t.desc||'').length>80?'…':''}</div>
+        <div class="sub" style="margin-top:2px;">🏷 ${(t.tags||[]).map(x => escapeHtml(x)).join(' · ') || '—'}</div>
       </div>
-      <div class="tpl-actions">${actions}</div>
+      <div class="tpl-actions">
+        <button class="mini ghost" onclick="viewTpl(${t.id})">👁 查看</button>
+        <button class="mini ghost" onclick="editTpl(${t.id})">✏️ 编辑</button>
+        ${t.status !== 'approved' ? `<button class="mini ok" onclick="tplAct(${t.id},'approve')">✅ 上架</button>` : `<button class="mini danger" onclick="tplAct(${t.id},'reject')">⬇ 下架</button>`}
+        <button class="mini danger" onclick="delTpl(${t.id})">🗑 删除</button>
+      </div>
     </div>`;
   }).join('');
 }
-async function tplAct(id, action) {
-  if (action === 'reject' && !confirm('确定拒绝该模板？作者将收到通知。')) return;
-  const r = await api('/api/admin/templates/' + id + '/' + action, { method: 'POST', body: JSON.stringify({}) });
-  if (r.ok) { toast('已' + (action==='approve'?'通过':'拒绝')); loadTplReview(); refreshStatsSilent(); }
-  else alert((r.body && r.body.error) || '操作失败');
+
+async function editTpl(id) {
+  const r = await api('/api/admin/templates/' + id);
+  if (!r.ok) { alert('加载失败'); return; }
+  const t = r.body;
+  let d = {};
+  try { d = typeof t.data === 'string' ? JSON.parse(t.data) : (t.data || {}); } catch(e) {}
+  const tagsStr = (t.tags||[]).join(', ');
+  const dataStr = JSON.stringify(d, null, 2);
+  openModal(`
+    <h3>✏️ 编辑模板 #${t.id}</h3>
+    <div class="edit-row"><label>标题</label><input id="etTitle" value="${escapeHtml(t.title)}"></div>
+    <div class="edit-row"><label>简介</label><textarea id="etDesc">${escapeHtml(t.desc||'')}</textarea></div>
+    <div class="edit-row"><label>标签</label><input id="etTags" value="${escapeHtml(tagsStr)}" placeholder="用逗号分隔"></div>
+    <div class="edit-row"><label>分类</label><input id="etCat" value="${escapeHtml(t.category||'')}" placeholder="如：减脂/增肌/学习"></div>
+    <div class="edit-row"><label>状态</label><select id="etStatus" style="padding:8px 10px;border-radius:6px;background:var(--bg2);color:var(--text);border:1px solid var(--line);">
+      <option value="pending" ${t.status==='pending'?'selected':''}>待审核</option>
+      <option value="approved" ${t.status==='approved'?'selected':''}>已上架</option>
+      <option value="rejected" ${t.status==='rejected'?'selected':''}>已拒绝</option>
+    </select></div>
+    <div class="edit-row"><label>数据(json)</label><textarea id="etData" style="min-height:200px;">${escapeHtml(dataStr)}</textarea></div>
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;">
+      <button class="ok" onclick="saveTplEdit(${t.id})">💾 保存</button>
+      <button class="ghost" onclick="closeModal()">取消</button>
+    </div>`);
+}
+
+async function saveTplEdit(id) {
+  const title = document.getElementById('etTitle')?.value || '';
+  const desc = document.getElementById('etDesc')?.value || '';
+  const tags = (document.getElementById('etTags')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+  const category = document.getElementById('etCat')?.value || '';
+  const status = document.getElementById('etStatus')?.value || 'pending';
+  let data = null;
+  try {
+    const raw = document.getElementById('etData')?.value || '{}';
+    data = JSON.parse(raw);
+    /* 更新 counts 与 data 内的规则/阶段/资源数一致 */
+    const counts = {
+      rules: (data.rules||[]).length,
+      cats: (data.cats||[]).length,
+      levels: (data.levels||[]).length,
+      phases: (data.phases||[]).length,
+      resources: (data.resources||[]).length
+    };
+    /* 先更新模板数据 */
+    const r = await api('/api/admin/templates/' + id, {
+      method: 'PUT', body: JSON.stringify({ title, desc, tags, category, data, counts })
+    });
+    if (!r.ok) { alert('保存失败: ' + ((r.body&&r.body.error)||r.status)); return; }
+    /* 如果状态变了，单独调 approve/reject */
+    const tpl = await api('/api/admin/templates/' + id);
+    if (tpl.ok && tpl.body.status !== status) {
+      await api('/api/admin/templates/' + id + '/' + (status==='approved'?'approve':'reject'), { method: 'POST', body: JSON.stringify({}) });
+    }
+    closeModal();
+    loadTplMarket();
+    toast('模板已更新');
+  } catch(e) {
+    alert('数据 JSON 格式错误: ' + e.message);
+  }
+}
+
+async function delTpl(id) {
+  if (!confirm('确定永久删除模板 #' + id + '？此操作不可撤销。')) return;
+  const r = await api('/api/admin/templates/' + id, { method: 'DELETE' });
+  if (r.ok) { toast('已删除'); loadTplMarket(); refreshStatsSilent(); }
+  else alert((r.body&&r.body.error)||'删除失败');
+}
+
+/* 重新导入模板：从现有 JSON 数据重新提交（用于模板更新后重新上架） */
+async function reimportTpl(id) {
+  const r = await api('/api/admin/templates/' + id);
+  if (!r.ok) { alert('加载失败'); return; }
+  const t = r.body;
+  let data = {};
+  try { data = typeof t.data === 'string' ? JSON.parse(t.data) : (t.data || {}); } catch(e) {}
+  const newData = prompt('粘贴新的 JSON 数据（留空则保持不变）:', JSON.stringify(data, null, 2));
+  if (newData === null) return; /* 用户取消 */
+  if (!newData.trim()) return;
+  try { data = JSON.parse(newData); } catch(e) { alert('JSON 格式错误: ' + e.message); return; }
+  const counts = { rules:(data.rules||[]).length, cats:(data.cats||[]).length, levels:(data.levels||[]).length, phases:(data.phases||[]).length, resources:(data.resources||[]).length };
+  const up = await api('/api/admin/templates/' + id, { method: 'PUT', body: JSON.stringify({ data, counts }) });
+  if (up.ok) { toast('已重新导入'); loadTplMarket(); }
+  else alert((up.body&&up.body.error)||'导入失败');
 }
 /* 审核预览：拉完整数据并弹窗展示摘要 */
 async function viewTpl(id) {
@@ -433,14 +572,16 @@ async function viewTpl(id) {
   const phasesList = (d.phases||[]).filter(p=>!p.parent).map(p => '• ' + p.name + (p.start?('（'+p.start+' ~ '+(p.end||'至今')+'）'):'')).join('\n');
   const resList = (d.resources||[]).slice(0, 12).map(x => '• ' + (x.title||'')).join('\n');
   openModal(`
-    <h3>${escapeHtml(t.title)}</h3>
-    <div class="sub" style="margin-bottom:10px;">作者 ${escapeHtml(t.author)} · 提交于 ${fmt(t.created_at)} · 状态：${t.status}</div>
+    <h3>${escapeHtml(t.title)} <span style="font-size:12px;color:var(--muted);">#${t.id}</span></h3>
+    <div class="sub" style="margin-bottom:10px;">作者 ${escapeHtml(t.author)} · 提交于 ${fmt(t.created_at)} · 状态：${t.status} · 分类：${escapeHtml(t.category||'—')}</div>
     <div class="kv"><b>简介：</b>${escapeHtml(t.desc||'—')}</div>
     <div class="kv"><b>标签：</b>${(t.tags||[]).map(escapeHtml).join('、')||'—'}</div>
     <h3 style="margin-top:14px;">规则（${(d.rules||[]).length}）</h3><pre>${escapeHtml(rulesList||'（无）')}</pre>
     <h3>阶段（顶层 ${(d.phases||[]).filter(p=>!p.parent).length} / 共 ${(d.phases||[]).length}）</h3><pre>${escapeHtml(phasesList||'（无）')}</pre>
     <h3>资源（${(d.resources||[]).length}）</h3><pre>${escapeHtml(resList||'（无）')}</pre>
-    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;">
+    <div style="margin-top:14px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+      <button class="ghost" onclick="closeModal();editTpl(${t.id})">✏️ 编辑</button>
+      <button class="ghost" onclick="closeModal();reimportTpl(${t.id})">📥 重新导入</button>
       ${t.status==='pending' ? `<button class="ok" onclick="closeModal();tplAct(${t.id},'approve')">通过</button>
       <button class="danger" onclick="closeModal();tplAct(${t.id},'reject')">拒绝</button>` : ''}
       <button class="ghost" onclick="closeModal()">关闭</button>
