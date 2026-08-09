@@ -95,7 +95,11 @@ async function cloudDownload(uid) {
     }
     /* 🔴 COS 直连读最新（绕过 CDN 缓存：downloadFile 走 CDN 会读到写前旧版） */
     return await cloudDownloadLatest(fileID);
-  } catch (e) { return null; }
+  } catch (e) {
+    /* 🔴 读失败抛（不返回 null）——防 GET /api/data 误判为"无数据"用默认 bag 覆盖用户真实 profile */
+    console.error('⚠️ profile 读取失败（抛错防覆盖）:', (e && e.message) || e);
+    throw e;
+  }
 }
 async function cloudProfileGet(uid) {
   const raw = await cloudDownload(uid);
@@ -139,15 +143,20 @@ async function cloudProfileSet(uid, dataStr) {
       const mid = res.fileID.replace('cloud://', '').split('/')[0]; /* envId.bucketId */
       const dot = mid.indexOf('.');
       if (dot > 0) {
-        _cloudEnv = mid.slice(0, dot); /* 🔴 修复：缓存真实 env（线上 TCB_ENV 可能为空，从上传返回的 fileID 提取权威值） */
-        _cloudBucket = mid.slice(dot + 1);
+        const e = mid.slice(0, dot), b = mid.slice(dot + 1);
+        if (e !== _cloudEnv || b !== _cloudBucket) {
+          _cloudEnv = e; /* 🔴 修复：缓存真实 env（线上 TCB_ENV 可能为空，从上传返回的 fileID 提取权威值） */
+          _cloudBucket = b;
+          _cloudMetaDirty = true; /* 🔴 只在变化时标记——避免每次 profileSet 都上传 meta.json（写放大 2x） */
+        }
       }
-      /* 🔴 持久化 meta.json（跨重启/多实例恢复 env/bucket） */
-      await _cloudSaveMeta();
+      /* 🔴 持久化 meta.json（跨重启/多实例恢复 env/bucket）——仅首次/变化时上传 */
+      if (_cloudMetaDirty) await _cloudSaveMeta();
     } catch (e) { /* 忽略 */ }
   }
 }
 let _cloudEnv = ''; /* 从上传返回 fileID 提取的真实 env（CLOUD_ENV 空时兜底） */
+let _cloudMetaDirty = false; /* meta.json 需要上传（env/bucket 变化才置脏） */
 const CLOUD_META_FILE = 'meta.json'; /* 云存储元信息（env/bucket）——重启后也能构造 fileID */
 
 /* 🔴 持久化 env/bucket：写成功后将 meta.json 上传（重启读回，解决 TCB_ENV 空导致 fileID 构造失败） */
@@ -231,10 +240,9 @@ async function cloudUsersLoad() {
       _rebuildCloudIdx();
       return _cloudUsers;
     } catch (e) {
-      console.warn('⚠️ users.json 读取失败（初始化空）:', (e && e.message) || e);
-      _cloudUsers = { seq: 0, users: [] };
-      _rebuildCloudIdx();
-      return _cloudUsers;
+      /* 🔴 读失败必须抛——若置空，随后任意一次写（注册/改名/绑定）会用空缓存覆盖 users.json 清空全部账号 */
+      console.error('⚠️ users.json 读取失败（抛错防覆盖）:', (e && e.message) || e);
+      throw e;
     } finally { _cloudUsersLoading = null; }
   })();
   return _cloudUsersLoading;
@@ -254,16 +262,22 @@ async function cloudDownloadLatest(fileID) {
   try {
     const r = await cloudApp().getTempFileURL({ fileList: [{ fileID, maxAge: 60, urlType: 'COS_URL' }] });
     const item = r && r.fileList && r.fileList[0];
-    if (!item) return null;
-    if (item.code && item.code !== 'SUCCESS' && item.code !== 0) return null;
+    if (!item) throw new Error('云存储读失败：无响应');
+    /* getTempFileURL 返回错误码 = 读失败（凭证/权限/网络）→ 抛，防上层误判为空覆盖 */
+    if (item.code && item.code !== 'SUCCESS' && item.code !== 0) {
+      /* 🔴 文件不存在（getTempFileURL 返回 STORAGE_FILE_NONEXIST 等错误码，非 HTTP 404）→ 正常返回 null */
+      if (/NONEXIST|NOT_FOUND|NOEXIST|NOTFOUND/i.test(String(item.code))) return null;
+      throw new Error('云存储读失败: ' + (item.code || ''));
+    }
     const url = item.download_url || item.tempFileURL || '';
-    if (!url) return null;
+    if (!url) throw new Error('云存储读失败：无下载地址');
     const resp = await fetch(url);
-    if (!resp.ok) return null;
+    if (resp.status === 404) return null; /* 🔴 文件不存在（新用户/首次）→ 正常返回 null */
+    if (!resp.ok) throw new Error('云存储读失败: HTTP ' + resp.status);
     const buf = Buffer.from(await resp.arrayBuffer());
     const c = buf.toString('utf8');
     return (c === undefined || c === null || c === '') ? null : c;
-  } catch (e) { return null; }
+  } catch (e) { throw e; } /* 🔴 异常向上抛（不吞）——宁可 500 也不让上层误判为空去覆盖真实数据 */
 }
 function cloudFileID0(path) {
   const env = CLOUD_ENV || _cloudEnv; /* 🔴 CLOUD_ENV 空时用上传提取的真实 env */
@@ -357,7 +371,8 @@ async function cloudUserAll() {
 async function cloudWipeUsers() {
   const n = _cloudUsers ? _cloudUsers.users.length : 0;
   _cloudUsers = { seq: 0, users: [] };
-  await cloudUsersSave();
+  const ok = await cloudUsersSave();
+  if (!ok) throw new Error('用户数据保存失败（wipe 未落盘）');
   return n;
 }
 
@@ -1244,7 +1259,10 @@ async function orphanWxAccount(uid) {
       const fileID = cloudFileID(uid);
       if (fileID) await cloudApp().deleteFile({ fileList: [fileID] });
     } catch (e) { console.warn('⚠️ 孤儿清理删云存储 profile 失败：', (e && e.message) || e); }
-    return cloudUserSet(uid, { wechat: null, display_name: null, email: null, wx_openid: null, pw_hash: cryptoRandomHash(), pw_set: 0, orphaned: 1 });
+    /* 🔴 孤儿清理失败不抛（合并主步骤 openid 转移已成功）——记录 warn，孤儿残留可后续清理；
+     * 若抛错会让 merge-web 等返回 500 假报错（合并实际已完成），用户重试又遇已合并 400 */
+    try { return await cloudUserSet(uid, { wechat: null, display_name: null, email: null, wx_openid: null, pw_hash: cryptoRandomHash(), pw_set: 0, orphaned: 1 }); }
+    catch (e) { console.warn('⚠️ 孤儿清理写 users.json 失败（不阻塞合并）:', (e && e.message) || e); return true; }
   }
   if (USE_PG) {
     await pool.query(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = $1, pw_set = 0, orphaned = 1 WHERE id = $2`, [cryptoRandomHash(), uid]);
@@ -1391,7 +1409,11 @@ async function _cloudJsonLoad(file, cacheGetter, cacheSetter) {
         if (j && typeof j === 'object') { cacheSetter(j); return j; }
       }
       const empty = {}; cacheSetter(empty); return empty;
-    } catch (e) { const empty = {}; cacheSetter(empty); return empty; }
+    } catch (e) {
+      /* 🔴 读失败抛（不返回空缓存）——防 subs/sent/templates 被空缓存覆盖丢失 */
+      console.error('⚠️ ' + file + ' 读取失败（抛错防覆盖）:', (e && e.message) || e);
+      throw e;
+    }
   })();
   if (file === CLOUD_SUBS_FILE) _cloudSubsLoading = p;
   else if (file === CLOUD_SENT_FILE) _cloudSentLoading = p;

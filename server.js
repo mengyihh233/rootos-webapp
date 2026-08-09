@@ -525,7 +525,7 @@ async function start() {
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
     const u = await db.userByName(username) || await db.userByNameCI(username); /* 大小写不敏感（邮箱大小写常见） */
-    if (u && bcrypt.compareSync(password, u.pw_hash)) {
+    if (u && u.pw_hash && bcrypt.compareSync(password, u.pw_hash)) {
       req.session.userId = u.id;
       req.session.username = u.username;
       authOk(ip);
@@ -689,11 +689,19 @@ async function start() {
     /* 🔴 修复「退出再登录变新号」：历史遗留号 openid 为空（旧版 cloudUsersSave 吞错，openid 从未落盘）。
      * 按 username 前缀找回（注册名 = wx_ + openid 前 10 位）→ 补绑 openid 并登录旧号，不再每次注册新号。
      * 排除 orphaned（已被合并的号不复活，避免污染目标账号）。 */
-    const legacyName = 'wx_' + openid.slice(0, 10);
-    const legacy = await db.userByName(legacyName);
-    if (legacy && !legacy.wx_openid && /^wx_/.test(String(legacy.username || '')) && !legacy.orphaned) {
+    /* 🔴 找回历史 openid 空号（含 _N 序号变体）：wx_xxx / wx_xxx_2 / wx_xxx_3 ... 逐个探测
+     * （orphaned 已排除——被合并的号不复活，避免污染目标账号） */
+    const baseLegacy = 'wx_' + openid.slice(0, 10);
+    let legacy = null;
+    for (let i = 1; i <= 20; i++) {
+      const cand = i === 1 ? baseLegacy : baseLegacy + '_' + i;
+      const u = await db.userByName(cand);
+      if (u && !u.wx_openid && /^wx_/.test(String(u.username || '')) && !u.orphaned) { legacy = u; break; }
+      if (!u && i === 1) break; /* 基础名不存在则无需探测变体 */
+    }
+    if (legacy) {
       await db.userBindOpenid(legacy.id, openid);
-      console.log('✅ 修复历史 openid 空账号并登录：', legacyName);
+      console.log('✅ 修复历史 openid 空账号并登录：', legacy.username);
       return res.json({ ok: true, token: issueWxToken(legacy.id), username: legacy.username, display_name: legacy.display_name || '', need_name: !legacy.display_name, bound: true, legacy_repaired: true });
     }
     /* 未绑定：自动注册一个新账号（微信一键登录直达，无需先有网页账号）。
@@ -719,7 +727,7 @@ async function start() {
     const password = String(req.body.password || '');
     if (!openid) return res.status(400).json({ error: '缺少 openid' });
     const u = await db.userByName(username) || await db.userByNameCI(username); /* 大小写不敏感 */
-    if (!u || !bcrypt.compareSync(password, u.pw_hash)) {
+    if (!u || !u.pw_hash || !bcrypt.compareSync(password, u.pw_hash)) {
       if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
       return res.status(401).json({ error: '账号或密码错误' });
     }
@@ -1057,7 +1065,7 @@ async function start() {
     const password = String(req.body.password || '');
     const u = await db.userByName(username);
     if (!u || Number(u.is_dev) !== 1) { authFail(req.ip); return res.status(401).json({ error: '非开发者账号' }); }
-    if (!bcrypt.compareSync(password, u.pw_hash)) { authFail(req.ip); return res.status(401).json({ error: '密码错误' }); }
+    if (!u || !u.pw_hash || !bcrypt.compareSync(password, u.pw_hash)) { authFail(req.ip); return res.status(401).json({ error: '密码错误' }); }
     authOk(req.ip);
     req.session.isAdmin = true;
     res.json({ ok: true, username });
@@ -1137,14 +1145,18 @@ async function start() {
   /* 🔴 诊断：inject-plan 失败时返回真实错误（便于定位云存储/逻辑问题） */
   app.use('/api/admin/inject-plan', (err, req, res, next) => {
     console.error('❌ inject-plan 错误:', err && err.stack || err);
-    if (!res.headersSent) res.status(500).json({ error: '服务器内部错误', detail: (err && err.message) || String(err) });
+    /* 🔴 生产隐藏 detail（诊断已结束） */
+    if (!res.headersSent) {
+      if (process.env.NODE_ENV !== 'production') res.status(500).json({ error: '服务器内部错误', detail: (err && err.message) || String(err) });
+      else res.status(500).json({ error: '服务器内部错误' });
+    }
   });
   /* ⑦ 修改密码（需旧密码） */
   app.post('/api/password/change', requireAuth, wrap(async (req, res) => {
     const oldPw = String(req.body.old || '');
     const nextPw = String(req.body.next || '');
     const u = await db.userById(req.session.userId);
-    if (!u || !bcrypt.compareSync(oldPw, u.pw_hash)) return res.status(400).json({ error: '当前密码不正确' });
+    if (!u || !u.pw_hash || !bcrypt.compareSync(oldPw, u.pw_hash)) return res.status(400).json({ error: '当前密码不正确' });
     if (nextPw.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
     await db.userSetPassword(u.id, bcrypt.hashSync(nextPw, 10));
     res.json({ ok: true, msg: '密码已更新' });
@@ -1174,7 +1186,7 @@ async function start() {
     const username = String((req.body || {}).username || '').trim();
     const password = String((req.body || {}).password || '');
     const target = await db.userByName(username);
-    if (!target || !bcrypt.compareSync(password, target.pw_hash)) return res.status(401).json({ error: '账号或密码错误' });
+    if (!target || !target.pw_hash || !bcrypt.compareSync(password, target.pw_hash)) return res.status(401).json({ error: '账号或密码错误' });
     if (target.id === req.session.userId) return res.status(400).json({ error: '当前已是该账号，无需绑定' });
     const cur = await db.userById(req.session.userId);
     /* 🔴 历史遗留号 openid 空（旧版假成功时代注册）→ 提示先重登（重登会按 openid 前缀自动补绑），
@@ -1254,7 +1266,7 @@ async function start() {
     const wx = await db.userByWechat(wechat);
     if (!wx) return res.status(401).json({ error: '未找到该微信号对应的小程序账号（请先在小程序端「我的」设置微信号+密码）' });
     if (!/^wx_/.test(String(wx.username || ''))) return res.status(401).json({ error: '该微信号不是小程序自动注册账号' });
-    if (!bcrypt.compareSync(password, wx.pw_hash)) return res.status(401).json({ error: '密码错误' });
+    if (!wx || !wx.pw_hash || !bcrypt.compareSync(password, wx.pw_hash)) return res.status(401).json({ error: '密码错误' });
     if (wx.id === req.session.userId) return res.status(400).json({ error: '当前已是该账号，无需绑定' });
     if (!wx.wx_openid) return res.status(400).json({ error: '该小程序账号未绑定微信登录，无法接入' });
     const target = await db.userById(req.session.userId);
@@ -1305,7 +1317,11 @@ async function start() {
     res.json({ ok: true, token: issueWxToken(target.id), username: target.username, display_name: (await db.userById(target.id)).display_name || '', msg: '已接入并合并数据' });
     } catch (e) {
       console.error('❌ attach-wx 详细错误：', e && e.stack || e);
-      if (!res.headersSent) res.status(500).json({ error: '服务器内部错误', detail: (e && e.message) || String(e) });
+      /* 🔴 生产隐藏 detail（诊断已结束） */
+      if (!res.headersSent) {
+        if (process.env.NODE_ENV !== 'production') res.status(500).json({ error: '服务器内部错误', detail: (e && e.message) || String(e) });
+        else res.status(500).json({ error: '服务器内部错误' });
+      }
     }
   }));
 
