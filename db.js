@@ -225,7 +225,7 @@ async function cloudCreateUser(username, pw_hash) {
   if (u.users.some(x => String(x.username).toLowerCase() === lo)) return 0; /* 0 = 冲突 */
   u.seq += 1;
   const id = u.seq;
-  u.users.push({ id, username, pw_hash, email: null, email_verified: 0, wechat: null, wx_openid: null, display_name: null, unlock_until: null, is_dev: 0, pw_set: 0, created_at: new Date().toISOString() });
+  u.users.push({ id, username, pw_hash, email: null, email_verified: 0, wechat: null, wx_openid: null, display_name: null, unlock_until: null, is_dev: 0, pw_set: 0, orphaned: 0, created_at: new Date().toISOString() });
   await cloudUsersSave();
   return id;
 }
@@ -354,6 +354,7 @@ const SCHEMA_PG = {
       unlock_until   TEXT,
       is_dev         INTEGER NOT NULL DEFAULT 0,
       pw_set         INTEGER NOT NULL DEFAULT 0,
+      orphaned       INTEGER NOT NULL DEFAULT 0,
       created_at     TEXT NOT NULL DEFAULT NOW()
     )`,
   profiles: `
@@ -492,7 +493,7 @@ async function init() {
       await pool.query(SCHEMA_PG.backups);
       await pool.query(SCHEMA_PG.sent_logs);
       /* 既有库迁移：为旧 users 表补新列（幂等，已存在则跳过） */
-      for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT', 'unlock_until TEXT', 'is_dev INTEGER NOT NULL DEFAULT 0', 'display_name TEXT', 'pw_set INTEGER NOT NULL DEFAULT 0']) {
+      for (const col of ['email TEXT', 'email_verified INTEGER NOT NULL DEFAULT 0', 'wechat TEXT', 'wx_openid TEXT', 'unlock_until TEXT', 'is_dev INTEGER NOT NULL DEFAULT 0', 'display_name TEXT', 'pw_set INTEGER NOT NULL DEFAULT 0', 'orphaned INTEGER NOT NULL DEFAULT 0']) {
         const name = col.split(' ')[0];
         await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${name} ${col.slice(name.length).trim()}`);
       }
@@ -546,6 +547,7 @@ async function init() {
     if (!cols.includes('wx_openid')) sqlite.exec(`ALTER TABLE users ADD COLUMN wx_openid TEXT`);
     if (!cols.includes('unlock_until')) sqlite.exec(`ALTER TABLE users ADD COLUMN unlock_until TEXT`);
     if (!cols.includes('pw_set')) sqlite.exec(`ALTER TABLE users ADD COLUMN pw_set INTEGER NOT NULL DEFAULT 0`);
+    if (!cols.includes('orphaned')) sqlite.exec(`ALTER TABLE users ADD COLUMN orphaned INTEGER NOT NULL DEFAULT 0`);
     if (!cols.includes('is_dev')) sqlite.exec(`ALTER TABLE users ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0`);
     if (!cols.includes('display_name')) sqlite.exec(`ALTER TABLE users ADD COLUMN display_name TEXT`);
     sqlite.exec(SCHEMA_SQLITE.shares);
@@ -1078,14 +1080,14 @@ async function orphanWxAccount(uid) {
       const fileID = cloudFileID(uid);
       if (fileID) await cloudApp().deleteFile({ fileList: [fileID] });
     } catch (e) { console.warn('⚠️ 孤儿清理删云存储 profile 失败：', (e && e.message) || e); }
-    return cloudUserSet(uid, { wechat: null, display_name: null, email: null, wx_openid: null, pw_hash: cryptoRandomHash(), pw_set: 0 });
+    return cloudUserSet(uid, { wechat: null, display_name: null, email: null, wx_openid: null, pw_hash: cryptoRandomHash(), pw_set: 0, orphaned: 1 });
   }
   if (USE_PG) {
-    await pool.query(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = $1, pw_set = 0 WHERE id = $2`, [cryptoRandomHash(), uid]);
+    await pool.query(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = $1, pw_set = 0, orphaned = 1 WHERE id = $2`, [cryptoRandomHash(), uid]);
     await pool.query('DELETE FROM profiles WHERE user_id = $1', [uid]);
     return;
   }
-  sqlite.prepare(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = ?, pw_set = 0 WHERE id = ?`).run(cryptoRandomHash(), uid);
+  sqlite.prepare(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = ?, pw_set = 0, orphaned = 1 WHERE id = ?`).run(cryptoRandomHash(), uid);
   sqlite.prepare('DELETE FROM profiles WHERE user_id = ?').run(uid);
 }
 

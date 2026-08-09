@@ -528,6 +528,10 @@ async function start() {
   /* 当前用户（含邮箱/微信绑定状态，供设置页渲染；requireAuth 兼容网页 cookie 与小程序 Bearer token） */
   app.get('/api/me', requireAuth, wrap(async (req, res) => {
     const u = await db.userById(req.session.userId);
+    /* 🔴 孤儿检测：wx_ 已合并（openid 转走+清字段）→ 前端立即用新 token 重登（自愈） */
+    if (u && /^wx_/.test(String(u.username || '')) && !u.wx_openid && u.orphaned) {
+      return res.status(401).json({ error: '账号已合并到网页账号，请重新登录' });
+    }
     res.json({
       username: u ? u.username : req.session.username,
       display_name: u ? (u.display_name || '') : '',
@@ -537,7 +541,9 @@ async function start() {
       wechat: u ? (u.wechat || '') : '',
       is_wx: u ? /^wx_/.test(String(u.username || '')) : false, /* 🔴 微信自动注册账号 → 前端据此选 set-first（设初始密码）vs change（改密码） */
       pw_set: u ? !!u.pw_set : true, /* 已设过密码 → 改走 change（校验旧密码），未设 → set-first */
-      web_bound: u ? !/^wx_/.test(String(u.username || '')) : true /* 非 wx_ = 网页账号体系（已与网页打通） */
+      wx_bound: u ? !!u.wx_openid : false, /* 🔴 是否已绑定微信登录（有 openid）——网页端/小程序端双向显示"已绑定微信" */
+      web_bound: u ? !/^wx_/.test(String(u.username || '')) : false, /* 当前账号是否属于网页账号体系（非 wx_ 临时账号）；合并后微信登录直接进网页账号，此处为 true */
+      web_bound_name: u && !/^wx_/.test(String(u.username || '')) ? u.username : '' /* 绑定卡显示当前网页账号 */
     });
   }));
 
@@ -728,6 +734,7 @@ async function start() {
       }
       await db.userBindOpenid(holder.id, null);
     }
+    if (u.wx_openid && u.wx_openid !== openid) return res.status(409).json({ error: '该账号已绑定其他微信，请先解绑' });
     await db.userBindOpenid(u.id, openid);
     /* 🔴 修复：显示名继承——微信账号已有名字而网页账号空时，把名字带给网页账号（同一人不应重复取名） */
     if (holder && holder.display_name) {
@@ -1167,10 +1174,16 @@ async function start() {
       await db.profileSet(target.id, JSON.stringify(tgtData));
     }
     /* openid 转给目标账号；当前 wx_ 账号解除（下次微信登录直接进目标账号） */
+    if (target.wx_openid && target.wx_openid !== cur.wx_openid) return res.status(409).json({ error: '该账号已绑定其他微信，请先解绑' });
     await db.userBindOpenid(target.id, cur.wx_openid);
     await db.userBindOpenid(req.session.userId, null);
     /* 🔴 修复：显示名继承——微信账号有名字而网页账号空时，把名字带给网页账号（同一人不应重复取名） */
     if (cur.display_name && !target.display_name) await db.userSetDisplayName(target.id, cur.display_name);
+    /* 🔴 微信号继承：wx_ 有微信号而目标空 → 带给目标 */
+    if (cur.wechat && !target.wechat) {
+      const taken = await db.wechatTaken(cur.wechat, target.id);
+      if (!taken) await db.userSetWechat(target.id, cur.wechat);
+    }
     /* 🔴 清理孤儿：wx_ 账号已合并，清空身份字段+随机密码+删 profile */
     await db.orphanWxAccount(req.session.userId);
     console.log('✅ 账号合并：', cur.username, '→', target.username);
@@ -1224,9 +1237,18 @@ async function start() {
       await db.profileSet(target.id, JSON.stringify(tgtData));
     }
     /* openid 转给网页账号；wx_ 账号解除绑定（下次微信登录直接进网页账号） */
+    /* 🔴 防覆盖：target 已绑另一个微信 → 拒绝（避免切断原微信登录无提示） */
+    if (target.wx_openid && target.wx_openid !== wx.wx_openid) {
+      return res.status(409).json({ error: '该账号已绑定其他微信，请先解绑或联系管理员' });
+    }
     await db.userBindOpenid(target.id, wx.wx_openid);
     await db.userBindOpenid(wx.id, null);
     if (wx.display_name && !target.display_name) await db.userSetDisplayName(target.id, wx.display_name);
+    /* 🔴 微信号继承：wx_ 有微信号而目标空 → 带给目标（用户熟悉的微信号不丢失；orphan 会清 wx_ 的） */
+    if (wx.wechat && !target.wechat) {
+      const taken = await db.wechatTaken(wx.wechat, target.id);
+      if (!taken) await db.userSetWechat(target.id, wx.wechat);
+    }
     /* 🔴 清理孤儿：wx_ 账号已合并，清空身份字段+随机密码+删 profile（防微信号占用/双份数据/可登录） */
     await db.orphanWxAccount(wx.id);
     console.log('✅ 网页接入微信：', wx.username, '→', target.username);

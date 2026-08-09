@@ -3206,6 +3206,12 @@ async function renderSettings(){
           +'<button class="ghost mini" onclick="unbindWechat()">解绑</button></div>'
       : '<div class="row" style="margin-top:8px;"><input type="text" id="setWechat" placeholder="微信号" style="flex:1;min-width:140px;">'
           +'<button class="ok mini" onclick="bindWechat()">绑定</button></div>')
+    +'<div><b style="font-size:.9rem;">微信小程序 <small style="color:var(--dim);font-weight:normal;">（双向绑定状态）</small></b>'
+    +'<div style="margin-top:6px;font-size:.85rem;color:'+(j.wx_bound?'var(--ok)':'var(--warn)')+';">'
+    +(j.wx_bound
+      ? '✅ 已绑定微信登录 —— 小程序微信一键登录直接进入本账号'
+      : '未绑定微信登录 —— 用下方「接入」绑定小程序账号后，微信一键登录直达本账号')
+    +'</div></div>'
     +'<div><b style="font-size:.9rem;">接入微信小程序账号 <small style="color:var(--dim);font-weight:normal;">（把小程序端数据合并到本账号）</small></b>'
     +'<div style="margin-top:6px;"><small style="color:var(--dim);">在小程序「我的」设好【微信号+密码】后，在此输入小程序端的<strong style="color:var(--accent);">微信号</strong>+密码，两边数据合并。</small></div>'
     +'<div class="row" style="margin-top:8px;"><input type="text" id="attachWxUser" placeholder="小程序端微信号（如 yanshuo-selfness）" style="flex:1;min-width:140px;">'
