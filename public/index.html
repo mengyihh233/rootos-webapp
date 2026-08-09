@@ -987,6 +987,7 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
   </div>
 </div>
 
+<script src="/shared/bagSchema.js"></script>
 <script src="/logic.js"></script>
 <script>
 /* ============================================================
@@ -2709,26 +2710,31 @@ async function applyTemplate(file,title,mode,choices){
 function overwriteBagFromTemplate(d){
   suppressSave=true;
   sanitizeBagIds(d);
-  if(Array.isArray(d.cats)) cats=d.cats;
-  if(Array.isArray(d.levels)) levels=d.levels;
-  if(Array.isArray(d.rules)) rules=d.rules;
-  if(Array.isArray(d.tags)) tags=d.tags;
-  if(Array.isArray(d.phases)) {
-    /* 🔴 修复：阶段 startDate 未定义显示"undefined"——套用时按 dayOff 计算 start/end（数据库字段可能为 null） */
-    let cursor = 0;
-    phases = d.phases.map((p, i) => {
-      let start = p.startDate || p.start || (p.dayOff !== undefined && p.dayOff !== null ? _dayOff(p.dayOff) : (i === 0 ? _dayOff(0) : _dayOff(cursor)));
-      /* 计算 end：取下一个阶段的 start，或 7 天后（推算结束） */
-      const next = d.phases[i + 1];
-      let end = p.endDate || p.end || (next && (next.startDate || next.start) ? (next.startDate || next.start) : (p.dayOff !== undefined && p.dayOff !== null ? _dayOff(p.dayOff + 6) : _dayOff(cursor + 6)));
-      cursor = p.dayOff !== undefined && p.dayOff !== null ? p.dayOff + 1 : (p.dayOff !== undefined ? p.dayOff + 1 : cursor + 1);
-      return { ...p, start, end };
-    });
-  }
-  if(Array.isArray(d.resources)) resources=d.resources;
+  const BF = BAG_SCHEMA.BAG_FIELDS;
+  /* 数组型字段：直接从模板覆盖 */
+  BF.arrays.forEach(k => {
+    if (Array.isArray(d[k])) {
+      if (k === 'phases') {
+        /* 阶段特殊处理：初始化 startDate/dayOff 计算日期 */
+        let cursor = 0;
+        const arr = d.phases.map((p, i) => {
+          let start = p.startDate || p.start || (p.dayOff !== undefined && p.dayOff !== null ? _dayOff(p.dayOff) : (i === 0 ? _dayOff(0) : _dayOff(cursor)));
+          const next = d.phases[i + 1];
+          let end = p.endDate || p.end || (next && (next.startDate || next.start) ? (next.startDate || next.start) : (p.dayOff !== undefined && p.dayOff !== null ? _dayOff(p.dayOff + 6) : _dayOff(cursor + 6)));
+          cursor = p.dayOff !== undefined && p.dayOff !== null ? p.dayOff + 1 : cursor + 1;
+          return { ...p, start, end };
+        });
+        window[k] = arr; continue;
+      }
+      window[k] = d[k];
+    }
+  });
+  /* 🔴 对象型字段：保留用户已有的 reviews/retros（模板的为空数组/对象，覆盖会丢用户复盘） */
   suppressSave=false;
-  const m={cats,levels,rules,tags,phases,reviews,retros,resources};
-  ['cats','levels','rules','tags','phases','reviews','retros','resources'].forEach(k=>store.set(k,m[k]));
+  BF.arrays.forEach(k => { if (k !== 'phases') store.set(k, window[k] || []); });
+  store.set('phases', window.phases || []);
+  store.set('resources', window.resources || []);
+  BF.objects.forEach(k => store.set(k, window[k] || (typeof d[k] === 'object' ? d[k] : {})));
 }
 
 /* 按 file 取模板数据：内置走静态 /templates/，社区走 /api/templates/community/:id */

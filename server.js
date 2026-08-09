@@ -13,6 +13,7 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
+const { BAG_FIELDS, migrateBag, emptyBag } = require('./shared/bagSchema');
 
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'rootos-dev-secret-change-me';
@@ -1387,6 +1388,7 @@ async function start() {
     const raw = await db.profileGet(req.session.userId);
     let data = {};
     try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
+    data = migrateBag(data); /* 🔴 透明版本迁移：旧数据自动升级到最新 schema（v1+） */
     if (!data || Object.keys(data).length === 0) {
       data = defaultBag();
       await db.profileSet(req.session.userId, JSON.stringify(data));
@@ -1421,10 +1423,20 @@ async function start() {
     /* 字段长度裁剪 + 数量上限（防恶意灌水撑爆数据库） */
     const clean = { ...defaultBag(), ...d };
     if (clean.meta) {
-      delete clean.meta.ghToken;
-      /* 🔴 修复：一旦用户保存（写入真实数据），清除 _seed 默认标记——
-       * 否则新用户改过规则后仍被 isDefaultBag 判为"临时账号"，绑定合并方向错乱 */
-      delete clean.meta._seed;
+      /* 🔴 清除敏感字段——由 BAG_FIELDS.sensitive 统一管理，新增敏感字段只需加到这里 */
+      BAG_FIELDS.sensitive.forEach(key => {
+        const parts = key.split('.');
+        if (parts.length === 2 && clean[parts[0]]) delete clean[parts[0]][parts[1]];
+      });
+    }
+    /* 数组型字段：裁剪数量+长度 */
+    if (Array.isArray(clean.rules)) {
+      if (clean.rules.length > MAX_RULES_PER_USER) return { error: `规则数量超过上限 ${MAX_RULES_PER_USER}` };
+      clean.rules = clean.rules.slice(0, MAX_RULES_PER_USER).map(r => ({
+        ...r,
+        t: trimStr(r.t || '', MAX_RULE_TEXT),
+        micro: trimStr(r.micro || '', MAX_RULE_TEXT)
+      }));
     }
     if (Array.isArray(clean.rules)) {
       if (clean.rules.length > MAX_RULES_PER_USER) return { error: `规则数量超过上限 ${MAX_RULES_PER_USER}` };
@@ -2001,6 +2013,7 @@ async function start() {
 
   /* 静态前端（除首页/管理页外的资源：css/js/templates 等） */
   app.use(express.static(path.join(__dirname, 'public')));
+  app.use('/shared', express.static(path.join(__dirname, 'shared')));
 
   app.listen(PORT, () => {
     console.log(`✅ 底层创造者OS 多用户版运行中： http://localhost:${PORT}`);

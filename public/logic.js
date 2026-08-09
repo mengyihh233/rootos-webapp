@@ -29,6 +29,8 @@ function escJs(s) {
 
 /* 判断一份 JSON 是否为合法的 ROOT-OS 数据包（导入校验用） */
 function isRootBag(d) {
+  /* 🔴 优先用共享 schema 定义（更完整），fallback 兼容测试环境（无 BAG_SCHEMA） */
+  if (typeof BAG_SCHEMA !== 'undefined' && BAG_SCHEMA.isRootBag) return BAG_SCHEMA.isRootBag(d);
   if (!d || typeof d !== 'object') return false;
   if (!Array.isArray(d.rules) || !Array.isArray(d.cats) || !Array.isArray(d.tags) || !Array.isArray(d.phases)) return false;
   if (typeof d.daily !== 'object' || d.daily === null) return false;
