@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@cloudbase/node-sdk": "^3.18.3",
+    "@cloudbase/storage": "^3.7.1",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.3.0",
     "compression": "^1.8.1",
