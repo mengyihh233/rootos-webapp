@@ -318,8 +318,8 @@ function render() {
 
   const us = document.getElementById('userSearch');
   if (us) us.addEventListener('input', () => { userFilter = us.value.trim(); renderUserTableOnly(); });
-  const ts = document.getElementById('tplSearch');
-  if (ts) ts.addEventListener('input', () => loadTplMarket());
+  const tplInp = document.getElementById('tplSearch');
+  if (tplInp) tplInp.addEventListener('input', () => loadTplMarket());
   loadTplMarket();
   renderDevList();
   loadBackups();
