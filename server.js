@@ -455,17 +455,25 @@ async function start() {
 
   /* 统一鉴权：网页走 session cookie，小程序走 Bearer token；后续逻辑统一用 req.session.userId */
   function requireAuth(req, res, next) {
-    if (req.session.userId) { globalThis.__incUsageApi && globalThis.__incUsageApi(); return next(); }
+    /* 🔴 req.user 中间层：session 和 JWT 的统一身份对象。
+     * 当前 session 仍为主路径（向后兼容），req.user 为新代码提供无状态入口。
+     * 未来迁移 JWT 完全化时，只需改这里——消费端不用动。 */
+    if (req.session.userId) {
+      req.user = { id: req.session.userId, isAdmin: !!req.session.isAdmin };
+      globalThis.__incUsageApi && globalThis.__incUsageApi();
+      return next();
+    }
     const uid = wxUidFromReq(req);
     if (!uid) return res.status(401).json({ error: '未登录' });
-    req.session.userId = uid;
+    req.session.userId = uid; /* 兼容旧代码（未来可删） */
+    req.user = { id: uid, isAdmin: false /* 小程序无 admin */ };
     globalThis.__incUsageApi && globalThis.__incUsageApi();
     next();
   }
 
-  /* 管理后台鉴权：仅 ADMIN_TOKEN 持有者可进入 */
+  /* 管理后台鉴权 */
   function requireAdmin(req, res, next) {
-    if (!req.session.isAdmin) return res.status(401).json({ error: '未授权' });
+    if (!req.user?.isAdmin) return res.status(401).json({ error: '未授权' });
     next();
   }
 
