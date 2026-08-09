@@ -905,6 +905,22 @@ async function start() {
     res.json({ ok: true, username, unlockUntil: until });
   }));
 
+  /* 🔴 管理员复位密码（ADMIN_TOKEN 保护）：POST /api/admin/reset-password { username, password }
+   * wx_ 自动注册账号密码随机生成、无邮箱 → 失去微信后永久无法网页登录。
+   * 此端点提供兜底恢复路径：管理员验证用户身份后在此设新密码。 */
+  app.post('/api/admin/reset-password', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    const username = String(req.body.username || '').trim();
+    const password = String(req.body.password || '');
+    if (!password || password.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
+    const u = await db.userByName(username);
+    if (!u) return res.status(404).json({ error: '用户不存在' });
+    const pw_hash = bcrypt.hashSync(password, 10);
+    await db.userSetPassword(u.id, pw_hash);
+    console.log('🔑 管理员已为', username, '重置密码');
+    res.json({ ok: true, username });
+  }));
+
   /* ---- 定时任务入口（云函数定时触发器调用，解决缩容0下常驻定时器失效）----
    * 用法：云开发控制台 → 云函数 → rootosCron → 定时触发器（cron 表达式）
    *   每天 20:00：0 0 20 * * * *   → POST /api/cron/remind

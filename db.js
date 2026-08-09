@@ -1370,10 +1370,14 @@ async function orphanWxAccount(uid) {
       const fileID = cloudFileID(uid);
       if (fileID) await cloudApp().deleteFile({ fileList: [fileID] });
     } catch (e) { console.warn('⚠️ 孤儿清理删云存储 profile 失败：', (e && e.message) || e); }
-    /* 🔴 孤儿清理失败不抛（合并主步骤 openid 转移已成功）——记录 warn，孤儿残留可后续清理；
-     * 若抛错会让 merge-web 等返回 500 假报错（合并实际已完成），用户重试又遇已合并 400 */
+    /* 🔴 orphan 清理写 users.json——失败时重试一次 wx_openid 清空（最关键的字段：
+     * openid 不清 → 两账号同 openid → userFindByOpenid 顺序敏感 → 用户可能登入废弃号） */
     try { return await cloudUserSet(uid, { wechat: null, display_name: null, email: null, wx_openid: null, pw_hash: cryptoRandomHash(), pw_set: 0, orphaned: 1 }); }
-    catch (e) { console.warn('⚠️ 孤儿清理写 users.json 失败（不阻塞合并）:', (e && e.message) || e); return true; }
+    catch (e) {
+      console.warn('⚠️ 孤儿清理 users.json 失败，重试清 openid:', (e && e.message) || e);
+      try { await cloudUserSet(uid, { wx_openid: null }); } catch (e2) { console.warn('⚠️ 重试也失败:', (e2 && e2.message) || e2); }
+      return true; /* 阻塞合并结果没有意义——目标账号 openid 已转移成功 */
+    }
   }
   if (USE_PG) {
     await pool.query(`UPDATE users SET wechat = NULL, display_name = NULL, email = NULL, wx_openid = NULL, pw_hash = $1, pw_set = 0, orphaned = 1 WHERE id = $2`, [cryptoRandomHash(), uid]);
