@@ -473,7 +473,9 @@ async function start() {
 
   /* 管理后台鉴权 */
   function requireAdmin(req, res, next) {
-    if (!req.user?.isAdmin) return res.status(401).json({ error: '未授权' });
+    /* 🔴 admin 路由不经过 requireAuth → req.user 可能未初始化 → 同时检查 session 作为 fallback */
+    if (!req.user) req.user = { id: req.session.userId, isAdmin: !!req.session.isAdmin };
+    if (!req.user.isAdmin) return res.status(401).json({ error: '未授权' });
     next();
   }
 
