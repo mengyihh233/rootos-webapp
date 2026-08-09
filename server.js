@@ -1935,6 +1935,24 @@ async function start() {
     res.json({ ok: true });
   }));
 
+  /* 🔴 模板编辑与删除（管理员） */
+  app.put('/api/admin/templates/:id', requireAdmin, wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
+    const tpl = await db.templateGet(id);
+    if (!tpl) return res.status(404).json({ error: '模板不存在' });
+    const { title, desc, tags, category, data } = req.body || {};
+    await db.templateUpdate(id, { title, desc, tags, category, data });
+    res.json({ ok: true });
+  }));
+
+  app.delete('/api/admin/templates/:id', requireAdmin, wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: '无效的模板 ID' });
+    await db.templateDelete(id);
+    res.json({ ok: true });
+  }));
+
   /* ---- 模板评分（登录用户 1-5 星） ---- */
   app.post('/api/templates/:id/rate', requireAuth, wrap(async (req, res) => {
     const id = Number(req.params.id);

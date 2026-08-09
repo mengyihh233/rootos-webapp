@@ -938,6 +938,43 @@ async function templateReject(id) {
   sqlite.prepare(`UPDATE templates SET status='rejected' WHERE id=?`).run(id);
 }
 
+async function templateUpdate(id, { title, desc, tags, category, data }) {
+  if (USE_CLOUD_STORAGE) {
+    const t = await cloudTemplatesLoad();
+    const x = (t.list || []).find(y => Number(y.id) === Number(id));
+    if (!x) throw new Error('模板不存在');
+    if (title !== undefined) x.title = title;
+    if (desc !== undefined) x.desc = desc;
+    if (tags !== undefined) x.tags = tags;
+    if (category !== undefined) x.category = category;
+    if (data !== undefined) x.data = (typeof data === 'string') ? data : JSON.stringify(data || {});
+    await cloudTemplatesSave();
+    return;
+  }
+  const fields = [], values = [], idx = [];
+  if (title !== undefined) { fields.push('title'); values.push(title); idx.push(fields.length); }
+  if (desc !== undefined) { fields.push('"desc"'); values.push(desc); idx.push(fields.length); }
+  if (tags !== undefined) { fields.push('tags'); values.push(JSON.stringify(tags)); idx.push(fields.length); }
+  if (category !== undefined) { fields.push('category'); values.push(category); idx.push(fields.length); }
+  if (data !== undefined) { fields.push('data'); values.push(JSON.stringify(data)); idx.push(fields.length); }
+  if (!fields.length) return;
+  const set = fields.map((f, i) => `${f}=$${i+1}`).join(',');
+  values.push(id);
+  if (USE_PG) { await pool.query(`UPDATE templates SET ${set} WHERE id=$${values.length}`, values); return; }
+  sqlite.prepare(`UPDATE templates SET ${set} WHERE id=?`).run(...values);
+}
+
+async function templateDelete(id) {
+  if (USE_CLOUD_STORAGE) {
+    const t = await cloudTemplatesLoad();
+    t.list = (t.list || []).filter(y => Number(y.id) !== Number(id));
+    await cloudTemplatesSave();
+    return;
+  }
+  if (USE_PG) { await pool.query(`DELETE FROM templates WHERE id=$1`, [id]); return; }
+  sqlite.prepare(`DELETE FROM templates WHERE id=?`).run(id);
+}
+
 /* ---------- 通知（模板审核结果推送给作者） ---------- */
 async function notify(userId, type, payload) {
   /* 🔴 云存储模式：notifications.json 持久 */
@@ -1525,7 +1562,7 @@ async function wipeAllUsers() {
   return deleted;
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userByWechat, wechatTaken, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orphanWxAccount, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, CLOUD_ENV, get _cloudBucket() { return _cloudBucket; } };
+module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userByWechat, wechatTaken, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orphanWxAccount, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, templateUpdate, templateDelete, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, CLOUD_ENV, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 /* ================= 订阅消息云存储层（方案B 优化2：辅助表持久化） =================
