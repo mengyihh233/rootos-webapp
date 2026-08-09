@@ -1,0 +1,323 @@
+{
+  "cats": [
+    {
+      "id": "c_learn",
+      "name": "学习/工作",
+      "color": "#4fc1ff"
+    },
+    {
+      "id": "c_focus",
+      "name": "专注力",
+      "color": "#4ec9b0"
+    },
+    {
+      "id": "c_entertain",
+      "name": "娱乐/消遣",
+      "color": "#e8912d"
+    },
+    {
+      "id": "c_health",
+      "name": "健康",
+      "color": "#c586c0"
+    },
+    {
+      "id": "c_life",
+      "name": "生活秩序",
+      "color": "#dcdcaa"
+    }
+  ],
+  "levels": [
+    {
+      "id": "lv_root",
+      "name": "根部（每天必做）"
+    },
+    {
+      "id": "lv_mid",
+      "name": "中层（每周 3-5 次）"
+    },
+    {
+      "id": "lv_top",
+      "name": "顶层（进阶/可选）"
+    }
+  ],
+  "rules": [
+    {
+      "id": "r_read",
+      "cat": "c_learn",
+      "lv": "lv_root",
+      "t": "阅读 30 分钟",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_plan",
+      "cat": "c_learn",
+      "lv": "lv_root",
+      "t": "写下今日 3 件事",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_deep",
+      "cat": "c_focus",
+      "lv": "lv_root",
+      "t": "深度工作 90 分钟（单任务、免打扰）",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_deep_b",
+      "cat": "c_focus",
+      "lv": "lv_root",
+      "t": "发现分心时：记录干扰、30 秒呼吸、回到工作",
+      "on": true,
+      "parent": "r_deep",
+      "seq": 1
+    },
+    {
+      "id": "r_no_doom",
+      "cat": "c_entertain",
+      "lv": "lv_root",
+      "t": "刷视频/信息流 ≤ 30 分钟",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_no_doom_b",
+      "cat": "c_entertain",
+      "lv": "lv_root",
+      "t": "刷超时后：立刻关掉、出去散步 5 分钟",
+      "on": true,
+      "parent": "r_no_doom",
+      "seq": 1
+    },
+    {
+      "id": "r_sleep",
+      "cat": "c_health",
+      "lv": "lv_root",
+      "t": "23:30 前上床",
+      "on": true,
+      "parent": null,
+      "seq": 1,
+      "micro": "规律就寝是昼夜节律的锚点"
+    },
+    {
+      "id": "r_water",
+      "cat": "c_health",
+      "lv": "lv_root",
+      "t": "饮水 2L+",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_screen",
+      "cat": "c_health",
+      "lv": "lv_root",
+      "t": "屏幕时间 ≤ 8h（手机设置里查）",
+      "on": true,
+      "parent": null,
+      "seq": 3
+    },
+    {
+      "id": "r_sport",
+      "cat": "c_health",
+      "lv": "lv_mid",
+      "t": "运动 30 分钟",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_sport_b",
+      "cat": "c_health",
+      "lv": "lv_mid",
+      "t": "没运动时：至少散步 15 分钟 + 拉伸",
+      "on": true,
+      "parent": "r_sport",
+      "seq": 1
+    },
+    {
+      "id": "r_tidy",
+      "cat": "c_life",
+      "lv": "lv_root",
+      "t": "睡前 5 分钟整理桌面/房间",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_gratitude",
+      "cat": "c_life",
+      "lv": "lv_root",
+      "t": "写下今天 1 件感恩的事",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_morning",
+      "cat": "c_life",
+      "lv": "lv_root",
+      "t": "起床后不碰手机（先光照+喝水+伸展）",
+      "on": true,
+      "parent": null,
+      "seq": 3,
+      "micro": "Huberman:晨间屏幕破坏多巴胺基线"
+    },
+    {
+      "id": "r_break",
+      "cat": "c_focus",
+      "lv": "lv_root",
+      "t": "每工作 50 分钟休息 10 分钟",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_music",
+      "cat": "c_learn",
+      "lv": "lv_mid",
+      "t": "听播客/课程 30 分钟",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_no_alcohol",
+      "cat": "c_health",
+      "lv": "lv_root",
+      "t": "不饮酒",
+      "on": true,
+      "parent": null,
+      "seq": 4
+    },
+    {
+      "id": "r_journal",
+      "cat": "c_life",
+      "lv": "lv_root",
+      "t": "写日记（今天哪个定式卡住了？）",
+      "on": true,
+      "parent": null,
+      "seq": 4
+    },
+    {
+      "id": "r_outdoors",
+      "cat": "c_health",
+      "lv": "lv_root",
+      "t": "户外活动 20 分钟",
+      "on": true,
+      "parent": null,
+      "seq": 5
+    },
+    {
+      "id": "r_social",
+      "cat": "c_life",
+      "lv": "lv_mid",
+      "t": "和家人/朋友深度交流（不看屏幕）",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_meditate",
+      "cat": "c_focus",
+      "lv": "lv_mid",
+      "t": "正念/冥想 10 分钟",
+      "on": true,
+      "parent": null,
+      "seq": 1
+    },
+    {
+      "id": "r_review",
+      "cat": "c_learn",
+      "lv": "lv_root",
+      "t": "睡前回顾：今天哪些做好了哪些没做好",
+      "on": true,
+      "parent": null,
+      "seq": 3
+    },
+    {
+      "id": "r_cook",
+      "cat": "c_life",
+      "lv": "lv_mid",
+      "t": "自己做饭（不点外卖）",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_sunlight",
+      "cat": "c_health",
+      "lv": "lv_root",
+      "t": "晨间 10 分钟阳光暴露",
+      "on": true,
+      "parent": null,
+      "seq": 6,
+      "micro": "Huberman: 早晨光照设定昼夜节律"
+    },
+    {
+      "id": "r_nosugar",
+      "cat": "c_health",
+      "lv": "lv_root",
+      "t": "不喝含糖饮料",
+      "on": true,
+      "parent": null,
+      "seq": 7
+    },
+    {
+      "id": "r_selected",
+      "cat": "c_learn",
+      "lv": "lv_mid",
+      "t": "整理笔记/收藏夹/知识库",
+      "on": true,
+      "parent": null,
+      "seq": 2
+    },
+    {
+      "id": "r_night_mode",
+      "cat": "c_health",
+      "lv": "lv_root",
+      "t": "睡前 1h 关屏幕/开夜览模式",
+      "on": true,
+      "parent": null,
+      "seq": 8
+    }
+  ],
+  "tags": [
+    {
+      "id": "t_degrade",
+      "name": "降级日",
+      "color": "#e8912d",
+      "degrade": true
+    },
+    {
+      "id": "t_sick",
+      "name": "生病",
+      "color": "#f44747",
+      "degrade": false
+    },
+    {
+      "id": "t_travel",
+      "name": "外出/旅行",
+      "color": "#4fc1ff",
+      "degrade": false
+    }
+  ],
+  "daily": {},
+  "events": {},
+  "phases": [],
+  "reviews": {},
+  "retros": [],
+  "resources": [],
+  "retroEvents": [],
+  "meta": {
+    "_seed": 1,
+    "desc": "ROOT-OS 经典默认模板：5门类 2层级 27规则（含 2支链）",
+    "nightBar": false
+  }
+}
