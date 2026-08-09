@@ -273,16 +273,21 @@ function cloudFileID0(path) {
 }
 
 async function cloudUsersSave() {
-  if (!_cloudUsers) return;
+  if (!_cloudUsers) return true;
   _rebuildCloudIdx();
   const snapshot = JSON.stringify(_cloudUsers);
-  /* 串行化写，防并发覆盖（注册/改名等高频写） */
-  _cloudUsersWriteQ = _cloudUsersWriteQ.then(async () => {
+  /* 串行化写，防并发覆盖（注册/改名等高频写）。
+   * 🔴 失败返回 false（不再静默假成功）——调用方（createUser/cloudUserSet）抛错让上层感知，
+   * 否则注册/改名"显示成功"但重启后账号消失（写入其实没落盘） */
+  const p = _cloudUsersWriteQ.then(async () => {
     const res = await cloudApp().uploadFile({ cloudPath: CLOUD_USERS_FILE, fileContent: Buffer.from(snapshot, 'utf8') });
     if (!res) throw new Error('users.json 上传无响应');
     if (res.code && res.code !== 'SUCCESS' && res.code !== 0) throw new Error('users.json 上传失败: ' + (res.message || res.code));
-  }).catch(e => { console.warn('⚠️ users.json 写入失败:', (e && e.message) || e); });
-  return _cloudUsersWriteQ;
+    return true;
+  }).catch(e => { console.warn('⚠️ users.json 写入失败:', (e && e.message) || e); return false; });
+  /* 队列不断链：写失败也允许下一次写继续排队 */
+  _cloudUsersWriteQ = p.catch(() => {});
+  return p;
 }
 
 async function cloudUserById(uid) {
@@ -332,7 +337,8 @@ async function cloudCreateUser(username, pw_hash) {
   u.seq += 1;
   const id = u.seq;
   u.users.push({ id, username, pw_hash, email: null, email_verified: 0, wechat: null, wx_openid: null, display_name: null, unlock_until: null, is_dev: 0, pw_set: 0, orphaned: 0, created_at: new Date().toISOString() });
-  await cloudUsersSave();
+  const ok = await cloudUsersSave();
+  if (!ok) throw new Error('用户数据保存失败，请重试');
   return id;
 }
 async function cloudUserSet(uid, fields) {
@@ -340,7 +346,8 @@ async function cloudUserSet(uid, fields) {
   const x = u.users.find(v => Number(v.id) === Number(uid));
   if (!x) return false;
   Object.assign(x, fields);
-  await cloudUsersSave();
+  const ok = await cloudUsersSave();
+  if (!ok) throw new Error('用户数据保存失败，请重试');
   return true;
 }
 async function cloudUserAll() {
@@ -1321,6 +1328,10 @@ async function wipeAllUsers() {
     /* 清订阅/去重标记（敏感信息） */
     _cloudSubs = {}; await _cloudJsonSave(CLOUD_SUBS_FILE, {}, _cloudSubsWriteQ);
     _cloudSent = {}; await _cloudJsonSave(CLOUD_SENT_FILE, {}, _cloudSentWriteQ);
+    /* 🔴 清社区模板（云存储 templates.json + 内存缓存）——wipe 应回到全新状态 */
+    _cloudTemplates = { seq: 0, list: [] };
+    try { await _cloudJsonSave(CLOUD_TEMPLATES_FILE, _cloudTemplates, _cloudTemplatesWriteQ); }
+    catch (e) { console.warn('⚠️ wipe: templates.json 清理失败:', (e && e.message) || e); }
     console.log('  🗑️ 云存储 users.json 已重置, profile 清理:', n);
     return n;
   }

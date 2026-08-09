@@ -3158,6 +3158,8 @@ async function saveDisplayName(){
 function showForgot(){ $('#authLogin').style.display='none'; $('#authForgot').style.display='block'; $('#forgotMsg').textContent=''; }
 function backToLogin(){ $('#authForgot').style.display='none'; $('#authLogin').style.display='block'; }
 async function doForgotSend(){
+  try{
+
   const email=document.getElementById('fgEmail').value.trim();
   const msg=document.getElementById('forgotMsg');
   if(!email) return msg.textContent='请输入绑定邮箱';
@@ -3165,8 +3167,12 @@ async function doForgotSend(){
   const j=await apiPost('/api/forgot/send-code',{email});
   msg.style.color=j.error?'var(--danger)':'var(--ok)';
   msg.textContent=j.error||j.msg||'';
+
+  }catch(e){ var msg=document.getElementById('forgotMsg'); if(msg){ msg.style.color='var(--danger)'; msg.textContent='网络异常，请重试'; } console.warn('doForgotSend', e); }
 }
 async function doForgotReset(){
+  try{
+
   const email=document.getElementById('fgEmail').value.trim();
   const code=document.getElementById('fgCode').value.trim();
   const password=document.getElementById('fgPass').value;
@@ -3176,6 +3182,8 @@ async function doForgotReset(){
   const j=await apiPost('/api/forgot/reset',{email,code,password});
   if(j.ok){ msg.style.color='var(--ok)'; msg.textContent='✅ 密码已重置，正在返回登录页…'; setTimeout(backToLogin, 1500); }
   else { msg.style.color='var(--danger)'; msg.textContent=j.error||'重置失败'; }
+
+  }catch(e){ var msg=document.getElementById('forgotMsg'); if(msg){ msg.style.color='var(--danger)'; msg.textContent='网络异常，请重试'; } console.warn('doForgotReset', e); }
 }
 /* ================= 设置页（v1.2：账号绑定 / 偏好） ================= */
 async function renderSettings(){
@@ -3286,9 +3294,13 @@ async function sendBindCode(){
 
   }catch(e){ toast('网络异常，请重试') }
 }async function bindWechat(){
+  try{
+
   const wechat=(document.getElementById('setWechat').value||'').trim();
   const j=await apiPost('/api/wechat/bind',{wechat});
   if(j.ok){ toast('微信'+(j.wechat?'绑定已更新':'绑定成功')); renderSettings(); } else toast(j.error||'操作失败');
+
+  }catch(e){ toast('网络异常，请重试'); console.warn('bindWechat', e); }
 }
 /* 接入微信小程序账号：输入【微信号 + 密码】→ 数据合并到当前账号（微信号在小程序端「我的」设置） */
 async function attachWx(){
@@ -3308,9 +3320,13 @@ async function attachWx(){
 
   }catch(e){ const msg=document.getElementById('attachWxMsg');if(msg){msg.textContent='网络异常，请重试';msg.style.color='var(--danger)';} }
 }async function unbindWechat(){
+  try{
+
   if(!confirm('确定解绑微信号？（仅清除此处的「微信号」文字标识，不影响小程序 openid 关联）')) return;
   const j=await apiPost('/api/wechat/unbind',{});
   if(j.ok){ toast('已解绑'); renderSettings(); } else toast(j.error||'解绑失败');
+
+  }catch(e){ toast('网络异常，请重试'); console.warn('unbindWechat', e); }
 }
 async function changePassword(){
   try{
@@ -3341,6 +3357,8 @@ async function changePassword(){
   toast(on?'深夜提醒已开启':'深夜提醒已关闭');
 }
 async function saveDispName(){
+  try{
+
   const v=document.getElementById('setDispName').value.trim();
   const msg=document.getElementById('setDispMsg');
   if(v.length<2 || v.length>16){ msg.style.color='var(--danger)'; msg.textContent='名字需 2-16 个字符'; return; }
@@ -3351,6 +3369,8 @@ async function saveDispName(){
     const ub=document.getElementById('userBox');
     if(ub) ub.innerHTML = esc(j.display_name)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
   } else { msg.style.color='var(--danger)'; msg.textContent=j.error||'保存失败'; }
+
+  }catch(e){ var msg=document.getElementById('setDispMsg'); if(msg){ msg.style.color='var(--danger)'; msg.textContent='网络异常，请重试'; } console.warn('saveDispName', e); }
 }
 
 async function doLogout(){

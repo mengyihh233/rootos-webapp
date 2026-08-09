@@ -479,6 +479,13 @@ async function start() {
     if (password.length < 6) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(400).json({ error: '密码至少 6 位' }); }
     const exists = await db.userByName(username);
     if (exists) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(409).json({ error: '用户名已被占用' }); }
+    /* 🔴 提前校验显示名占用（在 createUser 之前）——否则账号已创建才发现名字被占 → 409 但账号已落库，
+     * 用户重试注册报"用户名已被占用"卡死（半创建账号）。最终一致性仍由 userSetDisplayName 内部兜底。 */
+    const dn = String(req.body.display_name || '').trim();
+    if (dn && dn.length >= 2 && dn.length <= 16 && /^[\u4e00-\u9fa5A-Za-z0-9_-]+$/.test(dn)) {
+      const ph = await db.userByDisplayName(dn, 0);
+      if (ph && String(ph.display_name).toLowerCase() === dn.toLowerCase()) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(409).json({ error: '该名字已被使用' }); }
+    }
     const pw_hash = bcrypt.hashSync(password, 10);
     const uid = await db.createUser(username, pw_hash);
     if (!uid) return res.status(409).json({ error: '用户名已被占用' }); /* 云存储并发兜底 */
@@ -489,12 +496,12 @@ async function start() {
      * 🔴 修复：不填时自动用【用户名清洗后的默认名】，不再登录后强制取名——同一用户微信端已取过名，网页端注册不应重复取。
      * 规则：取用户名 @ 前部分，过滤非法字符（仅留 中文/字母/数字/_/-），截 16 位；若清洗后仍 <2 位则用「用户+id」。 */
     let needName = false;
-    const dn = String(req.body.display_name || '').trim();
     if (dn) {
       if (dn.length >= 2 && dn.length <= 16 && /^[\u4e00-\u9fa5A-Za-z0-9_-]+$/.test(dn)) {
-        const holder = await db.userByDisplayName(dn, uid);
-        if (holder && String(holder.display_name).toLowerCase() === dn.toLowerCase()) return res.status(409).json({ error: '该名字已被使用' });
-        if (await db.userSetDisplayName(uid, dn)) needName = false;
+        /* 名字已提前查重（createUser 前）；这里 setDisplayName 内部仍有唯一性兜底，失败回落默认名 */
+        if (!(await db.userSetDisplayName(uid, dn))) {
+          if (!(await db.setDisplayNameWithRetry(uid, username))) needName = true;
+        }
       } else {
         /* 非法名字不阻断注册，自动回落默认名 */
         if (!(await db.setDisplayNameWithRetry(uid, username))) needName = true;
@@ -502,7 +509,9 @@ async function start() {
     } else {
       if (!(await db.setDisplayNameWithRetry(uid, username))) needName = true;
     }
-    await db.profileSet(uid, JSON.stringify(defaultBag()));
+    /* 🔴 数据初始化失败不报 500（账号已创建）——提示可登录，避免用户以为注册失败去重试撞"用户名已占用" */
+    try { await db.profileSet(uid, JSON.stringify(defaultBag())); }
+    catch (e) { console.warn('⚠️ 注册数据初始化失败（账号已创建）:', (e && e.message) || e); }
     req.session.userId = uid;
     req.session.username = username;
     authOk(ip);
@@ -534,6 +543,9 @@ async function start() {
   /* 当前用户（含邮箱/微信绑定状态，供设置页渲染；requireAuth 兼容网页 cookie 与小程序 Bearer token） */
   app.get('/api/me', requireAuth, wrap(async (req, res) => {
     const u = await db.userById(req.session.userId);
+    /* 🔴 账号已删除（注销后旧 token/旧 session 仍有效）→ 401 → 前端自动重登/提示重新登录，
+     * 防：删号后旧 token 继续读/写（幽灵数据），GET /api/data 还会自动重建默认 bag */
+    if (!u) return res.status(401).json({ error: '账号不存在或已注销，请重新登录' });
     /* 🔴 孤儿检测：wx_ 已合并（openid 转走+清字段）→ 前端立即用新 token 重登（自愈） */
     if (u && /^wx_/.test(String(u.username || '')) && !u.wx_openid && u.orphaned) {
       return res.status(401).json({ error: '账号已合并到网页账号，请重新登录' });
@@ -750,6 +762,14 @@ async function start() {
     if (holder && holder.display_name) {
       const tgt = await db.userById(u.id);
       if (tgt && !tgt.display_name) await db.userSetDisplayName(u.id, holder.display_name);
+    }
+    /* 🔴 修复：微信号继承——wx_ 账号设过微信号（供网页端接入用）而网页账号空时带给目标，
+     * 否则合并后用户在网页端拿不到原微信号（唯一性：被其他账号占用则放弃继承） */
+    if (holder && holder.wechat) {
+      const tgt = await db.userById(u.id);
+      if (tgt && !tgt.wechat && !(await db.wechatTaken(holder.wechat, u.id))) {
+        await db.userSetWechat(u.id, holder.wechat);
+      }
     }
     /* 🔴 清理孤儿：holder（wx_ 账号）openid 已转移，清空身份+随机密码+删 profile（防微信号占用/双份数据/可登录） */
     if (holder && holder.id !== u.id) await db.orphanWxAccount(holder.id);
@@ -1318,6 +1338,8 @@ async function start() {
   }));
 
   app.get('/api/data', requireAuth, wrap(async (req, res) => {
+    /* 🔴 账号已删除（注销后旧 token）→ 401，防自动重建幽灵数据 */
+    if (!(await db.userById(req.session.userId))) return res.status(401).json({ error: '账号不存在或已注销，请重新登录' });
     const raw = await db.profileGet(req.session.userId);
     let data = {};
     try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
@@ -1326,9 +1348,12 @@ async function start() {
       await db.profileSet(req.session.userId, JSON.stringify(data));
     }
     /* 多端同步：以服务器时钟为准，返回数据最后更新时间（供前端判断本地是否较新），
-     * 避免依赖客户端时钟（设备时钟不一致会导致数据被静默覆盖） */
-    const updatedAt = await db.profileUpdatedAt(req.session.userId);
+     * 避免依赖客户端时钟（设备时钟不一致会导致数据被静默覆盖）。
+     * 🔴 用文件内毫秒（与 PUT 乐观锁同一精度）——秒级会导致 baseTs < curTs 恒成立 → 首次保存必 409。
+     * 同时写入响应体 _updatedAt（云函数转发通道不透传 header，前端从 body 取） */
+    const updatedAt = await db.profileUpdatedAt(req.session.userId, true);
     if (updatedAt) res.setHeader('X-Data-Updated', updatedAt);
+    if (updatedAt) data._updatedAt = updatedAt;
     res.json(data);
   }));
 
@@ -1744,8 +1769,11 @@ async function start() {
     });
     if (bad.length) return res.status(400).json({ error: '模板含非法 id（' + bad.slice(0, 3).join(', ') + '）' });
     const title = String(b.title || '').trim().slice(0, 60) || '未命名模板';
-    /* author 强制取登录用户名，防冒用他人名义 */
-    const author = (req.session.username || '匿名').slice(0, 32);
+    /* author 强制取登录用户名，防冒用他人名义。
+     * 🔴 修复：requireAuth 对小程序 JWT 只设 session.userId 不设 username → 之前恒为「匿名」；
+     * 且审核通知按作者找用户，「匿名」找不到作者 → 作者收不到结果。改为按 userId 查真名。 */
+    const me = await db.userById(req.session.userId);
+    const author = (me && me.username) || (req.session.username || '匿名');
     const desc = String(b.desc || '').trim().slice(0, 300);
     const tags = Array.isArray(b.tags) ? b.tags.slice(0, 12).map(String).map(t => t.slice(0, 20)) : [];
     const counts = {
