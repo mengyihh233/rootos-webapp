@@ -938,6 +938,13 @@ async function templateReject(id) {
 
 /* ---------- 通知（模板审核结果推送给作者） ---------- */
 async function notify(userId, type, payload) {
+  /* 🔴 云存储模式：notifications.json 持久 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('notifications');
+    t.seq = (Number(t.seq) || 0) + 1;
+    t.rows.push({ id: t.seq, user_id: userId, type, payload: payload || {}, is_read: 0, created_at: new Date().toISOString() });
+    return _cloudTableSave('notifications');
+  }
   if (USE_PG) {
     await pool.query(
       `INSERT INTO notifications (user_id, type, payload, created_at) VALUES ($1,$2,$3,NOW())`,
@@ -950,6 +957,12 @@ async function notify(userId, type, payload) {
   ).run(userId, type, JSON.stringify(payload || {}));
 }
 async function notificationList(userId) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('notifications');
+    return t.rows.filter(r => r.user_id === userId).sort((a, b) => b.id - a.id).slice(0, 50)
+      .map(r => ({ id: r.id, type: r.type, payload: r.payload || {}, is_read: !!r.is_read, created_at: r.created_at }));
+  }
   const sql = `SELECT id,type,payload,is_read,created_at FROM notifications WHERE user_id=$uid ORDER BY id DESC LIMIT 50`;
   const map = r => ({ id: r.id, type: r.type, payload: JSON.parse(r.payload || '{}'), is_read: !!r.is_read, created_at: r.created_at });
   if (USE_PG) {
@@ -959,18 +972,40 @@ async function notificationList(userId) {
   return sqlite.prepare(sql.replace('$uid', '?')).all(userId).map(map);
 }
 async function notificationUnreadCount(userId) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('notifications');
+    return t.rows.filter(r => r.user_id === userId && !r.is_read).length;
+  }
   const sql = `SELECT COUNT(*) AS n FROM notifications WHERE user_id=$uid AND is_read=0`;
   if (USE_PG) { const r = await pool.query(sql.replace('$uid', '$1'), [userId]); return Number(r.rows[0].n); }
   const row = sqlite.prepare(sql.replace('$uid', '?')).get(userId);
   return Number(row.n);
 }
 async function notificationMarkRead(userId) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('notifications');
+    let changed = false;
+    t.rows.forEach(r => { if (r.user_id === userId && !r.is_read) { r.is_read = 1; changed = true; } });
+    if (changed) return _cloudTableSave('notifications');
+    return;
+  }
   if (USE_PG) { await pool.query(`UPDATE notifications SET is_read=1 WHERE user_id=$1`, [userId]); return; }
   sqlite.prepare(`UPDATE notifications SET is_read=1 WHERE user_id=?`).run(userId);
 }
 
 /* ---------- 模板评分（1-5 星，每用户一条，upsert） ---------- */
 async function ratingUpsert(templateId, userId, score) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('ratings');
+    const sc = Math.max(1, Math.min(5, Math.round(Number(score) || 1)));
+    const ex = t.rows.find(r => r.template_id === templateId && r.user_id === userId);
+    if (ex) ex.score = sc;
+    else t.rows.push({ template_id: templateId, user_id: userId, score: sc });
+    return _cloudTableSave('ratings');
+  }
   const s = Math.max(1, Math.min(5, Math.round(Number(score) || 1)));
   if (USE_PG) {
     await pool.query(
@@ -986,6 +1021,13 @@ async function ratingUpsert(templateId, userId, score) {
   ).run(templateId, userId, s);
 }
 async function ratingStats(templateId) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('ratings');
+    const rs = t.rows.filter(r => r.template_id === templateId);
+    if (!rs.length) return { avg: 0, count: 0 };
+    return { avg: rs.reduce((sum, r) => sum + (Number(r.score) || 0), 0) / rs.length, count: rs.length };
+  }
   const sql = `SELECT COALESCE(AVG(score),0) AS avg, COUNT(*) AS cnt FROM ratings WHERE template_id=$tid`;
   if (USE_PG) { const r = await pool.query(sql.replace('$tid', '$1'), [templateId]); return { avg: Number(r.rows[0].avg), count: Number(r.rows[0].cnt) }; }
   const row = sqlite.prepare(sql.replace('$tid', '?')).get(templateId);
@@ -994,6 +1036,15 @@ async function ratingStats(templateId) {
 
 /* ---------- 模板收藏（toggle） ---------- */
 async function favoriteToggle(templateId, userId) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('favorites');
+    const idx = t.rows.findIndex(r => r.template_id === templateId && r.user_id === userId);
+    if (idx >= 0) { t.rows.splice(idx, 1); await _cloudTableSave('favorites'); return false; }
+    t.rows.push({ template_id: templateId, user_id: userId });
+    await _cloudTableSave('favorites');
+    return true;
+  }
   if (USE_PG) {
     const ex = await pool.query(`SELECT 1 FROM favorites WHERE template_id=$1 AND user_id=$2`, [templateId, userId]);
     if (ex.rows.length) { await pool.query(`DELETE FROM favorites WHERE template_id=$1 AND user_id=$2`, [templateId, userId]); return false; }
@@ -1006,6 +1057,11 @@ async function favoriteToggle(templateId, userId) {
   return true;
 }
 async function favoriteIs(templateId, userId) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('favorites');
+    return t.rows.some(r => r.template_id === templateId && r.user_id === userId);
+  }
   if (USE_PG) { const r = await pool.query(`SELECT 1 FROM favorites WHERE template_id=$1 AND user_id=$2`, [templateId, userId]); return r.rows.length > 0; }
   return !!sqlite.prepare(`SELECT 1 FROM favorites WHERE template_id=? AND user_id=?`).get(templateId, userId);
 }
@@ -1113,6 +1169,13 @@ async function userSetDev(uid, isDev) {
 
 /* 备份（全库快照存 backups 表）：save 写入，list 列出（新→旧），trim 保留最近 keep 份 */
 async function backupSave(snapshot) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('backups');
+    t.seq = (Number(t.seq) || 0) + 1;
+    t.rows.push({ id: t.seq, snapshot, size_bytes: Buffer.byteLength(snapshot, 'utf8'), created_at: new Date().toISOString() });
+    return _cloudTableSave('backups');
+  }
   const bytes = Buffer.byteLength(snapshot, 'utf8');
   if (USE_PG) {
     await pool.query('INSERT INTO backups (snapshot, size_bytes, created_at) VALUES ($1,$2,NOW())', [snapshot, bytes]);
@@ -1121,6 +1184,12 @@ async function backupSave(snapshot) {
   }
 }
 async function backupList(limit) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const n = Math.max(1, Math.min(30, Number(limit) || 10));
+    const t = await _cloudTableGet('backups');
+    return t.rows.slice().sort((a, b) => b.id - a.id).slice(0, n).map(r => ({ id: r.id, size_bytes: r.size_bytes, created_at: r.created_at }));
+  }
   const n = Math.max(1, Math.min(30, Number(limit) || 10));
   if (USE_PG) {
     const r = await pool.query('SELECT id, size_bytes, created_at FROM backups ORDER BY id DESC LIMIT $1', [n]);
@@ -1129,6 +1198,12 @@ async function backupList(limit) {
   return sqlite.prepare('SELECT id, size_bytes, created_at FROM backups ORDER BY id DESC LIMIT ?').all(n);
 }
 async function backupGet(id) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('backups');
+    const r = t.rows.find(x => Number(x.id) === Number(id));
+    return r ? r.snapshot : null;
+  }
   if (USE_PG) {
     const r = await pool.query('SELECT snapshot FROM backups WHERE id = $1', [id]);
     return r.rows[0] ? r.rows[0].snapshot : null;
@@ -1137,6 +1212,14 @@ async function backupGet(id) {
   return row ? row.snapshot : null;
 }
 async function backupTrim(keep) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const n = Math.max(1, Math.min(30, Number(keep) || 7));
+    const t = await _cloudTableGet('backups');
+    t.rows.sort((a, b) => b.id - a.id);
+    if (t.rows.length > n) { t.rows = t.rows.slice(0, n); return _cloudTableSave('backups'); }
+    return;
+  }
   const n = Math.max(1, Math.min(30, Number(keep) || 7));
   if (USE_PG) {
     await pool.query('DELETE FROM backups WHERE id NOT IN (SELECT id FROM backups ORDER BY id DESC LIMIT $1)', [n]);
@@ -1148,6 +1231,11 @@ async function backupTrim(keep) {
 /* 支付订单幂等（防 webhook 重放无限解锁）：已处理过该订单号返回 true */
 async function orderSeen(outTradeNo) {
   if (!outTradeNo) return true;
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('pay_orders');
+    return t.rows.some(r => r.out_trade_no === outTradeNo);
+  }
   if (USE_PG) {
     const r = await pool.query('SELECT 1 FROM pay_orders WHERE out_trade_no = $1', [outTradeNo]);
     return r.rows.length > 0;
@@ -1155,6 +1243,15 @@ async function orderSeen(outTradeNo) {
   return !!sqlite.prepare('SELECT 1 FROM pay_orders WHERE out_trade_no = ?').get(outTradeNo);
 }async function orderMark(outTradeNo, channel, userId, amount) {
   try {
+    /* 🔴 云存储模式 */
+    if (USE_CLOUD_STORAGE) {
+      const t = await _cloudTableGet('pay_orders');
+      if (!t.rows.some(r => r.out_trade_no === outTradeNo)) {
+        t.rows.push({ out_trade_no: outTradeNo, channel: channel || 'afdian', user_id: userId || 0, amount: String(amount || '') });
+        return _cloudTableSave('pay_orders');
+      }
+      return;
+    }
     if (USE_PG) {
       await pool.query('INSERT INTO pay_orders (out_trade_no, channel, user_id, amount) VALUES ($1,$2,$3,$4) ON CONFLICT (out_trade_no) DO NOTHING',
         [outTradeNo, channel || 'afdian', userId || 0, String(amount || '')]);
@@ -1231,6 +1328,14 @@ async function userSetPassword(uid, pw_hash) {
 
 /* ---------- 分享快照（v0.6：规划生成链接一键套用） ---------- */
 async function shareCreate(id, owner, title, dataStr) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('shares');
+    const ex = t.rows.find(r => String(r.id) === String(id));
+    if (ex) { ex.owner = owner; ex.title = title; ex.data = dataStr; ex.created_at = new Date().toISOString(); }
+    else t.rows.push({ id, owner, title, data: dataStr, created_at: new Date().toISOString() });
+    return _cloudTableSave('shares');
+  }
   if (USE_PG) {
     await pool.query(
       `INSERT INTO shares (id, owner, title, data, created_at) VALUES ($1,$2,$3,$4,NOW()) ON CONFLICT (id) DO UPDATE SET data=EXCLUDED.data`,
@@ -1243,6 +1348,12 @@ async function shareCreate(id, owner, title, dataStr) {
   ).run(id, owner, title, dataStr);
 }
 async function shareGet(id) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await _cloudTableGet('shares');
+    const r = t.rows.find(x => String(x.id) === String(id));
+    return r ? { id: r.id, owner: r.owner, title: r.title, data: r.data } : null;
+  }
   if (USE_PG) {
     const r = await pool.query(`SELECT id,owner,title,data FROM shares WHERE id=$1`, [id]);
     return r.rows[0];
@@ -1350,6 +1461,11 @@ async function wipeAllUsers() {
     _cloudTemplates = { seq: 0, list: [] };
     try { await _cloudJsonSave(CLOUD_TEMPLATES_FILE, _cloudTemplates, _cloudTemplatesWriteQ); }
     catch (e) { console.warn('⚠️ wipe: templates.json 清理失败:', (e && e.message) || e); }
+    /* 🔴 清辅助表（notifications/ratings/favorites/shares/backups/pay_orders） */
+    for (const name of Object.keys(CLOUD_TABLE_FILES)) {
+      _cloudTables[name] = { seq: 0, rows: [] };
+      try { await _cloudTableSave(name); } catch (e) { console.warn('⚠️ wipe: ' + name + ' 清理失败:', (e && e.message) || e); }
+    }
     console.log('  🗑️ 云存储 users.json 已重置, profile 清理:', n);
     return n;
   }
@@ -1394,11 +1510,11 @@ let _cloudSubs = null, _cloudSubsLoading = null;
 let _cloudSent = null, _cloudSentLoading = null;
 let _cloudTemplates = null, _cloudTemplatesLoading = null;
 
+/* 🔴 通用 JSON 文件加载：loading 用 Map（支持任意文件，辅助表持久化用） */
+const _cloudJsonLoading = new Map();
 async function _cloudJsonLoad(file, cacheGetter, cacheSetter) {
   if (cacheGetter()) return cacheGetter();
-  if (_cloudSubsLoading && file === CLOUD_SUBS_FILE) return _cloudSubsLoading;
-  if (_cloudSentLoading && file === CLOUD_SENT_FILE) return _cloudSentLoading;
-  if (_cloudTemplatesLoading && file === CLOUD_TEMPLATES_FILE) return _cloudTemplatesLoading;
+  if (_cloudJsonLoading.has(file)) return _cloudJsonLoading.get(file);
   const p = (async () => {
     try {
       let fileID = cloudFileID0(file);
@@ -1410,14 +1526,13 @@ async function _cloudJsonLoad(file, cacheGetter, cacheSetter) {
       }
       const empty = {}; cacheSetter(empty); return empty;
     } catch (e) {
-      /* 🔴 读失败抛（不返回空缓存）——防 subs/sent/templates 被空缓存覆盖丢失 */
+      /* 🔴 读失败抛（不返回空缓存）——防被空缓存覆盖丢失 */
       console.error('⚠️ ' + file + ' 读取失败（抛错防覆盖）:', (e && e.message) || e);
       throw e;
     }
   })();
-  if (file === CLOUD_SUBS_FILE) _cloudSubsLoading = p;
-  else if (file === CLOUD_SENT_FILE) _cloudSentLoading = p;
-  else _cloudTemplatesLoading = p;
+  _cloudJsonLoading.set(file, p);
+  p.finally(() => _cloudJsonLoading.delete(file));
   return p;
 }
 async function _cloudJsonSave(file, data, q) {
@@ -1430,6 +1545,28 @@ async function _cloudJsonSave(file, data, q) {
 }
 const _cloudSubsWriteQ = { value: Promise.resolve() };
 const _cloudSentWriteQ = { value: Promise.resolve() };
+
+/* 🔴 辅助表云存储持久化（通用）：notifications/ratings/favorites/shares/backups/pay_orders 存 <name>.json {seq,rows} */
+const CLOUD_TABLE_FILES = {
+  notifications: 'notifications.json', ratings: 'ratings.json', favorites: 'favorites.json',
+  shares: 'shares.json', backups: 'backups.json', pay_orders: 'pay_orders.json'
+};
+let _cloudTables = {};
+const _cloudTableWriteQs = {};
+async function _cloudTableGet(name) {
+  const file = CLOUD_TABLE_FILES[name];
+  if (!file) throw new Error('未知云表: ' + name);
+  if (!_cloudTables[name]) {
+    const d = await _cloudJsonLoad(file, () => _cloudTables[name], v => { _cloudTables[name] = v; });
+    _cloudTables[name] = (d && Array.isArray(d.rows)) ? d : { seq: 0, rows: [] };
+  }
+  return _cloudTables[name];
+}
+async function _cloudTableSave(name) {
+  const file = CLOUD_TABLE_FILES[name];
+  if (!_cloudTableWriteQs[name]) _cloudTableWriteQs[name] = { value: Promise.resolve() };
+  return _cloudJsonSave(file, _cloudTables[name] || { seq: 0, rows: [] }, _cloudTableWriteQs[name]);
+}
 const _cloudTemplatesWriteQ = { value: Promise.resolve() };
 
 /* 🔴 templates 云存储持久化（{seq, list} 结构，兼容 DB 行字段） */
