@@ -93,11 +93,8 @@ async function cloudDownload(uid) {
       fileID = cloudFileID(uid);
       if (!fileID) return null;
     }
-    const r = await cloudApp().downloadFile({ fileID });
-    if (!r || r.code !== 'SUCCESS') return null;
-    const c = r.fileContent;
-    if (c === undefined || c === null) return null;
-    return Buffer.isBuffer(c) ? c.toString('utf8') : String(c);
+    /* 🔴 COS 直连读最新（绕过 CDN 缓存：downloadFile 走 CDN 会读到写前旧版） */
+    return await cloudDownloadLatest(fileID);
   } catch (e) { return null; }
 }
 async function cloudProfileGet(uid) {
@@ -122,7 +119,7 @@ async function cloudProfileUpdatedAt(uid, preferFile) {
     if (fileID) {
       const fi = await cloudApp().getFileInfo({ fileList: [fileID] });
       const item = (fi && fi.fileList && fi.fileList[0]) || {};
-      if (item.code === 'SUCCESS' && item.lastModified) {
+      if (cloudOk(item) && item.lastModified) {
         const d = new Date(item.lastModified);
         if (!isNaN(d.getTime())) return d.toISOString();
       }
@@ -224,9 +221,8 @@ async function cloudUsersLoad() {
         fileID = cloudFileID0(CLOUD_USERS_FILE);
         if (!fileID) throw new Error('云存储 fileID 构造失败');
       }
-      const r = await cloudApp().downloadFile({ fileID });
-      if (r && r.code === 'SUCCESS' && r.fileContent !== undefined && r.fileContent !== null) {
-        const raw = Buffer.isBuffer(r.fileContent) ? r.fileContent.toString('utf8') : String(r.fileContent);
+      const raw = await cloudDownloadLatest(fileID);
+      if (raw) {
         const j = JSON.parse(raw);
         if (j && Array.isArray(j.users)) { _cloudUsers = { seq: Number(j.seq) || 0, users: j.users }; _rebuildCloudIdx(); return _cloudUsers; }
       }
@@ -244,6 +240,31 @@ async function cloudUsersLoad() {
   return _cloudUsersLoading;
 }
 
+/* 🔴 云存储返回判定兼容：真实 SDK downloadFile 返回 {fileContent}（code=undefined），
+     * 旧代码 r.code !== 'SUCCESS' 恒真 → 读取永远失败（写入成功但读回空——数据丢失假象的根因）。
+     * mock 返回 code:'SUCCESS'，需两者都兼容。 */
+function cloudOk(r) {
+  if (!r) return false;
+  const c = r.code;
+  return c === undefined || c === null || c === 'SUCCESS' || c === 0;
+}
+/* 🔴 读最新文件内容：getTempFileURL+COS_URL（COS 直连签名 URL，每次不同 → 绕过 CDN 缓存）。
+     * 旧 SDK downloadFile 走 CDN 域名，写入后立即读回旧版（缓存 TTL ~1-2 分钟）——数据丢失假象根因。 */
+async function cloudDownloadLatest(fileID) {
+  try {
+    const r = await cloudApp().getTempFileURL({ fileList: [{ fileID, maxAge: 60, urlType: 'COS_URL' }] });
+    const item = r && r.fileList && r.fileList[0];
+    if (!item) return null;
+    if (item.code && item.code !== 'SUCCESS' && item.code !== 0) return null;
+    const url = item.download_url || item.tempFileURL || '';
+    if (!url) return null;
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const c = buf.toString('utf8');
+    return (c === undefined || c === null || c === '') ? null : c;
+  } catch (e) { return null; }
+}
 function cloudFileID0(path) {
   const env = CLOUD_ENV || _cloudEnv; /* 🔴 CLOUD_ENV 空时用上传提取的真实 env */
   const bucket = _cloudBucket;
@@ -792,6 +813,19 @@ async function dbStats() {
  * data / tags / counts 均以 JSON 字符串存储，列表接口解析后返回。 */
 async function templateAdd({ author, title, desc, tags, counts, data }) {
   const status = 'pending';
+  /* 🔴 云存储模式：templates.json 持久（重启不丢模板） */
+  if (USE_CLOUD_STORAGE) {
+    const t = await cloudTemplatesLoad();
+    t.seq = (Number(t.seq) || 0) + 1;
+    if (!Array.isArray(t.list)) t.list = [];
+    t.list.push({
+      id: t.seq, author, title, desc, tags: tags || [], counts: counts || {},
+      data: (typeof data === 'string') ? data : JSON.stringify(data || {}),
+      status, created_at: new Date().toISOString()
+    });
+    await cloudTemplatesSave();
+    return t.seq;
+  }
   if (USE_PG) {
     const r = await pool.query(
       `INSERT INTO templates (author,title,"desc",tags,counts,data,status,created_at)
@@ -808,6 +842,14 @@ async function templateAdd({ author, title, desc, tags, counts, data }) {
 }
 
 async function templateListApproved() {
+  /* 🔴 云存储模式：从 templates.json 过滤 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await cloudTemplatesLoad();
+    return (t.list || []).filter(x => x.status === 'approved').sort((a, b) => b.id - a.id).map(x => ({
+      id: x.id, author: x.author, title: x.title, desc: x.desc,
+      tags: x.tags || [], counts: x.counts || {}
+    }));
+  }
   const sql = `SELECT id,author,title,"desc",tags,counts FROM templates WHERE status='approved' ORDER BY id DESC`;
   const rows = USE_PG ? (await pool.query(sql)).rows : sqlite.prepare(sql).all();
   return rows.map(r => ({
@@ -817,6 +859,15 @@ async function templateListApproved() {
 }
 
 async function templateListAll() {
+  /* 🔴 云存储模式：从 templates.json */
+  if (USE_CLOUD_STORAGE) {
+    const t = await cloudTemplatesLoad();
+    return (t.list || []).slice().sort((a, b) => b.id - a.id).map(x => ({
+      id: x.id, author: x.author, title: x.title, desc: x.desc,
+      tags: x.tags || [], counts: x.counts || {},
+      status: x.status, created_at: x.created_at
+    }));
+  }
   const sql = `SELECT id,author,title,"desc",tags,counts,status,created_at FROM templates ORDER BY id DESC`;
   const rows = USE_PG ? (await pool.query(sql)).rows : sqlite.prepare(sql).all();
   return rows.map(r => ({
@@ -827,6 +878,11 @@ async function templateListAll() {
 }
 
 async function templateGet(id) {
+  /* 🔴 云存储模式：从 templates.json 查 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await cloudTemplatesLoad();
+    return (t.list || []).find(x => Number(x.id) === Number(id)) || null;
+  }
   if (USE_PG) {
     const r = await pool.query('SELECT * FROM templates WHERE id=$1', [id]);
     return r.rows[0];
@@ -835,11 +891,25 @@ async function templateGet(id) {
 }
 
 async function templateApprove(id) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await cloudTemplatesLoad();
+    const x = (t.list || []).find(y => Number(y.id) === Number(id));
+    if (x) { x.status = 'approved'; await cloudTemplatesSave(); }
+    return;
+  }
   if (USE_PG) { await pool.query(`UPDATE templates SET status='approved' WHERE id=$1`, [id]); return; }
   sqlite.prepare(`UPDATE templates SET status='approved' WHERE id=?`).run(id);
 }
 
 async function templateReject(id) {
+  /* 🔴 云存储模式 */
+  if (USE_CLOUD_STORAGE) {
+    const t = await cloudTemplatesLoad();
+    const x = (t.list || []).find(y => Number(y.id) === Number(id));
+    if (x) { x.status = 'rejected'; await cloudTemplatesSave(); }
+    return;
+  }
   if (USE_PG) { await pool.query(`UPDATE templates SET status='rejected' WHERE id=$1`, [id]); return; }
   sqlite.prepare(`UPDATE templates SET status='rejected' WHERE id=?`).run(id);
 }
@@ -1290,27 +1360,31 @@ module.exports = { init, isConnected, userByName, userByNameCI, userById, userBy
  * subscriptions 存 subs.json（云存储，重启不丢）；sent_logs 存 sent.json */
 const CLOUD_SUBS_FILE = 'subs.json';
 const CLOUD_SENT_FILE = 'sent.json';
+const CLOUD_TEMPLATES_FILE = 'templates.json';
 let _cloudSubs = null, _cloudSubsLoading = null;
 let _cloudSent = null, _cloudSentLoading = null;
+let _cloudTemplates = null, _cloudTemplatesLoading = null;
 
 async function _cloudJsonLoad(file, cacheGetter, cacheSetter) {
   if (cacheGetter()) return cacheGetter();
   if (_cloudSubsLoading && file === CLOUD_SUBS_FILE) return _cloudSubsLoading;
   if (_cloudSentLoading && file === CLOUD_SENT_FILE) return _cloudSentLoading;
+  if (_cloudTemplatesLoading && file === CLOUD_TEMPLATES_FILE) return _cloudTemplatesLoading;
   const p = (async () => {
     try {
       let fileID = cloudFileID0(file);
       if (!fileID) { if (!(await ensureCloudBucket())) throw new Error('bucket'); fileID = cloudFileID0(file); if (!fileID) throw new Error('fileID'); }
-      const r = await cloudApp().downloadFile({ fileID });
-      if (r && r.code === 'SUCCESS' && r.fileContent !== undefined && r.fileContent !== null) {
-        const raw = Buffer.isBuffer(r.fileContent) ? r.fileContent.toString('utf8') : String(r.fileContent);
+      const raw = await cloudDownloadLatest(fileID);
+      if (raw) {
         const j = JSON.parse(raw);
         if (j && typeof j === 'object') { cacheSetter(j); return j; }
       }
       const empty = {}; cacheSetter(empty); return empty;
     } catch (e) { const empty = {}; cacheSetter(empty); return empty; }
   })();
-  if (file === CLOUD_SUBS_FILE) _cloudSubsLoading = p; else _cloudSentLoading = p;
+  if (file === CLOUD_SUBS_FILE) _cloudSubsLoading = p;
+  else if (file === CLOUD_SENT_FILE) _cloudSentLoading = p;
+  else _cloudTemplatesLoading = p;
   return p;
 }
 async function _cloudJsonSave(file, data, q) {
@@ -1323,6 +1397,16 @@ async function _cloudJsonSave(file, data, q) {
 }
 const _cloudSubsWriteQ = { value: Promise.resolve() };
 const _cloudSentWriteQ = { value: Promise.resolve() };
+const _cloudTemplatesWriteQ = { value: Promise.resolve() };
+
+/* 🔴 templates 云存储持久化（{seq, list} 结构，兼容 DB 行字段） */
+async function cloudTemplatesLoad() {
+  return _cloudJsonLoad(CLOUD_TEMPLATES_FILE, () => _cloudTemplates, v => { _cloudTemplates = v; });
+}
+async function cloudTemplatesSave() {
+  const d = _cloudTemplates || { seq: 0, list: [] };
+  return _cloudJsonSave(CLOUD_TEMPLATES_FILE, d, _cloudTemplatesWriteQ);
+}
 
 async function cloudSubsLoad() { return _cloudJsonLoad(CLOUD_SUBS_FILE, () => _cloudSubs, v => { _cloudSubs = v; }); }
 async function cloudSentLoad() { return _cloudJsonLoad(CLOUD_SENT_FILE, () => _cloudSent, v => { _cloudSent = v; }); }
