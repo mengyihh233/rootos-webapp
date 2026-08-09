@@ -1607,6 +1607,8 @@ async function start() {
       users.push({
         id: r.id,
         username: r.username,
+        display_name: r.display_name || '', /* 🔴 修复：补齐字段——admin 表格需要显示名字，缺失则前端永远空白 */
+        wechat: r.wechat || null,           /* 🔴 修复：补齐字段——admin 表格需要显示微信号 */
         created_at: r.created_at,
         updated_at: r.updated_at,
         is_dev: Number(r.is_dev) === 1 ? 1 : 0,
