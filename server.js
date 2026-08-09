@@ -686,6 +686,16 @@ async function start() {
     if (!openid) return res.status(400).json({ error: '未获取到 openid' });
     const u = await db.userFindByOpenid(openid);
     if (u) return res.json({ ok: true, token: issueWxToken(u.id), username: u.username, display_name: u.display_name || '', need_name: !u.display_name, bound: true });
+    /* 🔴 修复「退出再登录变新号」：历史遗留号 openid 为空（旧版 cloudUsersSave 吞错，openid 从未落盘）。
+     * 按 username 前缀找回（注册名 = wx_ + openid 前 10 位）→ 补绑 openid 并登录旧号，不再每次注册新号。
+     * 排除 orphaned（已被合并的号不复活，避免污染目标账号）。 */
+    const legacyName = 'wx_' + openid.slice(0, 10);
+    const legacy = await db.userByName(legacyName);
+    if (legacy && !legacy.wx_openid && /^wx_/.test(String(legacy.username || '')) && !legacy.orphaned) {
+      await db.userBindOpenid(legacy.id, openid);
+      console.log('✅ 修复历史 openid 空账号并登录：', legacyName);
+      return res.json({ ok: true, token: issueWxToken(legacy.id), username: legacy.username, display_name: legacy.display_name || '', need_name: !legacy.display_name, bound: true, legacy_repaired: true });
+    }
     /* 未绑定：自动注册一个新账号（微信一键登录直达，无需先有网页账号）。
      * 用户名取 wx_ + openid 片段（冲突时加序号）；密码随机不可知——用户之后可在设置页设密码，
      * 或通过「绑定网页账号」把 openid 关联到已有网页账号。 */
@@ -1167,7 +1177,9 @@ async function start() {
     if (!target || !bcrypt.compareSync(password, target.pw_hash)) return res.status(401).json({ error: '账号或密码错误' });
     if (target.id === req.session.userId) return res.status(400).json({ error: '当前已是该账号，无需绑定' });
     const cur = await db.userById(req.session.userId);
-    if (!cur || !cur.wx_openid) return res.status(400).json({ error: '当前账号没有微信绑定，无法合并' });
+    /* 🔴 历史遗留号 openid 空（旧版假成功时代注册）→ 提示先重登（重登会按 openid 前缀自动补绑），
+     * 而不是笼统报「没有微信绑定」让用户困惑 */
+    if (!cur || !cur.wx_openid) return res.status(400).json({ error: '当前账号未绑定微信，请先「退出登录」再重新登录一次（将自动绑定微信），然后重试绑定' });
     /* 只禁止：openid 已被【其他账号】绑定。当前账号自己持有 openid 是正常情况（就是要转给目标账号） */
     const holder = await db.userFindByOpenid(cur.wx_openid);
     if (holder && holder.id !== req.session.userId && holder.id !== target.id) return res.status(409).json({ error: '该微信已绑定其他账号' });
