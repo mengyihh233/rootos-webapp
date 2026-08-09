@@ -49,7 +49,7 @@ function cloudApp() {
 let _cloudBucket = '';  /* 真实 bucketId（首次上传后缓存） */
 function cloudFilePath(uid) { return 'profiles/' + uid + '.json'; }
 function cloudFileID(uid) {
-  const env = CLOUD_ENV || '';
+  const env = CLOUD_ENV || _cloudEnv; /* 🔴 CLOUD_ENV 空时用上传提取的真实 env */
   const bucket = _cloudBucket;
   if (env && bucket) return 'cloud://' + env + '.' + bucket + '/' + cloudFilePath(uid);
   return '';  /* 无法构造（尚未缓存）→ 走 getUploadMetadata 探测 */
@@ -59,7 +59,20 @@ async function ensureCloudBucket() {
   try {
     const meta = await cloudApp().getUploadMetadata({ cloudPath: cloudFilePath('__probe') });
     const b = (meta && (meta.bucketId || meta.bucket)) || '';
-    if (b) { _cloudBucket = b; return true; }
+    if (b) {
+      _cloudBucket = b;
+      /* 🔴 从 metadata 提取 env（envId 字段或返回里的 fileID 前缀） */
+      if (!CLOUD_ENV && !_cloudEnv) {
+        const e = (meta && (meta.envId || meta.env)) || '';
+        if (e) _cloudEnv = e;
+        else if (meta && meta.fileID && /^cloud:\/\//.test(meta.fileID)) {
+          const mid = meta.fileID.replace('cloud://', '').split('/')[0];
+          const dot = mid.indexOf('.');
+          if (dot > 0) _cloudEnv = mid.slice(0, dot);
+        }
+      }
+      return true;
+    }
   } catch (e) { /* 继续走 fileID 缓存路径 */ }
   return !!_cloudBucket;
 }
@@ -119,9 +132,52 @@ async function cloudProfileSet(uid, dataStr) {
     try {
       const mid = res.fileID.replace('cloud://', '').split('/')[0]; /* envId.bucketId */
       const dot = mid.indexOf('.');
-      if (dot > 0) _cloudBucket = mid.slice(dot + 1);
+      if (dot > 0) {
+        _cloudEnv = mid.slice(0, dot); /* 🔴 修复：缓存真实 env（线上 TCB_ENV 可能为空，从上传返回的 fileID 提取权威值） */
+        _cloudBucket = mid.slice(dot + 1);
+      }
+      /* 🔴 持久化 meta.json（跨重启/多实例恢复 env/bucket） */
+      await _cloudSaveMeta();
     } catch (e) { /* 忽略 */ }
   }
+}
+let _cloudEnv = ''; /* 从上传返回 fileID 提取的真实 env（CLOUD_ENV 空时兜底） */
+const CLOUD_META_FILE = 'meta.json'; /* 云存储元信息（env/bucket）——重启后也能构造 fileID */
+
+/* 🔴 持久化 env/bucket：写成功后将 meta.json 上传（重启读回，解决 TCB_ENV 空导致 fileID 构造失败） */
+async function _cloudSaveMeta() {
+  try {
+    if (!_cloudEnv && !_cloudBucket) return;
+    const meta = { env: _cloudEnv, bucket: _cloudBucket, at: Date.now() };
+    const res = await cloudApp().uploadFile({ cloudPath: CLOUD_META_FILE, fileContent: Buffer.from(JSON.stringify(meta), 'utf8') });
+    if (!res) return;
+    if (res.code && res.code !== 'SUCCESS' && res.code !== 0) return;
+    if (res.fileID && /^cloud:\/\//.test(res.fileID)) {
+      const mid = res.fileID.replace('cloud://', '').split('/')[0];
+      const dot = mid.indexOf('.');
+      if (dot > 0 && !_cloudEnv) _cloudEnv = mid.slice(0, dot);
+      if (dot > 0 && !_cloudBucket) _cloudBucket = mid.slice(dot + 1);
+    }
+  } catch (e) { console.warn('⚠️ meta.json 写入失败:', (e && e.message) || e); }
+}
+async function _cloudLoadMeta() {
+  try {
+    /* 🔴 核心方案：getUploadMetadata 探测（不需要 env，返回 data.fileId 含真实 env/bucket） */
+    if (!_cloudEnv || !_cloudBucket) {
+      const meta = await cloudApp().getUploadMetadata({ cloudPath: cloudFilePath('__probe') });
+      const data = meta && meta.data ? meta.data : meta;
+      const fid = (data && (data.fileId || data.fileID)) || '';
+      /* fileId 形如 cloud://<env>.<bucket>/<path> 或 <env>.<bucket>/<path> */
+      const mid = fid.replace('cloud://', '').split('/')[0] || '';
+      const dot = mid.indexOf('.');
+      if (dot > 0) {
+        if (!_cloudEnv) _cloudEnv = mid.slice(0, dot);
+        if (!_cloudBucket) _cloudBucket = mid.slice(dot + 1);
+      }
+      const b = (data && (data.bucketId || data.bucket)) || '';
+      if (b && !_cloudBucket) _cloudBucket = b;
+    }
+  } catch (e) { /* 忽略 */ }
 }
 
 /* ================= users 表云存储层（方案 B：全迁云存储，弃 PG/SQLite） =================
@@ -180,7 +236,7 @@ async function cloudUsersLoad() {
 }
 
 function cloudFileID0(path) {
-  const env = CLOUD_ENV || '';
+  const env = CLOUD_ENV || _cloudEnv; /* 🔴 CLOUD_ENV 空时用上传提取的真实 env */
   const bucket = _cloudBucket;
   if (env && bucket) return 'cloud://' + env + '.' + bucket + '/' + path;
   return '';
@@ -469,6 +525,8 @@ async function init() {
       const tables = Object.values(SCHEMA_SQLITE);
       sqlite.exec(tables.join(';'));
       connected = true;
+      /* 🔴 预载 env/bucket 元信息（TCB_ENV 空时也能构造 fileID 读写）——不阻塞，失败忽略 */
+      try { await _cloudLoadMeta(); } catch (e) { /* 忽略 */ }
       console.log('✅ 数据库：云存储模式（users/profiles 存云存储，辅助表本地 SQLite）');
     } catch (e) {
       console.warn('⚠️ 云存储模式 SQLite 初始化失败:', (e && e.message) || e);
