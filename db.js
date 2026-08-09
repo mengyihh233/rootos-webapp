@@ -132,6 +132,21 @@ const CLOUD_USERS_FILE = 'users.json';
 let _cloudUsers = null;      /* {seq, users[]} 缓存 */
 let _cloudUsersLoading = null; /* 并发读去重 */
 let _cloudUsersWriteQ = Promise.resolve(); /* 串行写队列 */
+let _cloudIdx = null;        /* 🔴 索引缓存：{byNameCI: Map<lowerName, idx>, byId: Map<id, idx>} —— 避免每次查询全量扫 */
+
+function _rebuildCloudIdx() {
+  if (!_cloudUsers) { _cloudIdx = null; return; }
+  const byNameCI = new Map(), byId = new Map();
+  _cloudUsers.users.forEach((u, i) => {
+    byId.set(Number(u.id), i);
+    byNameCI.set(String(u.username).toLowerCase(), i);
+  });
+  _cloudIdx = { byNameCI, byId };
+}
+function _cloudIdxGet() {
+  if (!_cloudIdx || !_cloudUsers) _rebuildCloudIdx();
+  return _cloudIdx;
+}
 
 async function cloudUsersLoad() {
   if (_cloudUsers) return _cloudUsers;
@@ -148,14 +163,16 @@ async function cloudUsersLoad() {
       if (r && r.code === 'SUCCESS' && r.fileContent !== undefined && r.fileContent !== null) {
         const raw = Buffer.isBuffer(r.fileContent) ? r.fileContent.toString('utf8') : String(r.fileContent);
         const j = JSON.parse(raw);
-        if (j && Array.isArray(j.users)) { _cloudUsers = { seq: Number(j.seq) || 0, users: j.users }; return _cloudUsers; }
+        if (j && Array.isArray(j.users)) { _cloudUsers = { seq: Number(j.seq) || 0, users: j.users }; _rebuildCloudIdx(); return _cloudUsers; }
       }
       /* 文件不存在或损坏 → 初始化为空 */
       _cloudUsers = { seq: 0, users: [] };
+      _rebuildCloudIdx();
       return _cloudUsers;
     } catch (e) {
       console.warn('⚠️ users.json 读取失败（初始化空）:', (e && e.message) || e);
       _cloudUsers = { seq: 0, users: [] };
+      _rebuildCloudIdx();
       return _cloudUsers;
     } finally { _cloudUsersLoading = null; }
   })();
@@ -171,6 +188,7 @@ function cloudFileID0(path) {
 
 async function cloudUsersSave() {
   if (!_cloudUsers) return;
+  _rebuildCloudIdx();
   const snapshot = JSON.stringify(_cloudUsers);
   /* 串行化写，防并发覆盖（注册/改名等高频写） */
   _cloudUsersWriteQ = _cloudUsersWriteQ.then(async () => {
@@ -183,16 +201,18 @@ async function cloudUsersSave() {
 
 async function cloudUserById(uid) {
   const u = await cloudUsersLoad();
-  return u.users.find(x => Number(x.id) === Number(uid)) || null;
+  const idx = _cloudIdxGet().byId.get(Number(uid));
+  return idx !== undefined ? u.users[idx] : null;
 }
 async function cloudUserByName(username) {
   const u = await cloudUsersLoad();
-  return u.users.find(x => x.username === username) || null;
+  const idx = _cloudIdxGet().byNameCI.get(String(username).toLowerCase());
+  return idx !== undefined && u.users[idx].username === username ? u.users[idx] : null;
 }
 async function cloudUserByNameCI(username) {
   const u = await cloudUsersLoad();
-  const lo = String(username).toLowerCase();
-  return u.users.find(x => String(x.username).toLowerCase() === lo) || null;
+  const idx = _cloudIdxGet().byNameCI.get(String(username).toLowerCase());
+  return idx !== undefined ? u.users[idx] : null;
 }
 async function cloudUserByOpenid(openid) {
   if (!openid) return null;
@@ -1161,6 +1181,9 @@ async function wipeAllUsers() {
       if (fileList.length) await cloudApp().deleteFile({ fileList });
     } catch (e) { console.warn('⚠️ wipe: 云存储 profile 删除失败:', (e && e.message) || e); }
     await cloudWipeUsers();
+    /* 清订阅/去重标记（敏感信息） */
+    _cloudSubs = {}; await _cloudJsonSave(CLOUD_SUBS_FILE, {}, _cloudSubsWriteQ);
+    _cloudSent = {}; await _cloudJsonSave(CLOUD_SENT_FILE, {}, _cloudSentWriteQ);
     console.log('  🗑️ 云存储 users.json 已重置, profile 清理:', n);
     return n;
   }
@@ -1196,8 +1219,55 @@ async function wipeAllUsers() {
 module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userByWechat, wechatTaken, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orphanWxAccount, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, CLOUD_ENV, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
+/* ================= 订阅消息云存储层（方案B 优化2：辅助表持久化） =================
+ * subscriptions 存 subs.json（云存储，重启不丢）；sent_logs 存 sent.json */
+const CLOUD_SUBS_FILE = 'subs.json';
+const CLOUD_SENT_FILE = 'sent.json';
+let _cloudSubs = null, _cloudSubsLoading = null;
+let _cloudSent = null, _cloudSentLoading = null;
+
+async function _cloudJsonLoad(file, cacheGetter, cacheSetter) {
+  if (cacheGetter()) return cacheGetter();
+  if (_cloudSubsLoading && file === CLOUD_SUBS_FILE) return _cloudSubsLoading;
+  if (_cloudSentLoading && file === CLOUD_SENT_FILE) return _cloudSentLoading;
+  const p = (async () => {
+    try {
+      let fileID = cloudFileID0(file);
+      if (!fileID) { if (!(await ensureCloudBucket())) throw new Error('bucket'); fileID = cloudFileID0(file); if (!fileID) throw new Error('fileID'); }
+      const r = await cloudApp().downloadFile({ fileID });
+      if (r && r.code === 'SUCCESS' && r.fileContent !== undefined && r.fileContent !== null) {
+        const raw = Buffer.isBuffer(r.fileContent) ? r.fileContent.toString('utf8') : String(r.fileContent);
+        const j = JSON.parse(raw);
+        if (j && typeof j === 'object') { cacheSetter(j); return j; }
+      }
+      const empty = {}; cacheSetter(empty); return empty;
+    } catch (e) { const empty = {}; cacheSetter(empty); return empty; }
+  })();
+  if (file === CLOUD_SUBS_FILE) _cloudSubsLoading = p; else _cloudSentLoading = p;
+  return p;
+}
+async function _cloudJsonSave(file, data, q) {
+  q.value = q.value.then(async () => {
+    const res = await cloudApp().uploadFile({ cloudPath: file, fileContent: Buffer.from(JSON.stringify(data), 'utf8') });
+    if (!res) throw new Error('上传无响应');
+    if (res.code && res.code !== 'SUCCESS' && res.code !== 0) throw new Error('上传失败: ' + (res.message || res.code));
+  }).catch(e => console.warn('⚠️ ' + file + ' 写入失败:', (e && e.message) || e));
+  return q.value;
+}
+const _cloudSubsWriteQ = { value: Promise.resolve() };
+const _cloudSentWriteQ = { value: Promise.resolve() };
+
+async function cloudSubsLoad() { return _cloudJsonLoad(CLOUD_SUBS_FILE, () => _cloudSubs, v => { _cloudSubs = v; }); }
+async function cloudSentLoad() { return _cloudJsonLoad(CLOUD_SENT_FILE, () => _cloudSent, v => { _cloudSent = v; }); }
+
 async function subUpsert(userId, tplId, enabled) {
   const e = enabled ? 1 : 0;
+  /* 🔴 云存储模式：subs.json 持久（重启不丢订阅） */
+  if (USE_CLOUD_STORAGE) {
+    const subs = await cloudSubsLoad();
+    subs[String(userId)] = { tpl_id: tplId, enabled: e };
+    return _cloudJsonSave(CLOUD_SUBS_FILE, subs, _cloudSubsWriteQ);
+  }
   if (USE_PG) {
     await pool.query(`INSERT INTO subscriptions (user_id, tpl_id, enabled) VALUES ($1,$2,$3)
       ON CONFLICT (user_id) DO UPDATE SET tpl_id=$2, enabled=$3`, [userId, tplId, e]);
@@ -1208,6 +1278,19 @@ async function subUpsert(userId, tplId, enabled) {
 }
 /* 已开启订阅的用户（含 openid），用于定时下发提醒 */
 async function subEnabledList() {
+  /* 🔴 云存储模式：subs.json + users.json 组合（SQLite subscriptions 无法 JOIN 云存储 users） */
+  if (USE_CLOUD_STORAGE) {
+    const subs = await cloudSubsLoad();
+    const users = await cloudUserAll();
+    const out = [];
+    Object.keys(subs).forEach(uidStr => {
+      const s = subs[uidStr];
+      if (!s || s.enabled !== 1) return;
+      const u = users.find(x => Number(x.id) === Number(uidStr));
+      if (u && u.wx_openid) out.push({ userId: Number(uidStr), tplId: s.tpl_id, openid: u.wx_openid });
+    });
+    return out;
+  }
   const sql = `SELECT s.user_id, s.tpl_id, u.wx_openid FROM subscriptions s
                JOIN users u ON u.id = s.user_id
                WHERE s.enabled = 1 AND u.wx_openid IS NOT NULL`;
@@ -1218,6 +1301,14 @@ async function subEnabledList() {
 /* 提醒去重（跨进程幂等）：key 如 'remind-2026-08-09'，当天已发过返回 false。
  * 解决「常驻 setInterval + 云函数 cron」并存时的双下发。 */
 async function sentOnce(key) {
+  /* 🔴 云存储模式：sent.json 持久（重启不丢去重标记） */
+  if (USE_CLOUD_STORAGE) {
+    const sent = await cloudSentLoad();
+    if (sent[key]) return false;
+    sent[key] = 1;
+    await _cloudJsonSave(CLOUD_SENT_FILE, sent, _cloudSentWriteQ);
+    return true;
+  }
   if (USE_PG) {
     const r = await pool.query('SELECT 1 FROM sent_logs WHERE key = $1', [key]);
     if (r.rows.length) return false;
