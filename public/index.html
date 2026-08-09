@@ -3110,19 +3110,25 @@ function toggleRegMode(){
   $('#authMsg').textContent = '';
 }
 async function doRegister(){
+  try{
+
   const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
   const n=document.getElementById('auName').value.trim();
   if(u.length<2){ showAuth('用户名至少 2 个字符'); return; }
   if(p.length<6){ showAuth('密码至少 6 位'); return; }
   const j=await apiPost('/api/register',{username:u,password:p,display_name:n});
   if(j.ok){ await afterLogin(); } else { showAuth(j.error||'注册失败'); }
-}
-async function doLogin(){
+
+  }catch(e){ showAuth('网络异常，请检查网络后重试') }
+}async function doLogin(){
+  try{
+
   const u=document.getElementById('auUser').value.trim(), p=document.getElementById('auPass').value;
   const j=await apiPost('/api/login',{username:u,password:p});
   if(j.ok){ await afterLogin(); } else { showAuth(j.error||'登录失败'); }
-}
-/* ---- 显示名（登录后必填）---- */
+
+  }catch(e){ showAuth('网络异常，请检查网络后重试') }
+}/* ---- 显示名（登录后必填）---- */
 function openNameModal(force){
   const m=document.getElementById('nameModal');
   if(m){ m.style.display='flex'; $('#nmInput').value=''; $('#nmMsg').textContent=''; if(force) m.querySelector('.card').dataset.force='1'; else m.querySelector('.card').dataset.force=''; }
@@ -3133,6 +3139,8 @@ function closeNameModal(){
   if(m) m.style.display='none';
 }
 async function saveDisplayName(){
+  try{
+
   const v=document.getElementById('nmInput').value.trim();
   const msg=document.getElementById('nmMsg');
   if(v.length<2 || v.length>16){ msg.textContent='名字需 2-16 个字符'; return; }
@@ -3144,8 +3152,9 @@ async function saveDisplayName(){
     if(ub) ub.innerHTML = esc(j.display_name)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
     toast('✅ 显示名已设置：'+j.display_name);
   } else { msg.textContent=j.error||'设置失败'; }
-}
-/* ================= 找回密码（v1.3：登录页闭环） ================= */
+
+  }catch(e){ if(msg)msg.textContent='网络异常，请重试' }
+}/* ================= 找回密码（v1.3：登录页闭环） ================= */
 function showForgot(){ $('#authLogin').style.display='none'; $('#authForgot').style.display='block'; $('#forgotMsg').textContent=''; }
 function backToLogin(){ $('#authForgot').style.display='none'; $('#authLogin').style.display='block'; }
 async function doForgotSend(){
@@ -3255,28 +3264,36 @@ async function deleteAccount(){
   else toast((j.error)||'注销失败');
 }
 async function sendBindCode(){
+  try{
+
   const email=(document.getElementById('setEmail').value||'').trim();
   const msg=document.getElementById('setEmailMsg'); if(!msg) return;
   msg.style.color='var(--dim)'; msg.textContent='发送中…';
   const j=await apiPost('/api/email/send-code',{email});
   msg.style.color=j.error?'var(--danger)':'var(--ok)';
   msg.textContent=j.error||j.msg||'';
-}
-async function bindEmail(){
+
+  }catch(e){ toast('网络异常，请重试') }
+}async function bindEmail(){
+  try{
+
   const email=(document.getElementById('setEmail').value||'').trim();
   const code=(document.getElementById('setEmailCode').value||'').trim();
   const msg=document.getElementById('setEmailMsg'); if(!msg) return;
   const j=await apiPost('/api/email/bind',{email,code});
   if(j.ok){ msg.style.color='var(--ok)'; msg.textContent='绑定成功 ✓'; renderSettings(); }
   else { msg.style.color='var(--danger)'; msg.textContent=j.error||'绑定失败'; }
-}
-async function bindWechat(){
+
+  }catch(e){ toast('网络异常，请重试') }
+}async function bindWechat(){
   const wechat=(document.getElementById('setWechat').value||'').trim();
   const j=await apiPost('/api/wechat/bind',{wechat});
   if(j.ok){ toast('微信'+(j.wechat?'绑定已更新':'绑定成功')); renderSettings(); } else toast(j.error||'操作失败');
 }
 /* 接入微信小程序账号：输入【微信号 + 密码】→ 数据合并到当前账号（微信号在小程序端「我的」设置） */
 async function attachWx(){
+  try{
+
   const wechat=(document.getElementById('attachWxUser').value||'').trim();
   const pass=document.getElementById('attachWxPass').value||'';
   const msg=document.getElementById('attachWxMsg');
@@ -3288,13 +3305,16 @@ async function attachWx(){
     SESSION=true;
     setTimeout(()=>location.reload(), 1200);
   } else { msg.textContent=j.error||'接入失败'; msg.style.color='var(--danger)'; }
-}
-async function unbindWechat(){
+
+  }catch(e){ const msg=document.getElementById('attachWxMsg');if(msg){msg.textContent='网络异常，请重试';msg.style.color='var(--danger)';} }
+}async function unbindWechat(){
   if(!confirm('确定解绑微信号？（仅清除此处的「微信号」文字标识，不影响小程序 openid 关联）')) return;
   const j=await apiPost('/api/wechat/unbind',{});
   if(j.ok){ toast('已解绑'); renderSettings(); } else toast(j.error||'解绑失败');
 }
 async function changePassword(){
+  try{
+
   const isWx=!!(window._meIsWx);
   const oldEl=document.getElementById('setOldPw');
   const old=oldEl?oldEl.value:'';
@@ -3313,8 +3333,9 @@ async function changePassword(){
   const j=await apiPost('/api/password/change',{old,next});
   if(j.ok){ toast(j.msg||'密码已更新'); if(oldEl)oldEl.value=''; document.getElementById('setNewPw').value=''; }
   else toast(j.error||'修改失败');
-}
-function setNightBarPref(on){
+
+  }catch(e){ toast('网络异常，请重试') }
+}function setNightBarPref(on){
   meta.nightBar=!!on; store.set('meta',meta);
   checkNight();
   toast(on?'深夜提醒已开启':'深夜提醒已关闭');

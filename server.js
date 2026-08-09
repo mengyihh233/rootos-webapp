@@ -74,6 +74,7 @@ function smtpReady() { return !!(SMTP.host && SMTP.user && SMTP.pass); }
 /* 邮箱验证码暂存（进程内存）：key=email，值={code, uid(绑定场景) , exp}
  * 单实例够用；与 session 同生命周期（重启后需重新发码），多实例部署可换 Redis。 */
 const emailCodes = new Map();
+const _codeCooldown = new Map(); /* 验证码重发冷却（email → 上次发送时间） */
 function issueCode(email) {
   const code = String(crypto.randomInt(100000, 1000000));
   emailCodes.set(email, { code, exp: Date.now() + 10 * 60 * 1000, fail: 0 });
@@ -570,10 +571,14 @@ async function start() {
     if (!EMAIL_RE.test(email)) return res.status(400).json({ error: '邮箱格式不正确' });
     const holder = await db.userFindByEmail(email);
     if (holder && holder.id !== req.session.userId) return res.status(409).json({ error: '该邮箱已被其他账号绑定' });
-    if (!smtpReady()) return res.status(503).json({ error: '服务端未配置 SMTP，无法发送验证码（可联系管理员配置 SMTP_HOST/USER/PASS）' });
+    if (!smtpReady()) return res.status(503).json({ error: '验证码服务暂不可用，请联系管理员' });
+    /* 🔴 重发冷却 60s（防连点轰炸） */
+    const last = _codeCooldown.get(email);
+    if (last && Date.now() - last < 60000) return res.status(429).json({ error: '发送太频繁，请 1 分钟后再试' });
     const code = issueCode(email);
     const r = await sendCodeMail(email, code, 'bind');
     if (r.err) return res.status(500).json({ error: '验证码发送失败，请稍后再试' });
+    _codeCooldown.set(email, Date.now());
     res.json({ ok: true, msg: '验证码已发送到 ' + email + '，10 分钟内有效' });
   }));
 
