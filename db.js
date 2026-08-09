@@ -405,6 +405,7 @@ const SCHEMA_SQLITE = {
       counts     TEXT NOT NULL DEFAULT '{}',
       data       TEXT NOT NULL DEFAULT '{}',
       status     TEXT NOT NULL DEFAULT 'pending',
+      category   TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )`,
   notifications: `
@@ -501,6 +502,7 @@ const SCHEMA_PG = {
       counts     TEXT NOT NULL DEFAULT '{}',
       data       TEXT NOT NULL DEFAULT '{}',
       status     TEXT NOT NULL DEFAULT 'pending',
+      category   TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT NOW()
     )`,
   notifications: `
@@ -630,6 +632,8 @@ async function init() {
       /* 🔴 wechat 唯一索引（应用层 + DB 双重保障，让「微信号+密码」能定位 wx_ 账号）
        * 用 LOWER() 实现大小写不敏感的唯一性（微信号不区分大小写） */
       await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_wechat_unique ON users (LOWER(wechat)) WHERE wechat IS NOT NULL AND wechat <> ''`);
+      /* templates 表 category 迁移（2026-08-09） */
+      await pool.query(`ALTER TABLE templates ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT ''`);
     };
     let ok = false;
     let lastErr = null;
@@ -680,6 +684,9 @@ async function init() {
     if (!cols.includes('orphaned')) sqlite.exec(`ALTER TABLE users ADD COLUMN orphaned INTEGER NOT NULL DEFAULT 0`);
     if (!cols.includes('is_dev')) sqlite.exec(`ALTER TABLE users ADD COLUMN is_dev INTEGER NOT NULL DEFAULT 0`);
     if (!cols.includes('display_name')) sqlite.exec(`ALTER TABLE users ADD COLUMN display_name TEXT`);
+    /* templates 表 category 迁移（2026-08-09） */
+    const tplCols = sqlite.prepare('PRAGMA table_info(templates)').all().map(c => c.name);
+    if (!tplCols.includes('category')) sqlite.exec(`ALTER TABLE templates ADD COLUMN category TEXT NOT NULL DEFAULT ''`);
     sqlite.exec(SCHEMA_SQLITE.shares);
     sqlite.exec(SCHEMA_SQLITE.pay_orders);
     sqlite.exec(SCHEMA_SQLITE.backups);
