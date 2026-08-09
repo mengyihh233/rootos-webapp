@@ -1402,6 +1402,27 @@ async function userDelete(uid, username) {
     const u = await cloudUsersLoad();
     u.users = u.users.filter(x => Number(x.id) !== Number(uid));
     await cloudUsersSave();
+    /* 🔴 云模式注销清理辅助表孤儿行（与 PG/SQLite 分支一致）：
+     * notifications/ratings/favorites/pay_orders 按 user_id、shares 按 owner 过滤 */
+    for (const name of ['notifications', 'ratings', 'favorites', 'pay_orders']) {
+      try {
+        const t = await _cloudTableGet(name);
+        const before = t.rows.length;
+        t.rows = t.rows.filter(x => Number(x.user_id) !== Number(uid));
+        if (t.rows.length !== before) await _cloudTableSave(name);
+      } catch (e) { console.warn('⚠️ 注销清理 ' + name + ' 失败:', (e && e.message) || e); }
+    }
+    try {
+      const t = await _cloudTableGet('shares');
+      const before = t.rows.length;
+      t.rows = t.rows.filter(x => Number(x.owner) !== Number(uid));
+      if (t.rows.length !== before) await _cloudTableSave('shares');
+    } catch (e) { console.warn('⚠️ 注销清理 shares 失败:', (e && e.message) || e); }
+    /* subs/sent 单独云文件（subs.json）也要清 */
+    try {
+      const s = await cloudSubsLoad();
+      if (s[String(uid)] !== undefined) { delete s[String(uid)]; await _cloudJsonSave(CLOUD_SUBS_FILE, s, _cloudSubsWriteQ); }
+    } catch (e) { console.warn('⚠️ 注销清理 subs 失败:', (e && e.message) || e); }
     return;
   }
   const T = (sql) => USE_PG ? sql.replace(/\?/g, '$1') : sql;

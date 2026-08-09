@@ -2346,7 +2346,8 @@ async function shareMyPlan(){
   if($('#shRules')&&$('#shRules').checked) mods.push('rules');
   if($('#shPhases')&&$('#shPhases').checked) mods.push('phases');
   if($('#shRes')&&$('#shRes').checked) mods.push('resources');
-  const r=await fetch('/api/share/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({modules:mods})});
+  const r=await fetch('/api/share/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({modules:mods})}).catch(()=>null);
+  if(!r) return alert('网络异常，请检查网络后重试');
   const j=await r.json();
   if(!j.ok) return alert(j.error||'分享失败');
   const url=location.origin+'/#share='+j.id;

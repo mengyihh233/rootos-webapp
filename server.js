@@ -1487,6 +1487,8 @@ async function start() {
 
   app.put('/api/data', requireAuth, wrap(async (req, res) => {
     if (!req.body || typeof req.body !== 'object') return res.status(400).json({ error: '数据格式错误' });
+    /* 🔴 用户存在性检查（与 GET /api/data 一致）：注销后旧 JWT 仍可 PUT → 防止重建幽灵 profile */
+    if (!(await db.userById(req.session.userId))) return res.status(401).json({ error: '账号不存在，请重新登录' });
     /* 滥用防护：写入频率限流（每用户每分钟最多 N 次） */
     if (!saveRateOk(req.session.userId)) return res.status(429).json({ error: '写入过于频繁，请稍后再试' });
     /* 乐观锁（防双端同时写互相覆盖）：客户端带 baseTs = 它读取数据时的服务端 updated_at。
