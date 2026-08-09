@@ -29,6 +29,7 @@ const USE_CLOUD_STORAGE = process.env.CLOUD_STORAGE === '1' && HAS_CLOUD_CRED;
  * 关键：避免 USE_PG=true（DATABASE_URL 残留）但 PG 连不上 → 数据静默丢失。 */
 const USE_PG = !!process.env.DATABASE_URL && !USE_CLOUD_STORAGE;
 let _cloudApp = null; /* @cloudbase/node-sdk app 实例（惰性初始化） */
+const _memCache = new Map(); /* 进程内存快照：{ 'profile:uid': {data,ts} } —— COS 故障时降级兜底 */
 
 let sqlite = null;   // better-sqlite3 实例
 let pool = null;     // pg Pool 实例
@@ -94,10 +95,19 @@ async function cloudDownload(uid) {
       if (!fileID) return null;
     }
     /* 🔴 COS 直连读最新（绕过 CDN 缓存：downloadFile 走 CDN 会读到写前旧版） */
-    return await cloudDownloadLatest(fileID);
+    const data = await cloudDownloadLatest(fileID);
+    /* 写穿缓存：读成功后更新进程内存快照（COS 故障时降级兜底） */
+    _memCache.set('profile:' + uid, { data, ts: Date.now() });
+    return data;
   } catch (e) {
-    /* 🔴 读失败抛（不返回 null）——防 GET /api/data 误判为"无数据"用默认 bag 覆盖用户真实 profile */
-    console.error('⚠️ profile 读取失败（抛错防覆盖）:', (e && e.message) || e);
+    /* 🔴 COS 读失败 → 尝试进程内存快照兜底（防 COS 短暂故障导致全站不可用） */
+    const cached = _memCache.get('profile:' + uid);
+    if (cached) {
+      console.warn(`⚠️ COS 读取失败(${(e&&e.message)||e})，使用 ${Date.now()-cached.ts}ms 旧缓存: ${uid}`);
+      return cached.data;
+    }
+    /* 无缓存 → 仍抛错（防 GET /api/data 误判为"无数据"用默认 bag 覆盖用户真实 profile） */
+    console.error('⚠️ profile 读取失败（无缓存兜底，抛错防覆盖）:', (e && e.message) || e);
     throw e;
   }
 }
@@ -137,6 +147,8 @@ async function cloudProfileSet(uid, dataStr) {
   /* 🔴 修复：上传失败必须抛错（上层 save() 会提示用户重试），不能假成功丢数据 */
   if (!res) throw new Error('云存储上传无响应');
   if (res.code && res.code !== 'SUCCESS' && res.code !== 0) throw new Error('云存储上传失败: ' + (res.message || res.code));
+  /* 写穿缓存：上传成功后更新内存快照（读路径 COS 故障时可降级返回） */
+  _memCache.set('profile:' + uid, { data: dataStr, ts: Date.now() });
   /* 从上传返回的权威 fileID 提取 envId.bucketId 缓存（cloud://<env>.<bucket>/<path>） */
   if (res && res.fileID && /^cloud:\/\//.test(res.fileID)) {
     try {
