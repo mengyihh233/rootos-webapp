@@ -547,6 +547,14 @@ async function delTpl(id) {
   else alert((r.body&&r.body.error)||'删除失败');
 }
 
+/* 上架/下架/审核模板 */
+async function tplAct(id, action) {
+  if (!confirm(action === 'approve' ? '确定上架该模板？' : '确定下架/拒绝该模板？')) return;
+  const r = await api('/api/admin/templates/' + id + '/' + action, { method: 'POST', body: JSON.stringify({}) });
+  if (r.ok) { toast(action === 'approve' ? '✅ 已上架' : '⬇ 已下架'); loadTplMarket(); refreshStatsSilent(); }
+  else alert((r.body && r.body.error) || '操作失败');
+}
+
 /* 重新导入模板：从现有 JSON 数据重新提交（用于模板更新后重新上架） */
 async function reimportTpl(id) {
   const r = await api('/api/admin/templates/' + id);

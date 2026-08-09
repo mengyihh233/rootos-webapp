@@ -957,7 +957,7 @@ async function templateReject(id) {
   sqlite.prepare(`UPDATE templates SET status='rejected' WHERE id=?`).run(id);
 }
 
-async function templateUpdate(id, { title, desc, tags, category, data }) {
+async function templateUpdate(id, { title, desc, tags, category, data, counts }) {
   if (USE_CLOUD_STORAGE) {
     const t = await cloudTemplatesLoad();
     const x = (t.list || []).find(y => Number(y.id) === Number(id));
@@ -966,6 +966,7 @@ async function templateUpdate(id, { title, desc, tags, category, data }) {
     if (desc !== undefined) x.desc = desc;
     if (tags !== undefined) x.tags = tags;
     if (category !== undefined) x.category = category;
+    if (counts !== undefined) x.counts = counts;
     if (data !== undefined) x.data = (typeof data === 'string') ? data : JSON.stringify(data || {});
     await cloudTemplatesSave();
     return;
@@ -975,6 +976,7 @@ async function templateUpdate(id, { title, desc, tags, category, data }) {
   if (desc !== undefined) { fields.push('"desc"'); values.push(desc); idx.push(fields.length); }
   if (tags !== undefined) { fields.push('tags'); values.push(JSON.stringify(tags)); idx.push(fields.length); }
   if (category !== undefined) { fields.push('category'); values.push(category); idx.push(fields.length); }
+  if (counts !== undefined) { fields.push('counts'); values.push(JSON.stringify(counts)); idx.push(fields.length); }
   if (data !== undefined) { fields.push('data'); values.push(JSON.stringify(data)); idx.push(fields.length); }
   if (!fields.length) return;
   const set = fields.map((f, i) => `${f}=$${i+1}`).join(',');
