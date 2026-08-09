@@ -534,7 +534,10 @@ async function start() {
       need_name: u ? !u.display_name : false, /* 未取名 → 前端弹强制取名 */
       email: u ? (u.email || '') : '',
       email_verified: u ? !!u.email_verified : false,
-      wechat: u ? (u.wechat || '') : ''
+      wechat: u ? (u.wechat || '') : '',
+      is_wx: u ? /^wx_/.test(String(u.username || '')) : false, /* 🔴 微信自动注册账号 → 前端据此选 set-first（设初始密码）vs change（改密码） */
+      pw_set: u ? !!u.pw_set : true, /* 已设过密码 → 改走 change（校验旧密码），未设 → set-first */
+      web_bound: u ? !/^wx_/.test(String(u.username || '')) : true /* 非 wx_ = 网页账号体系（已与网页打通） */
     });
   }));
 
@@ -1099,6 +1102,8 @@ async function start() {
     const u = await db.userById(req.session.userId);
     if (!u) return res.status(401).json({ error: '未登录' });
     if (!/^wx_/.test(String(u.username || ''))) return res.status(400).json({ error: '该功能仅限微信自动注册账号设置初始密码' });
+    /* 🔴 安全：已设过密码 → 拒绝 set-first 覆盖（需走 change 校验旧密码） */
+    if (u.pw_set) return res.status(400).json({ error: '已设置过密码，请用「修改密码」' });
     const nextPw = String(req.body.next || '');
     if (nextPw.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
     if (nextPw.length > 64) return res.status(400).json({ error: '密码过长' });
