@@ -833,7 +833,8 @@ async function dbStats() {
 /* ---------- 社区模板（需审核） ----------
  * status: 'pending'（待审） | 'approved'（已公开） | 'rejected'（已拒绝）
  * data / tags / counts 均以 JSON 字符串存储，列表接口解析后返回。 */
-async function templateAdd({ author, title, desc, tags, counts, data }) {
+async function templateAdd({ author, title, desc, tags, counts, data, category }) {
+  const cat = category || '';
   const status = 'pending';
   /* 🔴 云存储模式：templates.json 持久（重启不丢模板） */
   if (USE_CLOUD_STORAGE) {
@@ -842,6 +843,7 @@ async function templateAdd({ author, title, desc, tags, counts, data }) {
     if (!Array.isArray(t.list)) t.list = [];
     t.list.push({
       id: t.seq, author, title, desc, tags: tags || [], counts: counts || {},
+      category: cat, /* 🔴 社区模板分类（减脂/增肌/学习/效率等） */
       data: (typeof data === 'string') ? data : JSON.stringify(data || {}),
       status, created_at: new Date().toISOString()
     });
@@ -850,16 +852,16 @@ async function templateAdd({ author, title, desc, tags, counts, data }) {
   }
   if (USE_PG) {
     const r = await pool.query(
-      `INSERT INTO templates (author,title,"desc",tags,counts,data,status,created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()) RETURNING id`,
-      [author, title, desc, JSON.stringify(tags || []), JSON.stringify(counts || {}), JSON.stringify(data), status]
+      `INSERT INTO templates (author,title,"desc",tags,counts,category,data,status,created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW()) RETURNING id`,
+      [author, title, desc, JSON.stringify(tags || []), JSON.stringify(counts || {}), cat, JSON.stringify(data), status]
     );
     return r.rows[0].id;
   }
   const info = sqlite.prepare(
-    `INSERT INTO templates (author,title,"desc",tags,counts,data,status,created_at)
-     VALUES (?,?,?,?,?,?,?,datetime('now'))`
-  ).run(author, title, desc, JSON.stringify(tags || []), JSON.stringify(counts || {}), JSON.stringify(data), status);
+    `INSERT INTO templates (author,title,"desc",tags,counts,category,data,status,created_at)
+     VALUES (?,?,?,?,?,?,?,?,datetime('now'))`
+  ).run(author, title, desc, JSON.stringify(tags || []), JSON.stringify(counts || {}), cat, JSON.stringify(data), status);
   return info.lastInsertRowid;
 }
 
@@ -869,14 +871,14 @@ async function templateListApproved() {
     const t = await cloudTemplatesLoad();
     return (t.list || []).filter(x => x.status === 'approved').sort((a, b) => b.id - a.id).map(x => ({
       id: x.id, author: x.author, title: x.title, desc: x.desc,
-      tags: x.tags || [], counts: x.counts || {}
+      tags: x.tags || [], counts: x.counts || {}, category: x.category || ''
     }));
   }
-  const sql = `SELECT id,author,title,"desc",tags,counts FROM templates WHERE status='approved' ORDER BY id DESC`;
+  const sql = `SELECT id,author,title,"desc",tags,counts,category FROM templates WHERE status='approved' ORDER BY id DESC`;
   const rows = USE_PG ? (await pool.query(sql)).rows : sqlite.prepare(sql).all();
   return rows.map(r => ({
     id: r.id, author: r.author, title: r.title, desc: r.desc,
-    tags: JSON.parse(r.tags || '[]'), counts: JSON.parse(r.counts || '{}')
+    tags: JSON.parse(r.tags || '[]'), counts: JSON.parse(r.counts || '{}'), category: r.category || ''
   }));
 }
 

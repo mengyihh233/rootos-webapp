@@ -1775,7 +1775,8 @@ async function start() {
       const favorited = uid ? await db.favoriteIs(t.id, uid) : false;
       return {
         id: t.id, title: t.title, author: t.author, desc: t.desc,
-        tags: t.tags, counts: t.counts, file: 'community:' + t.id, source: 'community',
+        tags: t.tags, counts: t.counts, category: t.category || '',
+        file: 'community:' + t.id, source: 'community',
         rating, favorited
       };
     }));
@@ -1783,7 +1784,10 @@ async function start() {
       ...builtin.map(t => ({ ...t, source: 'builtin', rating: { avg: 0, count: 0 }, favorited: false })),
       ...enriched
     ];
-    res.json(list);
+    /* 🔴 支持 ?category= 分类筛选（社区模板分类：减脂/增肌/学习/效率等） */
+    const cat = (req.query.category || '').trim();
+    const filtered = cat ? list.filter(t => (t.category || t.tags || []).some(tag => tag.includes(cat))) : list;
+    res.json(filtered);
   }));
 
   /* 登录用户可提交自己的规划作为社区模板（默认待审） */
@@ -1830,7 +1834,7 @@ async function start() {
       resources: (safe.resources || []).length,
       retros: (safe.retros || []).length
     };
-    const id = await db.templateAdd({ author, title, desc, tags, counts, data: safe });
+    const id = await db.templateAdd({ author, title, desc, tags, counts, data: safe, category: (b.category || '').slice(0, 20) });
     res.status(201).json({ ok: true, id, status: 'pending' });
   }));
 

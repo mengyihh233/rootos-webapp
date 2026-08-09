@@ -2157,6 +2157,7 @@ function phaseHTML(p,depth){
     +='<span class="stars">'+'★'.repeat(p.imp||1)+'☆'.repeat(3-(p.imp||1))+'</span>'
     +'<p style="margin:4px 0;"><small class="mono">'+p.start+' ~ '+(p.end||'至今')+'</small>'
     +(p.goal?'<br><small>目标：'+esc(p.goal)+'</small>':'')+'</p>'
+    +((p.days && p.days.length) ? '<details style="margin:8px 0;"><summary style="color:var(--accent);cursor:pointer;font-size:13px;">📅 查看 30 天每日内容（'+p.days.length+' 天）</summary><div style="margin-top:8px;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;">' + p.days.map(d => '<div style="margin-bottom:8px;padding:8px;border-left:2px solid var(--accent);background:rgba(78,201,176,0.05);"><b style="color:var(--accent);">Day '+d.day+'</b> — '+esc(d.title||'')+'<br><small style="color:var(--muted);">'+esc(d.content||'')+'</small></div>').join('') + '</div></details>' : '')
     +'<div class="stat-grid">'
     +'<div class="stat"><div class="v">'+s.days+'</div><div class="k">有记录天数</div></div>'
     +'<div class="stat"><div class="v">'+s.pct+'%</div><div class="k">'+levels[0].name+'完成率</div></div>'
@@ -2605,10 +2606,18 @@ function overwriteBagFromTemplate(d){
   if(Array.isArray(d.levels)) levels=d.levels;
   if(Array.isArray(d.rules)) rules=d.rules;
   if(Array.isArray(d.tags)) tags=d.tags;
-  if(Array.isArray(d.phases)) phases=d.phases;
-  /* 🔴 修复：覆盖套用绝不替换 reviews/retros——模板的复盘/随笔恒为空（服务端剥离），
-   * 覆盖它们会清空用户自己的复盘与随笔（与"打卡保留"的承诺矛盾）。保留用户现有数据。 */
-  if(d.reviews && Object.keys(d.reviews).length) { /* 仅当模板自带非空复盘才合并（内置模板无） */ }
+  if(Array.isArray(d.phases)) {
+    /* 🔴 修复：阶段 startDate 未定义显示"undefined"——套用时按 dayOff 计算 start/end（数据库字段可能为 null） */
+    let cursor = 0;
+    phases = d.phases.map((p, i) => {
+      let start = p.startDate || p.start || (p.dayOff !== undefined && p.dayOff !== null ? _dayOff(p.dayOff) : (i === 0 ? _dayOff(0) : _dayOff(cursor)));
+      /* 计算 end：取下一个阶段的 start，或 7 天后（推算结束） */
+      const next = d.phases[i + 1];
+      let end = p.endDate || p.end || (next && (next.startDate || next.start) ? (next.startDate || next.start) : (p.dayOff !== undefined && p.dayOff !== null ? _dayOff(p.dayOff + 6) : _dayOff(cursor + 6)));
+      cursor = p.dayOff !== undefined && p.dayOff !== null ? p.dayOff + 1 : (p.dayOff !== undefined ? p.dayOff + 1 : cursor + 1);
+      return { ...p, start, end };
+    });
+  }
   if(Array.isArray(d.resources)) resources=d.resources;
   suppressSave=false;
   const m={cats,levels,rules,tags,phases,reviews,retros,resources};
@@ -2633,7 +2642,7 @@ function mergeBag(d, choices){
   levels=mergeWithChoices(levels, d.levels||SEED_LEVELS, choices);
   rules=mergeWithChoices(rules, d.rules, choices);
   tags=mergeWithChoices(tags, d.tags||SEED_TAGS, choices);
-  phases=mergeWithChoices(phases, d.phases||[], choices);
+  phases=mergeWithChoices(phases, _initPhaseDates(d.phases||[]), choices);
   retros=mergeWithChoices(retros, d.retros||[], choices);
   resources=mergeWithChoices(resources, d.resources||[], choices);
   reviews=mergeReviews(reviews, d.reviews);
@@ -2644,10 +2653,23 @@ function mergeBag(d, choices){
 
 /* 仅追加模式：不改动规则/门类/标签等，只把模板的阶段、资源补充进来（同名 id 更新，不删除用户任何数据） */
 function appendBag(d){
-  phases=mergeById(phases, d.phases||[]);
+  phases=mergeById(phases, _initPhaseDates(d.phases||[]));
   resources=mergeById(resources, d.resources||[]);
   const bag={cats,levels,rules,tags,daily,events,phases,reviews,retros,resources,meta};
   Object.keys(bag).forEach(k=>store.set(k,bag[k]));
+}
+
+/* 模板套用前：阶段 start/end 初始化（套用时按 dayOff 算"今天+N"） */
+function _initPhaseDates(arr){
+  if(!Array.isArray(arr)) return [];
+  let cursor = 0;
+  return arr.map((p, i) => {
+    const start = p.startDate || p.start || (p.dayOff !== undefined && p.dayOff !== null ? _dayOff(p.dayOff) : (i === 0 ? _dayOff(0) : _dayOff(cursor)));
+    const next = arr[i + 1];
+    const end = p.endDate || p.end || (next && (next.startDate || next.start) ? (next.startDate || next.start) : (p.dayOff !== undefined && p.dayOff !== null ? _dayOff(p.dayOff + 6) : _dayOff(cursor + 6)));
+    cursor = p.dayOff !== undefined && p.dayOff !== null ? p.dayOff + 1 : cursor + 1;
+    return { ...p, start, end };
+  });
 }
 
 /* 套用前选择：合并 / 仅追加阶段资源 / 覆盖 */
