@@ -218,6 +218,11 @@ async function cloudUserByDisplayName(name, exceptUid) {
 }
 async function cloudCreateUser(username, pw_hash) {
   const u = await cloudUsersLoad();
+  /* 🔴 唯一性检查（并发安全）：username 大小写不敏感唯一；openid 唯一。
+   * 云存储无 DB 约束，靠这里应用层拦截——调用方（register/wx login）也已先查重，
+   * 但并发时两个请求可能同时通过查重，这里在写队列内二次拦截。 */
+  const lo = String(username).toLowerCase();
+  if (u.users.some(x => String(x.username).toLowerCase() === lo)) return 0; /* 0 = 冲突 */
   u.seq += 1;
   const id = u.seq;
   u.users.push({ id, username, pw_hash, email: null, email_verified: 0, wechat: null, wx_openid: null, display_name: null, unlock_until: null, is_dev: 0, created_at: new Date().toISOString() });

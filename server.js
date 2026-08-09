@@ -475,6 +475,7 @@ async function start() {
     if (exists) { if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' }); return res.status(409).json({ error: '用户名已被占用' }); }
     const pw_hash = bcrypt.hashSync(password, 10);
     const uid = await db.createUser(username, pw_hash);
+    if (!uid) return res.status(409).json({ error: '用户名已被占用' }); /* 云存储并发兜底 */
     /* 注册名若为邮箱格式（老用户习惯把邮箱当用户名），自动写入 email 字段（未验证），
      * 这样不绑定也能用该邮箱走「找回密码」流程 */
     if (EMAIL_RE.test(username)) await db.userBindEmail(uid, username.toLowerCase());
@@ -508,7 +509,7 @@ async function start() {
     const ip = req.ip;
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
-    const u = await db.userByName(username);
+    const u = await db.userByName(username) || await db.userByNameCI(username); /* 大小写不敏感（邮箱大小写常见） */
     if (u && bcrypt.compareSync(password, u.pw_hash)) {
       req.session.userId = u.id;
       req.session.username = u.username;
@@ -662,6 +663,7 @@ async function start() {
     while (await db.userByName(uname)) uname = 'wx_' + openid.slice(0, 10) + '_' + (seq++);
     const randPw = crypto.randomBytes(16).toString('hex');
     const uid = await db.createUser(uname, bcrypt.hashSync(randPw, 10));
+    if (!uid) return res.status(409).json({ error: '注册冲突，请重试' }); /* 云存储并发兜底 */
     await db.userBindOpenid(uid, openid);
     await db.profileSet(uid, JSON.stringify(defaultBag()));
     console.log('✅ 微信自动注册新账号：', uname);
@@ -675,7 +677,7 @@ async function start() {
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
     if (!openid) return res.status(400).json({ error: '缺少 openid' });
-    const u = await db.userByName(username);
+    const u = await db.userByName(username) || await db.userByNameCI(username); /* 大小写不敏感 */
     if (!u || !bcrypt.compareSync(password, u.pw_hash)) {
       if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
       return res.status(401).json({ error: '账号或密码错误' });
@@ -729,6 +731,8 @@ async function start() {
       const tgt = await db.userById(u.id);
       if (tgt && !tgt.display_name) await db.userSetDisplayName(u.id, holder.display_name);
     }
+    /* 🔴 清理孤儿：holder（wx_ 账号）openid 已转移，清空身份+随机密码+删 profile（防微信号占用/双份数据/可登录） */
+    if (holder && holder.id !== u.id) await db.orphanWxAccount(holder.id);
     res.json({ ok: true, token: issueWxToken(u.id), username: u.username, display_name: (await db.userById(u.id)).display_name || '', need_name: !(await db.userById(u.id)).display_name, bound: true });
   }));
 
@@ -1289,7 +1293,7 @@ async function start() {
   const SAVE_PER_MIN = Number(process.env.SAVE_PER_MIN) || 30;
   const MAX_RULES_PER_USER = Number(process.env.MAX_RULES_PER_USER) || 500;
   const MAX_TAGS = 30, MAX_CATS = 30, MAX_LEVELS = 12, MAX_PHASES = 60;
-  const MAX_RULE_TEXT = 200, MAX_CAT_NAME = 30, MAX_TAG_NAME = 20, MAX_PHASE_NAME = 60, MAX_RESOURCE_BODY = 20000, MAX_RETRO_TEXT = 8000;
+  const MAX_RULE_TEXT = 200, MAX_CAT_NAME = 30, MAX_TAG_NAME = 20, MAX_PHASE_NAME = 120 /* 阶段复合目标，60 会截断 V4 规划 */, MAX_RESOURCE_BODY = 20000, MAX_RETRO_TEXT = 8000;
   function saveRateOk(uid) {
     const now = Date.now(), win = 60 * 1000;
     let b = _saveBuckets.get(uid);
