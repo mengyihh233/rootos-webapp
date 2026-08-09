@@ -1109,8 +1109,9 @@ async function start() {
     const u = await db.userById(req.session.userId);
     if (!u) return res.status(401).json({ error: '未登录' });
     if (!/^wx_/.test(String(u.username || ''))) return res.status(400).json({ error: '该功能仅限微信自动注册账号设置初始密码' });
-    /* 🔴 安全：已设过密码 → 拒绝 set-first 覆盖（需走 change 校验旧密码） */
-    if (u.pw_set) return res.status(400).json({ error: '已设置过密码，请用「修改密码」' });
+    /* 🔴 安全：已设过密码 → 需带 reset:true（前端二次确认）才允许重设——
+     * 微信登录态本身即身份验证（能登录=本人），忘密码也可重设；不带标记则拒绝防误触 */
+    if (u.pw_set && !req.body.reset) return res.status(400).json({ error: '已设置过密码，如需重设请确认' });
     const nextPw = String(req.body.next || '');
     if (nextPw.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
     if (nextPw.length > 64) return res.status(400).json({ error: '密码过长' });

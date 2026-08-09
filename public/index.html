@@ -3181,6 +3181,7 @@ async function renderSettings(){
   let j={};
   try{ j=await (await fetch('/api/me')).json(); }catch(e){}
   const email=j.email||'', verified=!!j.email_verified, wechat=j.wechat||'';
+  window._meIsWx=!!j.is_wx; window._mePwSet=!!j.pw_set; /* 密码卡按账号类型渲染 */
   box.innerHTML='<div style="display:flex;flex-direction:column;gap:16px;">'
     +'<div><b style="font-size:.9rem;">显示名 <small style="color:var(--dim);font-weight:normal;">（登录后展示的名字，全站唯一）</small></b>'
     +'<div style="margin-top:4px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">'
@@ -3218,10 +3219,11 @@ async function renderSettings(){
     +'<input type="password" id="attachWxPass" placeholder="小程序端密码" style="flex:1;min-width:140px;" onkeydown="if(event.key===\'Enter\')attachWx()">'
     +'<button class="ok mini" onclick="attachWx()">接入合并</button></div>'
     +'<small id="attachWxMsg" style="color:var(--dim);"></small></div>'
-    +'<div><b style="font-size:.9rem;">修改密码</b>'
-    +'<div class="row" style="margin-top:6px;"><input type="password" id="setOldPw" placeholder="当前密码" style="flex:1;min-width:100px;">'
+    +'<div><b style="font-size:.9rem;">'+(j.is_wx?'设置/重置密码':'修改密码')+' <small style="color:var(--dim);font-weight:normal;">'+(j.is_wx?'（微信登录已验证身份，无需旧密码）':'')+'</small></b>'
+    +'<div class="row" style="margin-top:6px;">'
+    +(!j.is_wx?'<input type="password" id="setOldPw" placeholder="当前密码" style="flex:1;min-width:100px;">':'')
     +'<input type="password" id="setNewPw" placeholder="新密码（≥6 位）" style="flex:1;min-width:100px;">'
-    +'<button class="ok mini" onclick="changePassword()">修改</button></div></div>'
+    +'<button class="ok mini" onclick="changePassword()">'+(j.is_wx?'设置':'修改')+'</button></div></div>'
     +'<div><small style="color:var(--dim);">忘记密码？登录页点「忘记密码」用绑定邮箱找回；邮箱需先在本页验证绑定。</small></div>'
     +'<div><button class="ghost" onclick="doLogout()">退出登录</button> '
     +'<button class="ghost" onclick="openSupport()" style="margin-left:8px;">☕ 支持作者</button></div>'
@@ -3293,9 +3295,23 @@ async function unbindWechat(){
   if(j.ok){ toast('已解绑'); renderSettings(); } else toast(j.error||'解绑失败');
 }
 async function changePassword(){
-  const old=document.getElementById('setOldPw').value, next=document.getElementById('setNewPw').value;
+  const isWx=!!(window._meIsWx);
+  const oldEl=document.getElementById('setOldPw');
+  const old=oldEl?oldEl.value:'';
+  const next=document.getElementById('setNewPw').value;
+  if(!next||next.length<6){ toast('新密码至少 6 位'); return; }
+  if(isWx){
+    /* wx_ 账号：微信登录态=身份验证，直接设置/重置（已设过→确认） */
+    const doSet=async()=>{ const j=await apiPost('/api/password/set-first',{next,reset:window._mePwSet?true:undefined});
+      if(j.ok){ toast(j.msg||'密码已设置'); document.getElementById('setNewPw').value=''; } else toast(j.error||'设置失败'); };
+    if(window._mePwSet){
+      if(!confirm('将直接重置密码（微信登录已验证身份），确定？')) return;
+    }
+    doSet();
+    return;
+  }
   const j=await apiPost('/api/password/change',{old,next});
-  if(j.ok){ toast(j.msg||'密码已更新'); document.getElementById('setOldPw').value=''; document.getElementById('setNewPw').value=''; }
+  if(j.ok){ toast(j.msg||'密码已更新'); if(oldEl)oldEl.value=''; document.getElementById('setNewPw').value=''; }
   else toast(j.error||'修改失败');
 }
 function setNightBarPref(on){
