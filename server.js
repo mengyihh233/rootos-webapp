@@ -401,6 +401,25 @@ async function start() {
     next();
   });
 
+  /* 🔴 缓存策略（防 CDN 无脑回源 → 砍 COS 读）：
+   * - 静态资源 24h 强缓存（文件名版本化时改 URL）
+   * - HTML no-cache（每次验证 E-Tag）
+   * - API 数据 private（按用户 session 隔离，不跨用户共享）
+   * - 模板数据 public 5min（全用户相同内容） */
+  app.use((req, res, next) => {
+    const p = req.path;
+    if (/\.(js|css|png|jpg|svg|woff2?|json|ico)$/.test(p)) {
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+    } else if (p === '/' || /\.html$/.test(p)) {
+      res.setHeader('Cache-Control', 'no-cache');
+    } else if (p === '/api/templates' || p.startsWith('/api/templates/')) {
+      if (req.method === 'GET') res.setHeader('Cache-Control', 'public, max-age=300');
+    } else if (p === '/api/data' && req.method === 'GET') {
+      res.setHeader('Cache-Control', 'private, no-cache'); /* CDN 不缓存、浏览器缓存但必须验证 */
+    }
+    next();
+  });
+
   /* Gzip 压缩（性能）：整包 JSON（/api/data 等）文本压缩率高，显著降流量与传输时间 */
   app.use(require('compression')());
 
