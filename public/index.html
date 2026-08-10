@@ -266,9 +266,11 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 </style>
 </head>
 <body>
-<!-- 🔴 同步加载提示条——顶部固定，登录后服务端数据未载完时显示 -->
+<!-- 🔴 同步加载提示条 + 失败重试 -->
 <div id="syncBar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9998;background:#4fc1ff;color:#06121c;text-align:center;padding:8px 16px;font-size:13px;font-weight:500;">
-  ⏳ 正在同步云端数据… <button id="syncBarClose" style="background:none;border:1px solid #06121c;color:#06121c;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:12px;margin-left:8px;" onclick="hideSyncBar()">关闭提示</button>
+  <span id="syncBarText">⏳ 正在同步云端数据…</span>
+  <button id="syncBarClose" style="background:none;border:1px solid #06121c;color:#06121c;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:12px;margin-left:8px;" onclick="hideSyncBar()">关闭提示</button>
+  <button id="syncBarRetry" style="display:none;background:#06121c;color:#b8e6ff;border:none;border-radius:4px;padding:2px 12px;cursor:pointer;font-size:12px;margin-left:8px;" onclick="retrySync()">🔄 重试</button>
 </div>
 <!-- ================= 登录 / 注册 / 找回密码 ================= -->
 <div id="auth" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);">
@@ -3151,8 +3153,10 @@ async function silentSync(){
   }catch(e){ /* 静默失败不打扰 */ }
 }
 function showApp(){ const a=document.getElementById('auth'); if(a) a.style.display='none'; }
-function showSyncBar(){ const b=document.getElementById('syncBar'); if(b) b.style.display='block'; }
+function showSyncBar(){ const b=document.getElementById('syncBar'); if(b) b.style.display='block'; const t=document.getElementById('syncBarText'); if(t) t.textContent='⏳ 正在同步云端数据…'; const r=document.getElementById('syncBarRetry'); if(r) r.style.display='none'; const c=document.getElementById('syncBarClose'); if(c) c.style.display='inline'; }
 function hideSyncBar(){ const b=document.getElementById('syncBar'); if(b) b.style.display='none'; }
+function showSyncError(msg){ const b=document.getElementById('syncBar'); if(b) b.style.display='block'; b.style.background='#c44545'; const t=document.getElementById('syncBarText'); if(t) t.textContent='⚠️ 同步失败'+(msg?': '+msg:''); const r=document.getElementById('syncBarRetry'); if(r) r.style.display='inline'; const c=document.getElementById('syncBarClose'); if(c) c.style.display='none'; }
+async function retrySync(){ showSyncBar(); try{ await loadFromServer(); hideSyncBar(); if(cats&&cats.length)bootApp(); }catch(e){ showSyncError((e&&e.message)||'请检查网络'); } }
 function showAuth(msg){ const a=document.getElementById('auth'); if(a){ a.style.display='flex'; if(msg) document.getElementById('authMsg').textContent=msg; } }
 /* 落地页 → 登录框切换 */
 function showAuthLogin(){
@@ -3554,15 +3558,10 @@ async function afterLogin(){
   try{ await loadFromServer(); }
   catch(e){
     console.warn('加载数据失败，重试一次', e);
-    try{ await loadFromServer(); }
+    try{ await loadFromServer(); hideSyncBar(); if(cats&&cats.length)bootApp(); }
     catch(e2){
-      console.warn('加载数据二次失败，重置本地', e2);
-      wipeLocalMirror();
-      cats = SEED_CATS.map(c=>({...c})); levels = SEED_LEVELS.map(l=>({...l}));
-      rules = SEED_RULES.map(r=>({...r})); tags = SEED_TAGS.map(t=>({...t}));
-      daily = {}; events = []; syncEventIds();
-      phases = SEED_PHASES.map(p=>({...p}));
-      reviews = {day:{},week:{},month:{}}; retros = []; resources = []; meta = {};
+      console.warn('加载数据二次失败', e2);
+      showSyncError((e2&&e2.message)||'请检查网络');
     }
   }
   suppressSave=false; /* 服务端数据已载好 → 开启推送权限 */
