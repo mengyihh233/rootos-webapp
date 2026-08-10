@@ -566,6 +566,20 @@ async function start() {
     if (u.orphaned) return res.status(401).json({ error: '该账号已合并到其他账号，请使用新账号登录' });
     authOk(ip);
     const token = issueWxToken(u.id);
+    /* 🔴 若提供了微信 code → 同时绑定 openid（用户用账号密码登录后，微信一键登录也能找到此账号） */
+    const code = String(req.body.code || '').trim();
+    if (code && WX_APPID && WX_SECRET) {
+      try {
+        const wxUrl = `https://api.weixin.qq.com/sns/jscode2session?appid=${encodeURIComponent(WX_APPID)}&secret=${encodeURIComponent(WX_SECRET)}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`;
+        const wxR = await fetch(wxUrl); const wxJ = await wxR.json();
+        if (wxJ.openid && !wxJ.errcode) {
+          const holder = await db.userFindByOpenid(wxJ.openid);
+          if (!holder || holder.id === u.id) {
+            await db.userBindOpenid(u.id, wxJ.openid).catch(() => {});
+          }
+        }
+      } catch (e) {}
+    }
     res.json({ token, uid: u.id, username: u.username, display_name: u.display_name || '', need_name: !u.display_name });
   }));
 
@@ -592,6 +606,15 @@ async function start() {
     if (!dn || dn.length < 2) await db.setDisplayNameWithRetry(uid, username).catch(() => {});
     authOk(ip);
     const token = issueWxToken(uid);
+    /* 🔴 若提供了微信 code → 同时绑定 openid（注册即绑定，后续微信一键登录直进） */
+    const code = String(req.body.code || '').trim();
+    if (code && WX_APPID && WX_SECRET) {
+      try {
+        const wxUrl = `https://api.weixin.qq.com/sns/jscode2session?appid=${encodeURIComponent(WX_APPID)}&secret=${encodeURIComponent(WX_SECRET)}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`;
+        const wxR = await fetch(wxUrl); const wxJ = await wxR.json();
+        if (wxJ.openid && !wxJ.errcode) await db.userBindOpenid(uid, wxJ.openid).catch(() => {});
+      } catch (e) {}
+    }
     res.json({ token, uid, username, display_name: dn || '', need_name: true });
   }));
 
