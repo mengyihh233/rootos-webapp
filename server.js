@@ -14,6 +14,7 @@ const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
 const { BAG_FIELDS, migrateBag, emptyBag } = require('./shared/bagSchema');
+const compression = require('compression'); /* gzip：JSON 响应 70% 缩（profile 50-100KB→15-30KB）省外网出流+内存峰值 */
 
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'rootos-dev-secret-change-me';
@@ -389,6 +390,8 @@ async function start() {
    * 故在事件绑定重构为 addEventListener 之前，CSP 只保留 'unsafe-inline'、不使用 nonce。
    * 收紧 object-src='none'（禁用插件/嵌套浏览上下文）、base-uri/form-action 已限 'self'。
    * 注意：frame-ancestors 故意不限制，以免破坏 WorkBuddy 预览的跨域 iframe（沿用既有决策）。 */
+  /* gzip 压缩中间件——必须最早加（其它中间件前）让 response 整体被压缩 */
+  app.use(compression({ threshold: 1024, level: 6 }));
   app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy',
       "default-src 'self'; " +
