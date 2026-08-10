@@ -730,13 +730,25 @@ async function start() {
     res.json({ ok: true, token: issueWxToken(uid), username: uname, display_name: '', need_name: true, bound: true, auto_registered: true });
   }));
 
-  /* ⑥b 小程序绑定 web 账号：openid + 网页账号密码 → 关联并签发 token（IP 限流防爆破） */
+  /* ⑥b 小程序绑定 web 账号：code 或 openid + 网页账号密码 → 关联并签发 token（IP 限流防爆破） */
   app.post('/api/wechat/bind-openid', wrap(async (req, res) => {
     const ip = req.ip;
-    const openid = String(req.body.openid || '').trim();
+    /* 🔴 支持两种入参：①code（前端未登录态首选——服务端做 code2session）②openid（已登录态绑定复用） */
+    let openid = String(req.body.openid || '').trim();
+    const code = String(req.body.code || '').trim();
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
-    if (!openid) return res.status(400).json({ error: '缺少 openid' });
+    if (code && WX_APPID && WX_SECRET && !openid) {
+      try {
+        const wxUrl = `https://api.weixin.qq.com/sns/jscode2session?appid=${encodeURIComponent(WX_APPID)}&secret=${encodeURIComponent(WX_SECRET)}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`;
+        const wxR = await fetch(wxUrl); const wxJ = await wxR.json();
+        if (wxJ.errcode) return res.status(400).json({ error: '微信登录失败：' + (wxJ.errmsg || ('errcode ' + wxJ.errcode)) });
+        openid = wxJ.openid || '';
+      } catch (e) {
+        return res.status(502).json({ error: '微信服务暂不可用，请稍后再试' });
+      }
+    }
+    if (!openid) return res.status(400).json({ error: '缺少 openid 或微信 code' });
     const u = await db.userByName(username) || await db.userByNameCI(username); /* 大小写不敏感 */
     if (!u || !u.pw_hash || !bcrypt.compareSync(password, u.pw_hash)) {
       if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
