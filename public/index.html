@@ -533,27 +533,20 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 <!-- ================= 回溯（v8 重做） ================= -->
 <div id="review" class="section">
 
-  <!-- 【v8 新增】定式迭代台：崩溃/恢复/修改 直接联动规则树 -->
-  <div class="card">
-    <h2>🔧 定式迭代台 <small>（崩塌即调试：选一条定式，执行动作）</small></h2>
-    <select id="iterRuleSel"></select>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-      <button class="mini danger" onclick="iterCrash()">💥 崩溃了 → 记录并去修改</button>
-      <button class="mini ok" onclick="iterRecover()">✅ 恢复执行</button>
-      <button class="mini" onclick="iterEdit()">🔧 修改/增删分支（跳规则树）</button>
-    </div>
-    <input type="text" id="iterNote" placeholder="调试备注（可空）：触发链是什么？怎么改？" style="margin-top:8px;">
-    <p><small>崩溃不归零：记录事实 → 修改定式 → 次日重启。迭代台的动作都会进事件流。</small></p>
-  </div>
+  <!-- 🔴 迭代台已移除 → 崩溃/恢复操作直接在今日页完成；事件流并入日复盘（见下方 dayEvents） -->
 
+  <!-- 回溯 & 复盘（v9.2 重构：折叠编辑 + 历史记录 + 看板 + 导出） -->
   <div class="card">
     <h2>🔁 回溯 & 复盘</h2>
+
+    <!-- 简单看板 -->
+    <div id="retroDash" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;font-size:13px;color:var(--dim);"></div>
+
     <div class="subtab" id="rvTabs">
-      <button class="active" onclick="reviewTab('day',this)">日</button>
-      <button onclick="reviewTab('week',this)">周</button>
-      <button onclick="reviewTab('month',this)">月</button>
-      <button onclick="reviewTab('timeline',this)">事件流</button>
-      <button onclick="reviewTab('all',this)">全部复盘</button>
+      <button class="active" onclick="reviewTab('day',this)">日复盘</button>
+      <button onclick="reviewTab('week',this)">周复盘</button>
+      <button onclick="reviewTab('month',this)">月复盘</button>
+      <button onclick="reviewTab('history',this)">📚 历史记录</button>
     </div>
 
     <!-- 日视图 + 日复盘 -->
@@ -561,10 +554,25 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <input type="date" id="rvDate" onchange="renderDayView()">
       <div id="dayView" style="margin-top:12px;"></div>
       <div class="review-box">
-        <h3>📝 日复盘 <small id="rvDayKey"></small></h3>
-        <textarea id="rvDayReview" rows="6" placeholder="今天的事实与观察：哪条定式崩了？触发链是什么？（自动保存）"></textarea>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+          <h3 style="margin:0;">📝 日复盘 <small id="rvDayKey"></small></h3>
+          <button class="mini ghost" onclick="exportDayReview()" title="导出当日记录">📥 导出</button>
+        </div>
+        <textarea id="rvDayPreview" rows="2" placeholder="快速记录… 点「展开」进入详细编辑" oninput="saveReview('day',$('#rvDate').value||today,this.value)"></textarea>
+        <div id="dayReviewDetail" style="display:none;">
+          <textarea id="rvDayReview" rows="6" placeholder="详细复盘：事实与观察、哪条定式崩了？触发链是什么？（自动保存）" oninput="saveReview('day',$('#rvDate').value||today,this.value)"></textarea>
+          <!-- 当日事件（可折叠） -->
+          <div id="dayEvents" style="margin-top:10px;">
+            <div class="review-box" style="background:var(--bg);padding:8px 12px;border-radius:6px;">
+              <div onclick="toggleDayEvents()" style="cursor:pointer;display:flex;align-items:center;gap:6px;">
+                <span id="dayEvArrow">▶</span> <b>📋 当日事件</b><small style="color:var(--dim);" id="dayEvCount">(0)</small>
+              </div>
+              <div id="dayEventsList" style="display:none;margin-top:8px;max-height:300px;overflow-y:auto;font-size:.8rem;"></div>
+            </div>
+          </div>
+        </div>
+        <button class="mini ghost" id="rvExpandBtn" onclick="toggleDayReview()" style="margin-top:4px;">📝 展开详细编辑</button>
       </div>
-      <div id="pastDayReviews" style="margin-top:10px;"></div>
     </div>
 
     <!-- 周视图 + 周复盘 -->
@@ -576,9 +584,8 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <div id="weekView"></div>
       <div class="review-box">
         <h3>🔄 周复盘 <small id="rvWeekKey"></small></h3>
-        <textarea id="rvWeekReview" rows="4" placeholder="三问复盘：&#10;1. 本周完成了几个节点？&#10;2. 卡在哪？&#10;3. 下周只改 1 件事？（自动保存）"></textarea>
+        <textarea id="rvWeekReview" rows="4" placeholder="三问复盘：&#10;1. 本周完成了几个节点？&#10;2. 卡在哪？&#10;3. 下周只改 1 件事？（自动保存）" oninput="saveReview('week',weekKeyOf(today),this.value)"></textarea>
       </div>
-      <div id="pastWeekReviews" style="margin-top:10px;"></div>
     </div>
 
     <!-- 月视图 + 月复盘 -->
@@ -588,34 +595,17 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
       <p><small>颜色越亮 = 第 1 级（根部）完成度越高。点天进入日视图。</small></p>
       <div class="review-box">
         <h3>🏆 月复盘 <small id="rvMonthKey"></small></h3>
-        <textarea id="rvMonthReview" rows="4" placeholder="本月最大突破：&#10;本月最大陷阱：&#10;下月聚焦：（自动保存）"></textarea>
+        <textarea id="rvMonthReview" rows="4" placeholder="本月最大突破：&#10;本月最大陷阱：&#10;下月聚焦：（自动保存）" oninput="saveReview('month',$('#rvMonth').value||today.slice(0,7),this.value)"></textarea>
       </div>
-      <div id="pastMonthReviews" style="margin-top:10px;"></div>
     </div>
 
-    <!-- 事件流 -->
-    <div id="rv-timeline" style="display:none;">
-      <button class="mini ok" onclick="openEventModal()">＋ 记录事件（可关联定式+回溯建议）</button>
-      <div class="subtab" id="evFilters" style="margin-top:10px;">
-        <button class="active" onclick="renderTimeline('all',this)">全部</button>
-        <button onclick="renderTimeline('crash',this)">崩溃</button>
-        <button onclick="renderTimeline('recover',this)">恢复</button>
-        <button onclick="renderTimeline('relapse',this)">破戒</button>
-        <button onclick="renderTimeline('sleep',this)">低能量</button>
-        <button onclick="renderTimeline('debug',this)">调试</button>
-        <button onclick="renderTimeline('mile',this)">里程碑</button>
+    <!-- 历史记录（折叠列表） -->
+    <div id="rv-history" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <small style="color:var(--dim);">📚 过去有记录的天——点日期展开详情</small>
+        <button class="mini ghost" onclick="exportAllReviews()">📥 导出全部</button>
       </div>
-      <div id="timelineView"></div>
-    </div>
-
-    <!-- 全部复盘 -->
-    <div id="rv-all" style="display:none;">
-      <div class="review-box" style="margin-bottom:14px;">
-        <h3>📝 添加复盘记录 <small>（随手记，不绑定日/周/月）</small></h3>
-        <textarea id="retroText" rows="3" placeholder="今天/这周的整体感受、卡点、下一步…（自动保存）"></textarea>
-        <button class="ok" style="margin-top:8px;" onclick="addRetro()">保存这条复盘</button>
-      </div>
-      <div id="allReviews"></div>
+      <div id="historyList"></div>
     </div>
   </div>
 </div>
@@ -1172,7 +1162,7 @@ function show(id,btn){
   btn.classList.add('active');
   document.querySelectorAll('.section').forEach(d=>d.classList.remove('active'));
   document.getElementById(id).classList.add('active');
-  if(id==='review'){ renderIterSel(); renderDayView(); }
+  if(id==='review'){ renderDayView(); renderRetroDash(); }
   if(id==='phase') renderPhases();
   if(id==='rules') renderRulePage();
   if(id==='data') renderMyFailure();
@@ -1216,12 +1206,12 @@ async function renderMyFailure(){
 function reviewTab(id,btn){
   document.querySelectorAll('#rvTabs button').forEach(x=>x.classList.remove('active'));
   btn.classList.add('active');
-  ['day','week','month','timeline','all'].forEach(k=>$('#rv-'+k).style.display=k===id?'block':'none');
+  ['day','week','month','history'].forEach(k=>{ const el=$('#rv-'+k); if(el) el.style.display=k===id?'block':'none'; });
   if(id==='day') renderDayView();
   if(id==='week') renderWeek();
   if(id==='month'){ if(!$('#rvMonth').value) $('#rvMonth').value=today.slice(0,7); renderMonth(); }
-  if(id==='timeline') renderTimeline('all', document.querySelector('#evFilters button'));
-  if(id==='all') renderAllReviews();
+  if(id==='history') renderHistory();
+  renderRetroDash();
 }
 
 /* ================= 日标记 ================= */
@@ -1775,7 +1765,7 @@ function iterRecover(){
   if(r.on===false){ r.on=true; store.set('rules',rules); }
   pushEvent('recover', '恢复执行：'+r.t+(note?'｜'+note:''), r.id, '');
   $('#iterNote').value='';
-  renderTodayRules(); renderIterSel();
+  renderTodayRules();
   alert('✅ 已记录恢复：'+r.t+(r.on?'':'（并重新启用）')+'\n不追责，不归零，继续运行。');
 }
 function iterEdit(){
@@ -1817,10 +1807,18 @@ function renderDayView(){
   const evs=events.filter(e=>(e.day||e.ts.slice(0,10))===d);
   if(evs.length){ html+='<div class="grp-title">当日事件</div>'; evs.forEach(e=>html+=evHTML(e,true)); }
   $('#dayView').innerHTML=html;
-  /* 日复盘 */
+  /* 日复盘：双层编辑器同步 */
   $('#rvDayKey').textContent='（'+d+'）';
-  $('#rvDayReview').value = reviews.day[d]||'';
-  renderPastReviews('day');
+  const txt = reviews.day[d]||'';
+  $('#rvDayPreview').value = txt;
+  $('#rvDayReview').value = txt;
+  /* 当日事件折叠列表 */
+  const dayEvs=events.filter(e=>(e.day||e.ts.slice(0,10))===d);
+  $('#dayEvCount').textContent='('+dayEvs.length+')';
+  $('#dayEventsList').innerHTML = dayEvs.length
+    ? dayEvs.map(e=>evHTML(e,false)).join('')
+    : '<small style="color:var(--dim);">暂无事件</small>';
+  renderRetroDash();
 }
 
 /* ================= 回溯：周（+柱状图 +周复盘） ================= */
@@ -1941,6 +1939,86 @@ function delRetro(id){
   store.set('retros', retros); scheduleServerSave();
   renderAllReviews();
   toast('已删除');
+}
+
+/* ================= 回溯 v9.2：折叠编辑 + 历史记录 + 看板 + 导出 ================= */
+let _dayReviewExpanded = false;
+function toggleDayReview(){
+  _dayReviewExpanded = !_dayReviewExpanded;
+  $('#dayReviewDetail').style.display = _dayReviewExpanded ? 'block' : 'none';
+  $('#rvExpandBtn').textContent = _dayReviewExpanded ? '📝 收起详细编辑' : '📝 展开详细编辑';
+  /* 快速框内容同步到详细框 */
+  if(_dayReviewExpanded) $('#rvDayReview').value = $('#rvDayPreview').value || '';
+}
+let _dayEvOpen = false;
+function toggleDayEvents(){
+  _dayEvOpen = !_dayEvOpen;
+  $('#dayEventsList').style.display = _dayEvOpen ? 'block' : 'none';
+  $('#dayEvArrow').textContent = _dayEvOpen ? '▼' : '▶';
+}
+/* 看板：当日完成率 + 崩溃 + 连续天数 */
+function renderRetroDash(){
+  const rec = daily[today]||{};
+  const roots = activeRoots(rec);
+  const done = roots.filter(r=>rec.checks&&rec.checks[r.id]).length;
+  const brk = roots.filter(r=>rec.broken&&rec.broken[r.id]).length;
+  const streak = countStreak();
+  const totalRules = rules.filter(r=>r.on!==false).length;
+  const todayEvs = events.filter(e=>(e.day||e.ts.slice(0,10))===today).length;
+  const el = $('#retroDash');
+  if(!el) return;
+  el.innerHTML = [
+    '<span>✅ 今日完成 '+done+'/'+roots.length+'（'+Math.round(done/Math.max(roots.length,1)*100)+'%）</span>',
+    brk?'<span style="color:#f44747;">💥 崩溃 '+brk+'</span>':'',
+    '<span>🔥 连续 '+streak+' 天</span>',
+    '<span>📋 '+totalRules+' 规则 · '+todayEvs+' 事件</span>',
+  ].join(' &nbsp;|&nbsp; ');
+}
+/* 历史记录：列出所有有记录的天/周/月，可折叠 */
+function renderHistory(){
+  const all = [];
+  Object.keys(reviews.day||{}).forEach(k=>all.push({type:'日', date:k, text:reviews.day[k], evs:events.filter(e=>(e.day||e.ts.slice(0,10))===k)}));
+  Object.keys(reviews.week||{}).forEach(k=>all.push({type:'周', date:k, text:reviews.week[k], evs:[]}));
+  Object.keys(reviews.month||{}).forEach(k=>all.push({type:'月', date:k, text:reviews.month[k], evs:[]}));
+  all.sort((a,b)=> (Date.parse(b.date)||0) - (Date.parse(a.date)||0));
+  const tc = {日:'#4fc1ff',周:'#4ec9b0',月:'#c586c0'};
+  $('#historyList').innerHTML = all.slice(0,60).map((x,i)=>{
+    const c = tc[x.type]||'#888';
+    const evHTML = x.evs.length ? '<div style="font-size:.75rem;margin-top:4px;padding-left:8px;border-left:2px solid '+c+';">'+x.evs.map(e=>evHTML(e,false)).join('')+'</div>' : '';
+    return '<div class="past-review" style="border-left:3px solid '+c+';padding:4px 8px;margin:6px 0;cursor:pointer;" onclick="this.querySelector(\'.hb\').style.display=this.querySelector(\'.hb\').style.display==\'none\'?\'block\':\'none\'">'
+      +'<span class="k" style="color:'+c+';">'+x.type+'</span> <span class="mono">'+esc(x.date)+'</span>'
+      +(x.evs.length?' <span style="font-size:.7rem;color:var(--dim);">'+x.evs.length+' 事件</span>':'')
+      +'<div class="hb" style="display:none;margin-top:4px;white-space:pre-wrap;">'+esc(x.text||'(无文字记录)')+'</div>'
+      +evHTML+'</div>';
+  }).join('') || '<p><small>还没有任何复盘记录。</small>';
+}
+/* 导出 */
+function exportDayReview(){
+  const d = $('#rvDate').value||today;
+  const txt = reviews.day[d]||'暂无记录';
+  const evs = events.filter(e=>(e.day||e.ts.slice(0,10))===d).map(e=>'['+e.type+'] '+e.text).join('\n');
+  const out = 'ROOT-OS 日复盘 - '+d+'\n\n'+txt+'\n'+(evs?'\n--- 当日事件 ---\n'+evs:'');
+  downloadText('review-'+d+'.md', out);
+}
+function exportAllReviews(){
+  const all = [];
+  Object.keys(reviews.day||{}).sort().reverse().forEach(k=>{ all.push('## '+k+' (日)\n'+reviews.day[k]+'\n'); });
+  Object.keys(reviews.week||{}).sort().reverse().forEach(k=>{ all.push('## 周 '+k+'\n'+reviews.week[k]+'\n'); });
+  Object.keys(reviews.month||{}).sort().reverse().forEach(k=>{ all.push('## 月 '+k+'\n'+reviews.month[k]+'\n'); });
+  downloadText('rootos-all-reviews.md', '# ROOT-OS 全部复盘记录\n\n'+all.join('\n'));
+}
+function downloadText(filename, content) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  a.click(); URL.revokeObjectURL(url);
+}
+function countStreak(){
+  const key = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  const d = new Date(); if(!daily[key(d)]) d.setDate(d.getDate()-1);
+  let n=0;
+  for(let i=0;i<365;i++){ if(daily[key(new Date(d.getTime()-i*86400000))]) n++; else break; }
+  return n;
 }
 
 /* ================= 规划·资源 ================= */
@@ -3141,7 +3219,7 @@ async function silentSync(){
     /* 轻量重渲染当前视图 */
     const cur=document.querySelector('.section.active');
     const id=cur?cur.id:'today';
-    if(id==='review'){ renderIterSel(); renderDayView(); }
+    if(id==='review'){ renderDayView(); renderRetroDash(); }
     else if(id==='phase') renderPhases();
     else if(id==='rules') renderRulePage();
     else if(id==='data') renderMyFailure();
