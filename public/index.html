@@ -2700,7 +2700,13 @@ async function applyTemplate(file,title,mode,choices){
     else if(mode==='merge') mergeBag(d,choices);
     else overwriteBagFromTemplate(d);   /* append=仅追加阶段资源 / merge=合并(可逐项选) / 其余=覆盖（不碰打卡/事件） */
     meta.onboarded=true; store.set('meta',meta);   /* 套用模板者非新手，跳过引导 */
-    if(SESSION){ try{ await pushToServer(); }catch(e){ console.warn('套用后落盘失败',e); } }
+    if(SESSION){
+      const pushed = await pushToServer().catch(e => { console.warn('套用后落盘失败',e); return false; });
+      if(pushed === false) {
+        alert('⚠️ 模板已应用到本地，但同步到云端失败。请检查网络后手动刷新，数据不会丢失。');
+        return; /* 🔴 推送失败不 reload——否则 localStorage 被服务端旧数据覆盖 */
+      }
+    }
     const label = mode==='append' ? '仅追加(阶段/资源)' : (mode==='merge' ? '合并' : '覆盖');
     alert('🧩 模板已'+label+'套用，正在刷新…'); location.reload();
   }catch(e){ alert('套用失败：'+(e&&e.message||e)); }
