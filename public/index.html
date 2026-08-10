@@ -266,6 +266,10 @@ details.chain-detail .path { font-size:.82rem; font-family:var(--mono); backgrou
 </style>
 </head>
 <body>
+<!-- 🔴 同步加载提示条——顶部固定，登录后服务端数据未载完时显示 -->
+<div id="syncBar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9998;background:#4fc1ff;color:#06121c;text-align:center;padding:8px 16px;font-size:13px;font-weight:500;">
+  ⏳ 正在同步云端数据… <button id="syncBarClose" style="background:none;border:1px solid #06121c;color:#06121c;border-radius:4px;padding:2px 10px;cursor:pointer;font-size:12px;margin-left:8px;" onclick="hideSyncBar()">关闭提示</button>
+</div>
 <!-- ================= 登录 / 注册 / 找回密码 ================= -->
 <div id="auth" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:var(--bg);">
   <!-- 落地页（未登录默认显示：价值主张 + 思想来源 + 特点 + 模板预览，提升转化） -->
@@ -3147,6 +3151,8 @@ async function silentSync(){
   }catch(e){ /* 静默失败不打扰 */ }
 }
 function showApp(){ const a=document.getElementById('auth'); if(a) a.style.display='none'; }
+function showSyncBar(){ const b=document.getElementById('syncBar'); if(b) b.style.display='block'; }
+function hideSyncBar(){ const b=document.getElementById('syncBar'); if(b) b.style.display='none'; }
 function showAuth(msg){ const a=document.getElementById('auth'); if(a){ a.style.display='flex'; if(msg) document.getElementById('authMsg').textContent=msg; } }
 /* 落地页 → 登录框切换 */
 function showAuthLogin(){
@@ -3525,10 +3531,7 @@ async function doLogout(){
 }
 async function afterLogin(){
   SESSION=true;
-  /* 🔴 关键：登录/注册成功必须「以服务端数据为准」。
-   * 清掉本地残留的时间戳与暂存——否则 loadFromServer 会误判"本地较新"
-   * 把上一个账号/演示数据推上去覆盖当前账号（曾导致账号数据被清空的严重 bug）。 */
-  suppressSave=true;
+  suppressSave=true; /* 未 loadFromServer 前禁止推送——防本地缓存旧数据覆盖服务器 */
   try{
     pendingPushData=null;
     localStorage.removeItem('pos_pendingPush');
@@ -3536,13 +3539,23 @@ async function afterLogin(){
     localStorage.removeItem('pos_serverTs');
   }catch(e){}
   localSavedAt=0;
+  /* 🔴 先渲染本地缓存——用户秒看到界面，不白等 */
+  showApp();
+  showSyncBar();
+  if (!cats || !cats.length) {
+    cats = SEED_CATS.map(c=>({...c})); levels = SEED_LEVELS.map(l=>({...l}));
+    rules = SEED_RULES.map(r=>({...r})); tags = SEED_TAGS.map(t=>({...t}));
+    daily = {}; events = []; syncEventIds();
+    phases = SEED_PHASES.map(p=>({...p}));
+    reviews = {day:{},week:{},month:{}}; retros = []; resources = []; meta = {};
+  }
+  bootApp(); /* 渲染 + 初始化事件（但 suppressSave 闭锁，不会推旧数据） */
+  /* 后台加载服务端最新数据 */
   try{ await loadFromServer(); }
   catch(e){
     console.warn('加载数据失败，重试一次', e);
     try{ await loadFromServer(); }
     catch(e2){
-      /* 🔴 修复：加载失败也必须清掉旧账号残留并重置为默认数据——否则残留的上一个账号
-       * 数据会串到新账号（编辑时 baseTs=0 → 409 合并把旧 daily 并入新账号） */
       console.warn('加载数据二次失败，重置本地', e2);
       wipeLocalMirror();
       cats = SEED_CATS.map(c=>({...c})); levels = SEED_LEVELS.map(l=>({...l}));
@@ -3552,8 +3565,9 @@ async function afterLogin(){
       reviews = {day:{},week:{},month:{}}; retros = []; resources = []; meta = {};
     }
   }
-  suppressSave=false;
-  showApp(); bootApp();
+  suppressSave=false; /* 服务端数据已载好 → 开启推送权限 */
+  hideSyncBar();
+  if (cats && cats.length) bootApp();
   /* 取名检查：登录/注册后必须设置显示名（唯一、防注入），未设置 → 弹强制取名层（不可关闭） */
   try{
     const m = await (await fetch('/api/me')).json();
@@ -3581,7 +3595,9 @@ async function afterLogin(){
 }
 
 /* ================= 启动 ================= */
+let appReady = false; /* bootApp 只初始化一次（防止 setInterval/addEventListener 双注册） */
 function bootApp(){
+  /* 渲染数据（多次调用安全：只更新 DOM 内容，不重复注册事件/定时器） */
   $('#datePill').textContent=today;
   $('#todayTask').value=dayRec().task||'';
   $('#dayNote').value=dayRec().note||'';
@@ -3589,26 +3605,26 @@ function bootApp(){
   renderTodayTags(); renderTodayRules(); updateProgress(); updatePhasePill();
   renderQuickEvents();
   renderStreak(); checkWeeklyGuide();
-  checkNight(); setInterval(checkNight,60000);
-  setInterval(silentSync,120000);  /* 【降消耗】120s 静默同步：先探测轻量 meta，服务端有更新才全量拉；无更新不产生全量请求 */
-  $('#todayTask').addEventListener('input',()=>{ dayRec().task=$('#todayTask').value; saveDaily(); });
-  $('#dayNote').addEventListener('input',()=>{ dayRec().note=$('#dayNote').value; saveDaily(); });
-  $('#sleepHr').addEventListener('input',()=>{ const v=$('#sleepHr').value; dayRec().sleep = v===''?null:+v; saveDaily(); });
-  /* 复盘自动保存（失焦即存） */
-  $('#rvDayReview').addEventListener('input',()=>saveReview('day', $('#rvDate').value||today, $('#rvDayReview').value));
-  $('#rvWeekReview').addEventListener('input',()=>saveReview('week', weekKeyOf(today), $('#rvWeekReview').value));
-  $('#rvMonthReview').addEventListener('input',()=>saveReview('month', $('#rvMonth').value||today.slice(0,7), $('#rvMonthReview').value));
-  /* 显示当前用户 + 退出（显示名优先，未取名回退账号名） */
+  /* 显示当前用户 + 退出 */
   fetch('/api/me').then(r=>r.json()).then(j=>{
     if(!j.username) return;
     const ub=document.getElementById('userBox');
-    const shown = j.display_name || j.username;
-    if(ub) ub.innerHTML = esc(shown)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
+    if(ub) ub.innerHTML = esc(j.display_name||j.username)+' <button class="mini ghost" onclick="doLogout()">退出</button>';
   }).catch(()=>{});
-  /* 新手引导：仅首次（meta.onboarded 未置位）自动弹出 */
-  if(!meta || !meta.onboarded){ setTimeout(startOnboarding, 350); }
   /* 登录态刷新通知红点 */
   if(SESSION) updateNotifDot();
+  /* 🔴 仅首次初始化：事件监听 + 定时间隔 + 新手引导 */
+  if (appReady) return;
+  appReady = true;
+  checkNight(); setInterval(checkNight,60000);
+  setInterval(silentSync,120000);
+  $('#todayTask').addEventListener('input',()=>{ dayRec().task=$('#todayTask').value; saveDaily(); });
+  $('#dayNote').addEventListener('input',()=>{ dayRec().note=$('#dayNote').value; saveDaily(); });
+  $('#sleepHr').addEventListener('input',()=>{ const v=$('#sleepHr').value; dayRec().sleep = v===''?null:+v; saveDaily(); });
+  $('#rvDayReview').addEventListener('input',()=>saveReview('day', $('#rvDate').value||today, $('#rvDayReview').value));
+  $('#rvWeekReview').addEventListener('input',()=>saveReview('week', weekKeyOf(today), $('#rvWeekReview').value));
+  $('#rvMonthReview').addEventListener('input',()=>saveReview('month', $('#rvMonth').value||today.slice(0,7), $('#rvMonthReview').value));
+  if(!meta || !meta.onboarded){ setTimeout(startOnboarding, 350); }
 }
 window.onload=()=>{
   loadLocal();   /* 【新增】先把本地镜像载入内存，作为多端同步基线 */
