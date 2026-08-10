@@ -2724,7 +2724,7 @@ function overwriteBagFromTemplate(d){
           cursor = p.dayOff !== undefined && p.dayOff !== null ? p.dayOff + 1 : cursor + 1;
           return { ...p, start, end };
         });
-        window[k] = arr; continue;
+        window[k] = arr; return;
       }
       window[k] = d[k];
     }
