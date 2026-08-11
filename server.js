@@ -1435,8 +1435,15 @@ async function start() {
     data = migrateBag(data); /* 🔴 透明版本迁移：旧数据自动升级到最新 schema（v1+） */
     data = repairBag(data); /* 🔴 数据自愈：修复跨门类支链/悬空 parent/循环引用/seq（防规则消失/渲染崩溃） */
     if (!data || Object.keys(data).length === 0) {
+      /* 🔴🔴 致命修复（2026-08-11）：读到空数据【绝不写回默认模板】！
+       * 旧逻辑 `await db.profileSet(uid, defaultBag())` 会把用户数据覆盖成初始账号——
+       * 云存储短暂读失败 → 返回空 → 自动写 defaultBag → 用户数据永久丢失（"变成初始账号"的根因）。
+       * 现在：空数据只返回默认用于展示，绝不落盘。真实数据仍可被后续 PUT /api/data 恢复。 */
       data = defaultBag();
-      await db.profileSet(req.session.userId, JSON.stringify(data));
+      if (raw === null) {
+        /* 云存储读失败（非"文件不存在"）→ 标记以便前端提示，仍不写盘 */
+        data._readWarn = '数据读取异常，请稍后重试或检查云存储';
+      }
     }
     /* 多端同步：以服务器时钟为准，返回数据最后更新时间（供前端判断本地是否较新），
      * 避免依赖客户端时钟（设备时钟不一致会导致数据被静默覆盖）。
