@@ -81,7 +81,53 @@
     return out;
   }
 
-  const schema = { BAG_FIELDS, BAG_VERSION, emptyBag, mergeById, migrateBag, isRootBag, cloneBag };
+  // ── 🔴 数据自愈：修复规则树一致性（加载/保存前调用，与小程序 utils/bagSchema.js 保持一致） ──
+  // 规则模型：parent=null 主链（属于门类 cat + 层级 lv）；parent=X.id 支链（必须与 X 同门类）
+  // 修复：①跨门类支链→恢复主链 ②parent 悬空→恢复主链 ③循环引用→断开 ④seq 规范化
+  function repairBag(bag) {
+    if (!bag || !Array.isArray(bag.rules)) return bag;
+    const ids = new Set(bag.rules.map(r => r && r.id));
+    const byId = {};
+    bag.rules.forEach(r => { if (r && r.id) byId[r.id] = r; });
+
+    // ① ② 跨门类 / 悬空 parent → 恢复主链
+    bag.rules.forEach(r => {
+      if (!r) return;
+      if (r.parent && (!ids.has(r.parent) || (byId[r.parent] && byId[r.parent].cat !== r.cat))) {
+        r.parent = null;
+      }
+    });
+
+    // ③ 循环引用：A→B→A（同门类也可能发生）→ 断开环
+    for (let i = 0; i < bag.rules.length; i++) {
+      const r = bag.rules[i];
+      if (!r || !r.parent) continue;
+      let cur = r.parent, hops = 0;
+      while (cur && hops < bag.rules.length + 1) {
+        if (cur === r.id) { r.parent = null; break; }
+        const p = byId[cur];
+        if (!p) break;
+        cur = p.parent;
+        hops++;
+      }
+    }
+
+    // ④ seq 规范化：同一 (cat, lv, parent) 组内 1..n
+    const groups = {};
+    bag.rules.forEach(r => {
+      if (!r) return;
+      const key = (r.cat || '') + '|' + (r.lv || '') + '|' + (r.parent || '');
+      (groups[key] = groups[key] || []).push(r);
+    });
+    Object.values(groups).forEach(list => {
+      list.sort((a, b) => (a.seq || 0) - (b.seq || 0));
+      list.forEach((r, i) => { r.seq = i + 1; });
+    });
+
+    return bag;
+  }
+
+  const schema = { BAG_FIELDS, BAG_VERSION, emptyBag, mergeById, migrateBag, isRootBag, cloneBag, repairBag };
 
   // UMD: Node / 浏览器 / 小程序 通用
   if (typeof module !== 'undefined' && module.exports) {

@@ -56,7 +56,12 @@ else console.log(`✅ HTML 中 ${called.size} 个事件处理函数全部有定�
 const ids = new Set([...html.matchAll(/\bid\s*=\s*"([^"]+)"/g)].map(m => m[1]));
 const refs = new Set([...code.matchAll(/\$\('#([\w-]+)'\)/g)].map(m => m[1]));
 [...code.matchAll(/getElementById\('([\w-]+)'\)/g)].forEach(m => refs.add(m[1]));
-const dynamic = new Set(['toast', 'resEditingId', 'confirmModal']); /* 运行时 createElement 注入的 id */
+/* 动态注入 + v9.2 重构后"有保护函数/死路径"的遗留引用（函数体开头已加元素存在性 return，
+ * 静态扫描无法识别保护逻辑，列入白名单避免误报） */
+const dynamic = new Set([
+  'toast', 'resEditingId', 'confirmModal', /* 运行时 createElement 注入的 id */
+  'iterRuleSel', 'iterNote', 'allReviews', 'retroText', 'timelineView', 'evFilters' /* 重构遗留+保护 */
+]);
 const ghost = [...refs].filter(r => !ids.has(r) && !dynamic.has(r));
 if (ghost.length) { console.error('❌ 脚本引用了不存在的元素 id：', ghost.join(', ')); bad++; }
 else console.log(`✅ 脚本引用的 ${refs.size} 个元素 id 全部存在`);

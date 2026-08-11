@@ -1743,6 +1743,8 @@ function editEvent(id){
 
 /* ================= 【v8】定式迭代台 ================= */
 function renderIterSel(){
+  /* 🔴 迭代台 tab 已随 v9.2 重构移除——元素不存在时直接返回 */
+  if(!document.getElementById('iterRuleSel')) return;
   $('#iterRuleSel').innerHTML = cats.map(c=>
     '<optgroup label="'+esc(c.name)+'">'
     + rules.filter(r=>r.cat===c.id).map(r=>'<option value="'+r.id+'">'
@@ -1907,6 +1909,8 @@ function renderPastReviews(scope){
 
 /* ================= 全部复盘（日/周/月 + 随笔，聚合一处） ================= */
 function renderAllReviews(){
+  /* 🔴 「全部复盘」元素已随 v9.2 重构移除——元素不存在时直接返回，防 addRetro/delRetro 崩 */
+  if(!document.getElementById('allReviews')) return;
   const all = [];
   Object.keys(reviews.day||{}).forEach(k=>all.push({src:'日', date:k, text:reviews.day[k]}));
   Object.keys(reviews.week||{}).forEach(k=>all.push({src:'周', date:k, text:reviews.week[k]}));
@@ -1925,6 +1929,8 @@ function renderAllReviews(){
     : '<p><small>还没有任何复盘记录。先在「日/周/月」写，或上面随手记一条。</small></p>';
 }
 function addRetro(){
+  /* 🔴 随笔输入框已随 v9.2 重构移除——元素不存在时直接返回 */
+  if(!document.getElementById('retroText')) return;
   const t = $('#retroText').value.trim();
   if(!t) return toast('复盘内容为空');
   if(!retros) retros=[];
@@ -2206,6 +2212,8 @@ function evHTML(e,del){
     +'</div>';
 }
 function renderTimeline(f,btn){
+  /* 🔴 事件流 tab 已移除（v9.2 重构），元素不存在时直接返回——防止保存/删除事件时崩 */
+  if(!document.getElementById('timelineView')) return;
   /* 动态补齐过滤器：事件流里出现的自定义类型（快速事件自定义）自动补成过滤按钮 */
   const fbar=document.getElementById('evFilters');
   if(fbar){

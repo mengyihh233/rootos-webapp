@@ -13,7 +13,7 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
-const { BAG_FIELDS, migrateBag, emptyBag } = require('./shared/bagSchema');
+const { BAG_FIELDS, migrateBag, emptyBag, repairBag } = require('./shared/bagSchema');
 const compression = require('compression'); /* gzip：JSON 响应 70% 缩（profile 50-100KB→15-30KB）省外网出流+内存峰值 */
 
 const PORT = process.env.PORT || 3000;
@@ -1433,6 +1433,7 @@ async function start() {
     let data = {};
     try { data = JSON.parse(raw || '{}'); } catch (e) { data = {}; }
     data = migrateBag(data); /* 🔴 透明版本迁移：旧数据自动升级到最新 schema（v1+） */
+    data = repairBag(data); /* 🔴 数据自愈：修复跨门类支链/悬空 parent/循环引用/seq（防规则消失/渲染崩溃） */
     if (!data || Object.keys(data).length === 0) {
       data = defaultBag();
       await db.profileSet(req.session.userId, JSON.stringify(data));
@@ -1445,6 +1446,107 @@ async function start() {
     if (updatedAt) res.setHeader('X-Data-Updated', updatedAt);
     if (updatedAt) data._updatedAt = updatedAt;
     res.json(data);
+  }));
+
+  /* 复盘导出：按日期范围生成格式化文本文件供小程序下载 */
+  app.get('/api/reviews/export', requireAuth, wrap(async (req, res) => {
+    const uid = req.session.userId;
+    const raw = await db.profileGet(uid);
+    let bag = {};
+    try { bag = JSON.parse(raw || '{}'); } catch (e) { bag = {}; }
+
+    const start = String(req.query.start || '').trim();
+    const end = String(req.query.end || '').trim();
+    const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+    if (!DATE_RE.test(start) || !DATE_RE.test(end)) return res.status(400).json({ error: '日期格式错误（需要 YYYY-MM-DD）' });
+    if (start > end) return res.status(400).json({ error: '起始日期不能晚于结束日期' });
+
+    const reviews = bag.reviews || {};
+    const dayR = reviews.day || {};
+    const weekR = reviews.week || {};
+    const monthR = reviews.month || {};
+    const events = bag.events || [];
+
+    const EVT_LABEL = { crash: '💥崩溃', recover: '✅恢复', relapse: '⚠️破戒', sleep: '🥱低能量', debug: '🔧调试', mile: '🏁里程碑', note: '📝随笔' };
+
+    const lines = [];
+    lines.push('ROOT-OS 每日复盘导出');
+    lines.push('导出范围：' + start + ' 至 ' + end);
+    lines.push('生成时间：' + new Date().toISOString().slice(0, 10).replace(/T.*/, ''));
+    lines.push('='.repeat(48));
+    lines.push('');
+
+    // 日复盘
+    const dayKeys = Object.keys(dayR).filter(k => k >= start && k <= end).sort();
+    if (dayKeys.length) {
+      lines.push('━'.repeat(48));
+      lines.push('  日复盘（' + dayKeys.length + ' 天）');
+      lines.push('━'.repeat(48));
+      lines.push('');
+      for (const k of dayKeys) {
+        const txt = (dayR[k] || '').trim();
+        lines.push('▌ ' + k);
+        lines.push(txt || '  （无文字记录）');
+        const dayEvs = events.filter(e => e.day === k);
+        if (dayEvs.length) {
+          lines.push('');
+          lines.push('  当日事件：');
+          dayEvs.forEach(e => lines.push('    [' + (EVT_LABEL[e.type] || e.type) + '] ' + (e.text || '无备注')));
+        }
+        lines.push('');
+      }
+    }
+
+    // 周复盘：key=周一日期，周区间 [k, k+6]；与 [start,end] 有交集即包含（k+6>=start 且 k<=end）
+    const fmt = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const weekKeys = Object.keys(weekR).filter(k => {
+      if (k > end) return false;
+      const monday = new Date(k + 'T00:00:00');
+      if (isNaN(monday.getTime())) return false;
+      const weekEnd = new Date(monday); weekEnd.setDate(weekEnd.getDate() + 6);
+      return fmt(weekEnd) >= start;
+    }).sort();
+    if (weekKeys.length) {
+      lines.push('━'.repeat(48));
+      lines.push('  周复盘（' + weekKeys.length + ' 周）');
+      lines.push('━'.repeat(48));
+      lines.push('');
+      for (const k of weekKeys) {
+        const txt = (weekR[k] || '').trim();
+        if (!txt) continue;
+        lines.push('▌ 周 ' + k);
+        lines.push(txt);
+        lines.push('');
+      }
+    }
+
+    // 月复盘
+    const monthKeys = Object.keys(monthR).filter(k => k >= start.slice(0, 7) && k <= end.slice(0, 7)).sort();
+    if (monthKeys.length) {
+      lines.push('━'.repeat(48));
+      lines.push('  月复盘（' + monthKeys.length + ' 个月）');
+      lines.push('━'.repeat(48));
+      lines.push('');
+      for (const k of monthKeys) {
+        const txt = (monthR[k] || '').trim();
+        if (!txt) continue;
+        lines.push('▌ ' + k);
+        lines.push(txt);
+        lines.push('');
+      }
+    }
+
+    if (!dayKeys.length && !weekKeys.length && !monthKeys.length) {
+      lines.push('该时间段内暂无复盘记录。');
+    }
+
+    lines.push('='.repeat(48));
+    lines.push('由 ROOT-OS 生成 · rootos.cc');
+
+    const content = lines.join('\n');
+    const filename = 'ROOT-OS复盘_' + start + '_至_' + end + '.txt';
+
+    res.json({ content, filename, size: Buffer.byteLength(content, 'utf8') });
   }));
 
   /* 保存数据（整包覆盖） */
@@ -1579,6 +1681,7 @@ async function start() {
     }
     const result = sanitizeBag(req.body);
     if (result.error) return res.status(400).json({ error: result.error });
+    repairBag(result.clean); /* 🔴 保存前自愈：跨门类支链/悬空 parent/循环/seq 修复后再入库 */
     await db.profileSet(req.session.userId, JSON.stringify(result.clean));
     /* 返回最新 updatedAt，供小程序端更新乐观锁基准（_bagTs） */
     const after = await db.profileUpdatedAt(req.session.userId, true); /* 写后基准：精确毫秒 */
