@@ -81,7 +81,7 @@
     return out;
   }
 
-  // ── 🔴 数据自愈：修复规则树一致性（加载/保存前调用，与小程序 utils/bagSchema.js 保持一致） ──
+  // ── 🔴 数据自愈：修复规则树一致性（加载/保存前调用） ──
   // 规则模型：parent=null 主链（属于门类 cat + 层级 lv）；parent=X.id 支链（必须与 X 同门类）
   // 修复：①跨门类支链→恢复主链 ②parent 悬空→恢复主链 ③循环引用→断开 ④seq 规范化
   function repairBag(bag) {
@@ -98,7 +98,7 @@
       }
     });
 
-    // ③ 循环引用：A→B→A（同门类也可能发生）→ 断开环——多轮遍历直到稳定
+    // ③ 循环引用：A→B→A（同门类也可能发生）→ 断开环——多轮遍历直到稳定（每轮只断第一个发现的环，复杂情况多轮解）
     let changed = true;
     let round = 0;
     while (changed && round < bag.rules.length) {
@@ -117,7 +117,7 @@
       }
     }
 
-    // ④ seq 规范化：同一 (cat, lv, parent) 组内 1..n
+    // ④ seq 规范化：同一 (cat, lv, parent) 组内 1..n（防排序错乱）
     const groups = {};
     bag.rules.forEach(r => {
       if (!r) return;
@@ -129,16 +129,34 @@
       list.forEach((r, i) => { r.seq = i + 1; });
     });
 
-    // ⑤ 🔴 兜底：孤儿门类无主链——若某 cat 下没有任何主链，把所有该 cat 下的支链恢复为主链
+    // ⑤ 🔴 兜底：孤儿门类无主链——若某 cat 下没有任何主链（除自身外），把所有该 cat 下的支链恢复为主链
     // 场景：用户把所有规则都设成了支链 → 根部门类主链为 0 → 规则页"还没有规则"
-    const mainByCat = {};
+    // 修复：把该 cat 下所有支链恢复为主链，保证每个门类至少有 1 条主链可见
+    const mainByCat = {}; /* cat → Set of ruleId（主链） */
     bag.rules.forEach(r => {
       if (!r || !r.cat || r.parent) return;
       (mainByCat[r.cat] = mainByCat[r.cat] || new Set()).add(r.id);
     });
     bag.rules.forEach(r => {
       if (!r || !r.cat || !r.parent) return;
+      /* 同门类主链为空（孤儿门类）→ 把所有该 cat 下的支链恢复为主链 */
       if (!(mainByCat[r.cat] && mainByCat[r.cat].size)) r.parent = null;
+    });
+
+    // ⑥ 🔴 补全缺失门类：规则引用了 cats 中不存在的门类（cats 丢失/被覆盖导致）
+    // 场景：cats 只剩 2 个门类，但 45 条规则的 cat 指向 c_study/c_en 等已丢失的门类
+    // → 规则页 cats.map 遍历不到 → "还没有规则"，今日页进度(不看cat)却正常
+    // 修复：为所有被规则引用但不在 cats 里的 cat id 补一个门类（保留原 id，名字从 id 推断，颜色默认）
+    if (!Array.isArray(bag.cats)) bag.cats = [];
+    const haveCat = new Set(bag.cats.map(c => c && c.id));
+    const missingCats = {};
+    bag.rules.forEach(r => {
+      if (r && r.cat && !haveCat.has(r.cat)) missingCats[r.cat] = true;
+    });
+    Object.keys(missingCats).forEach(cid => {
+      const inferName = cid.replace(/^c_/, '').replace(/_/g, ' ');
+      const pretty = inferName.charAt(0).toUpperCase() + inferName.slice(1);
+      bag.cats.push({ id: cid, name: pretty || cid, color: '#4fc1ff' });
     });
 
     return bag;
