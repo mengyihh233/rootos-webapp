@@ -98,17 +98,22 @@
       }
     });
 
-    // ③ 循环引用：A→B→A（同门类也可能发生）→ 断开环
-    for (let i = 0; i < bag.rules.length; i++) {
-      const r = bag.rules[i];
-      if (!r || !r.parent) continue;
-      let cur = r.parent, hops = 0;
-      while (cur && hops < bag.rules.length + 1) {
-        if (cur === r.id) { r.parent = null; break; }
-        const p = byId[cur];
-        if (!p) break;
-        cur = p.parent;
-        hops++;
+    // ③ 循环引用：A→B→A（同门类也可能发生）→ 断开环——多轮遍历直到稳定
+    let changed = true;
+    let round = 0;
+    while (changed && round < bag.rules.length) {
+      changed = false; round++;
+      for (let i = 0; i < bag.rules.length; i++) {
+        const r = bag.rules[i];
+        if (!r || !r.parent) continue;
+        let cur = r.parent, hops = 0;
+        while (cur && hops < bag.rules.length + 1) {
+          if (cur === r.id) { r.parent = null; changed = true; break; }
+          const p = byId[cur];
+          if (!p) break;
+          cur = p.parent;
+          hops++;
+        }
       }
     }
 
@@ -122,6 +127,18 @@
     Object.values(groups).forEach(list => {
       list.sort((a, b) => (a.seq || 0) - (b.seq || 0));
       list.forEach((r, i) => { r.seq = i + 1; });
+    });
+
+    // ⑤ 🔴 兜底：孤儿门类无主链——若某 cat 下没有任何主链，把所有该 cat 下的支链恢复为主链
+    // 场景：用户把所有规则都设成了支链 → 根部门类主链为 0 → 规则页"还没有规则"
+    const mainByCat = {};
+    bag.rules.forEach(r => {
+      if (!r || !r.cat || r.parent) return;
+      (mainByCat[r.cat] = mainByCat[r.cat] || new Set()).add(r.id);
+    });
+    bag.rules.forEach(r => {
+      if (!r || !r.cat || !r.parent) return;
+      if (!(mainByCat[r.cat] && mainByCat[r.cat].size)) r.parent = null;
     });
 
     return bag;
