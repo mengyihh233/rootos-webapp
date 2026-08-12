@@ -1602,7 +1602,18 @@ async function wipeAllUsers() {
   return deleted;
 }
 
-module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userByWechat, wechatTaken, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orphanWxAccount, wipeAllUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, templateUpdate, templateDelete, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, CLOUD_ENV, get _cloudBucket() { return _cloudBucket; } };
+/* 🔴 完整账号表导入（迁移用）：覆盖 _cloudUsers 并落盘 users.json。
+ * 仅用于 rootos → cloud1 迁移，迁移完成后应删除调用方接口。 */
+async function importUsers(seq, users) {
+  if (!Array.isArray(users)) throw new Error('users 必须为数组');
+  _cloudUsers = { seq: Number(seq) || 0, users: users.map(u => Object.assign({}, u)) };
+  _rebuildCloudIdx();
+  const ok = await cloudUsersSave();
+  if (!ok) throw new Error('users.json 保存失败');
+  return users.length;
+}
+
+module.exports = { init, isConnected, userByName, userByNameCI, userById, userByDisplayName, userByWechat, wechatTaken, userSetDisplayName, setDisplayNameWithRetry, createUser, userFindByEmail, userFindByOpenid, userBindEmail, userVerifyEmail, userSetWechat, userBindOpenid, userSetPassword, userUnlock, userSetDev, userDelete, orphanWxAccount, wipeAllUsers, importUsers, orderSeen, orderMark, backupSave, backupList, backupGet, backupTrim, profileGet, profileUpdatedAt, profileSet, adminUsers, dbStats, templateAdd, templateListApproved, templateListAll, templateGet, templateApprove, templateReject, templateUpdate, templateDelete, notify, notificationList, notificationUnreadCount, notificationMarkRead, ratingUpsert, ratingStats, favoriteToggle, favoriteIs, shareCreate, shareGet, subUpsert, subEnabledList, sentOnce, USE_PG, USE_CLOUD_STORAGE, CLOUD_ENV, get _cloudBucket() { return _cloudBucket; } };
 
 /* ---------- 订阅消息（微信提醒） ---------- */
 /* ================= 订阅消息云存储层（方案B 优化2：辅助表持久化） =================

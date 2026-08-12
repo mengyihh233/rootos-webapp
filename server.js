@@ -1014,6 +1014,26 @@ async function start() {
     res.send(JSON.stringify(out, null, 2));
   }));
 
+  /* 🔴 完整账号表导出（迁移用）：含 pw_hash/wx_openid 全字段（export-users 已剔除密码字段）。
+   * 仅用于 rootos → cloud1 迁移，迁移完成后应删除此接口（含密码哈希，切勿长期暴露）。 */
+  app.get('/api/admin/export-users-full', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    const users = await db.cloudUserAll();
+    const seq = users.reduce((m, u) => Math.max(m, Number(u.id) || 0), 0);
+    res.set('Content-Type', 'application/json');
+    res.json({ at: new Date().toISOString(), seq, count: users.length, users });
+  }));
+
+  /* 🔴 完整账号表导入（迁移用）：覆盖写入 users.json（含 pw_hash/wx_openid）。
+   * 仅用于 rootos → cloud1 迁移，迁移完成后应删除此接口。 */
+  app.post('/api/admin/import-users-full', wrap(async (req, res) => {
+    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    const { seq, users } = (req.body || {});
+    if (!Array.isArray(users)) return res.status(400).json({ error: '需传 users 数组' });
+    const n = await db.importUsers(seq, users);
+    res.json({ ok: true, count: n });
+  }));
+
   /* 🔴 清空全部用户数据（重新上架前）：必须传 confirm='DELETE-ALL' 二次确认，防误触。
    * 鉴权用 ADMIN_TOKEN（Bearer），与导出/inject 一致（requireAdmin 是 session 鉴权，脚本/curl 用不了） */
   app.post('/api/admin/wipe-users', wrap(async (req, res) => {
