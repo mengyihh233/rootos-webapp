@@ -1591,14 +1591,6 @@ async function start() {
         micro: trimStr(r.micro || '', MAX_RULE_TEXT)
       }));
     }
-    if (Array.isArray(clean.rules)) {
-      if (clean.rules.length > MAX_RULES_PER_USER) return { error: `规则数量超过上限 ${MAX_RULES_PER_USER}` };
-      clean.rules = clean.rules.slice(0, MAX_RULES_PER_USER).map(r => ({
-        ...r,
-        t: trimStr(r.t || '', MAX_RULE_TEXT),
-        micro: trimStr(r.micro || '', MAX_RULE_TEXT)
-      }));
-    }
     if (Array.isArray(clean.cats)) clean.cats = clean.cats.slice(0, MAX_CATS).map(c => ({ ...c, name: trimStr(c.name, MAX_CAT_NAME) }));
     if (Array.isArray(clean.tags)) clean.tags = clean.tags.slice(0, MAX_TAGS).map(t => ({ ...t, name: trimStr(t.name, MAX_TAG_NAME) }));
     if (Array.isArray(clean.levels)) clean.levels = clean.levels.slice(0, MAX_LEVELS);
