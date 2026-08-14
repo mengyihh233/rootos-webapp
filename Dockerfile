@@ -16,6 +16,8 @@ COPY . .
 
 # 云托管默认把流量打到容器 80 端口（控制台创建服务时端口填 80）
 ENV NODE_ENV=production
+# 云托管跑在 LB 之后：启用 trust proxy（secure cookie 依赖 X-Forwarded-Proto）
+ENV TRUST_PROXY=1
 ENV PORT=80
 
 EXPOSE 80

@@ -379,9 +379,12 @@ async function start() {
    * 先起 HTTP 服务（让 Render 健康检查 / 通过），数据库由后台循环异步连接，
    * Neon 免费层冷启动时连不上只会持续重试并打日志，不会触发 status 1 部署失败。 */
   const app = express();
-  /* 部署在 Nginx / Caddy / Render 反代之后时必须开启，
-   * 否则 NODE_ENV=production 下 cookie 的 secure 标志会导致登录态无法建立 */
-  app.set('trust proxy', 1);
+  /* P2: trust proxy XFF 伪造——无条件信任 1 层代理时，攻击者若可直连服务器，
+   * 伪造 X-Forwarded-For 即可绕过登录限流（authFail 按 req.ip 计数）与 IP 审计。
+   * 默认不信任任何代理（req.ip = 真实 TCP 对端，伪造头无效）；仅部署在可信反代/
+   * 云托管 LB 之后显式开启（TRUST_PROXY=1），同时保障 secure cookie 的 req.secure。
+   * CloudBase 云托管已在 Dockerfile 内置 ENV TRUST_PROXY=1。 */
+  if (process.env.TRUST_PROXY === '1') app.set('trust proxy', 1); /* P2: XFF 伪造修复，仅可信反代后开启 */
 
   /* 安全响应头：纵深防御 XSS / MIME 嗅探 / Referrer 泄露。
    * 重要教训：CSP 中 'unsafe-inline' 与 'nonce-' 同现时，现代浏览器会【忽略 unsafe-inline】，
@@ -501,6 +504,16 @@ async function start() {
     req.user = { id: uid, isAdmin: false /* 小程序无 admin */ };
     globalThis.__incUsageApi && globalThis.__incUsageApi();
     next();
+  }
+
+  /* P2: ADMIN_TOKEN 恒定时间比较（crypto.timingSafeEqual）——
+   * 消除时序侧信道（token 是较短共享密钥，逐字符比较的时间差可被远程测量）
+   * 长度不同直接不等（timingSafeEqual 要求等长 Buffer；token 固定长度，长度泄露量极小） */
+  function tokenEq(a, b) {
+    const x = Buffer.from(String(a || ''));
+    const y = Buffer.from(String(b || ''));
+    if (x.length !== y.length) return false;
+    return crypto.timingSafeEqual(x, y);
   }
 
   /* 管理后台鉴权 */
@@ -962,7 +975,7 @@ async function start() {
 
   /* 管理员手动解锁（备用通道）：POST /api/admin/unlock { username, days } */
   app.post('/api/admin/unlock', wrap(async (req, res) => {
-    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    if (!ADMIN_TOKEN || !tokenEq((req.headers.authorization || '').replace('Bearer ', '').trim(), ADMIN_TOKEN)) return res.status(401).json({ error: '未授权' });
     const username = String(req.body.username || '').trim();
     const days = Math.max(1, Math.min(3650, Number(req.body.days) || LICENSE_UNLOCK_DAYS));
     const u = await db.userByName(username);
@@ -976,7 +989,7 @@ async function start() {
    * wx_ 自动注册账号密码随机生成、无邮箱 → 失去微信后永久无法网页登录。
    * 此端点提供兜底恢复路径：管理员验证用户身份后在此设新密码。 */
   app.post('/api/admin/reset-password', wrap(async (req, res) => {
-    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    if (!ADMIN_TOKEN || !tokenEq((req.headers.authorization || '').replace('Bearer ', '').trim(), ADMIN_TOKEN)) return res.status(401).json({ error: '未授权' });
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
     if (!password || password.length < 6) return res.status(400).json({ error: '密码至少 6 位' });
@@ -994,20 +1007,20 @@ async function start() {
    *   每天 00:10：0 10 0 * * * *   → POST /api/cron/backup
    * 鉴权：Authorization: Bearer <ADMIN_TOKEN> */
   app.post('/api/cron/remind', wrap(async (req, res) => {
-    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    if (!ADMIN_TOKEN || !tokenEq((req.headers.authorization || '').replace('Bearer ', '').trim(), ADMIN_TOKEN)) return res.status(401).json({ error: '未授权' });
     const before = Date.now();
     try { await sendReminders(); res.json({ ok: true, ms: Date.now() - before }); }
     catch (e) { console.warn('⚠️ cron/remind 失败：', e && e.message); res.json({ ok: false, error: e && e.message || 'remind failed' }); }
   }));
   app.post('/api/cron/backup', wrap(async (req, res) => {
-    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    if (!ADMIN_TOKEN || !tokenEq((req.headers.authorization || '').replace('Bearer ', '').trim(), ADMIN_TOKEN)) return res.status(401).json({ error: '未授权' });
     try { await runAutoBackup(); res.json({ ok: true }); }
     catch (e) { console.warn('⚠️ cron/backup 失败：', e && e.message); res.json({ ok: false, error: e && e.message || 'backup failed' }); }
   }));
 
   /* 导出全部用户数据（删库前保全）：ADMIN_TOKEN（Bearer）鉴权，返回完整 users + profiles */
   app.get('/api/admin/export-users', wrap(async (req, res) => {
-    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    if (!ADMIN_TOKEN || !tokenEq((req.headers.authorization || '').replace('Bearer ', '').trim(), ADMIN_TOKEN)) return res.status(401).json({ error: '未授权' });
     const users = await db.adminUsers();
     const out = {
       at: new Date().toISOString(),
@@ -1039,7 +1052,7 @@ async function start() {
   /* 🔴 清空全部用户数据（重新上架前）：必须传 confirm='DELETE-ALL' 二次确认，防误触。
    * 鉴权用 ADMIN_TOKEN（Bearer），与导出/inject 一致（requireAdmin 是 session 鉴权，脚本/curl 用不了） */
   app.post('/api/admin/wipe-users', wrap(async (req, res) => {
-    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    if (!ADMIN_TOKEN || !tokenEq((req.headers.authorization || '').replace('Bearer ', '').trim(), ADMIN_TOKEN)) return res.status(401).json({ error: '未授权' });
     if (String((req.body && req.body.confirm) || '') !== 'DELETE-ALL') return res.status(400).json({ error: '需传 confirm=DELETE-ALL 二次确认' });
     const n = await db.wipeAllUsers();
     console.log('🗑️ 已清空全部用户数据：', n, '个账号（重新上架前清理）');
@@ -1157,7 +1170,7 @@ async function start() {
   /* 设置/取消开发者（ADMIN_TOKEN 保护）：POST /api/admin/set-dev { username, dev }
    * 支持大小写不敏感匹配（微信自动注册号 wx_ 前缀场景友好） */
   app.post('/api/admin/set-dev', wrap(async (req, res) => {
-    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    if (!ADMIN_TOKEN || !tokenEq((req.headers.authorization || '').replace('Bearer ', '').trim(), ADMIN_TOKEN)) return res.status(401).json({ error: '未授权' });
     const username = String(req.body.username || '').trim();
     const dev = req.body.dev !== false;
     let u = await db.userByName(username);
@@ -1170,7 +1183,7 @@ async function start() {
   /* 注入规划数据（ADMIN_TOKEN 保护）：POST /api/admin/inject-plan { username, plan, mode }
    * plan = 完整 bag JSON（字符串）；mode = merge（合并，默认）| overwrite（覆盖全部） */
   app.post('/api/admin/inject-plan', wrap(async (req, res) => {
-    if (!ADMIN_TOKEN || (req.headers.authorization || '').replace('Bearer ', '') !== ADMIN_TOKEN) return res.status(401).json({ error: '未授权' });
+    if (!ADMIN_TOKEN || !tokenEq((req.headers.authorization || '').replace('Bearer ', '').trim(), ADMIN_TOKEN)) return res.status(401).json({ error: '未授权' });
     const username = String(req.body.username || '').trim();
     const u = await db.userByName(username);
     if (!u) return res.status(404).json({ error: '用户不存在' });
@@ -1788,8 +1801,10 @@ async function start() {
     if (!ADMIN_TOKEN) return res.status(403).json({ error: '后台未启用（服务端未设置 ADMIN_TOKEN）' });
     if (authFail(req.ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
     const token = String(req.body.token || '').trim();
-    if (token !== ADMIN_TOKEN) { authFail(req.ip); return res.status(401).json({ error: 'Token 错误' }); }
+    if (!tokenEq(token, ADMIN_TOKEN)) { authFail(req.ip); return res.status(401).json({ error: 'Token 错误' }); }
     authOk(req.ip);
+    /* P2: 登录成功后 regenerate session——防会话固定（攻击者预置已知 session id 诱导管理员登录后接管） */
+    await new Promise((resolve, reject) => req.session.regenerate(e => (e ? reject(e) : resolve())));
     req.session.isAdmin = true;
     res.json({ ok: true });
   }));
@@ -2189,6 +2204,18 @@ async function start() {
   /* 静态前端（除首页/管理页外的资源：css/js/templates 等） */
   app.use(express.static(path.join(__dirname, 'public')));
   app.use('/shared', express.static(path.join(__dirname, 'shared')));
+
+  /* P2: JSON 错误中间件——express.json 解析失败/超限（60MB）时 Express 默认返回 HTML 错误页，
+   * API 客户端 fetch 拿不到 error 字段会误判成功/解析失败。此处统一转成 JSON 响应。
+   * 放所有路由之后：只兜 body-parser 等非路由中间件抛出的错误。 */
+  app.use((err, req, res, next) => {
+    if (!err || typeof err !== 'object') return next(err);
+    if (err.type === 'entity.too.large') return res.status(413).json({ error: '请求体过大（上限 60MB）' });
+    if (err.type === 'entity.parse.failed') return res.status(400).json({ error: '请求体 JSON 格式错误' });
+    if (err.type === 'charset.unsupported') return res.status(415).json({ error: '不支持的字符集' });
+    if (err.type === 'encoding.unsupported') return res.status(415).json({ error: '不支持的编码' });
+    next(err);
+  });
 
   app.listen(PORT, () => {
     console.log(`✅ 底层创造者OS 多用户版运行中： http://localhost:${PORT}`);
