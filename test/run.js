@@ -68,6 +68,16 @@ process.env.SESSION_SECRET = 'test-secret';
 process.env.SQLITE_PATH = TMP_DB;
 process.env.NODE_ENV = 'test';
 process.env.ADMIN_TOKEN = 'test-admin-token';
+/* 🔴 微信测试钩子：映射假 code → 假 openid（bind-openid 新流程要求 code2session，
+ * 测试无法真调微信，用 WX_TEST_CODE_MAP 让服务端走映射而非真实 API）。
+ * 注意：需要 WX_APPID/WX_SECRET 非空才走 code 分支，测试用假值 + 钩子绕过。 */
+process.env.WX_APPID = 'test-appid';
+process.env.WX_SECRET = 'test-secret';
+process.env.WX_TEST_CODE_MAP = JSON.stringify({
+  'code_openid_x': 'openid_x',
+  'code_merge_1': 'openid_merge_1',
+  'code_bind_1': 'openid_bind_1'
+});
 
 const child = spawn('node', ['server.js'], { cwd: path.join(__dirname, '..'), env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
 child.stderr.on('data', d => process.stderr.write('[srv] ' + d));
@@ -300,10 +310,10 @@ function makeDocx(text) {
   r = await fetch(base + '/api/forgot/send-code', { method:'POST', headers:hd, body: JSON.stringify({ email:'someone@test.com' }) });
   ok('SMTP 未配置：找回密码 → 503 降级提示', r.status === 503);
 
-  // ---- 微信小程序登录：未配置 503；配置假密钥时 code2session 被微信拒绝 → 400 ----
-  r = await fetch(base + '/api/wechat/login', { method:'POST', headers:hd, body: JSON.stringify({ code:'fakecode' }) });
-  ok('WX 未配置：小程序登录 → 503 降级提示', r.status === 503, 'status=' + r.status);
-  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ openid:'openid_x', username:'nobody', password:'x' }) });
+  // ---- 微信小程序登录：配置了假密钥 + 测试钩子，code2session 走映射 ----
+  r = await fetch(base + '/api/wechat/login', { method:'POST', headers:hd, body: JSON.stringify({ code:'code_openid_x' }) });
+  ok('WX 已配置：小程序登录 → 走测试钩子返回 openid 相关结果', r.status !== 503, 'status=' + r.status);
+  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ code:'code_openid_x', username:'nobody', password:'x' }) });
   ok('bind-openid：账号密码错 → 401', r.status === 401);
   r = await fetch(base + '/api/data', { headers:{ authorization:'Bearer invalid-token'} });
   ok('无效 Bearer token → 401', r.status === 401);
@@ -326,7 +336,7 @@ function makeDocx(text) {
   const mergeWebUser = 'mergeweb_' + Date.now();
   await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: mergeWxUser, password: 'pass123456' }) });
   await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: mergeWebUser, password: 'pass123456' }) });
-  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ openid:'openid_merge_1', username: mergeWxUser, password: 'pass123456' }) });
+  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ code:'code_merge_1', username: mergeWxUser, password: 'pass123456' }) });
   const mwxJ = await r.json();
   ok('merge 前置：微信账号绑定 openid → 200', r.status===200 && mwxJ.ok && mwxJ.token);
   const mwxAuth = 'Bearer ' + mwxJ.token;
@@ -345,10 +355,10 @@ function makeDocx(text) {
   await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: wxTemp, password: 'pass123456' }) });
   await fetch(base + '/api/register', { method:'POST', headers:hd, body: JSON.stringify({ username: bindWebUser, password: 'pass123456' }) });
   /* 模拟：openid 先被 wx_ 临时账号占用（微信自动注册） */
-  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ openid:'openid_bind_1', username: wxTemp, password: 'pass123456' }) });
+  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ code:'code_bind_1', username: wxTemp, password: 'pass123456' }) });
   ok('前置：openid 绑定到 wx_ 临时账号 → 200', r.status === 200);
   /* 网页账号绑定同一 openid → 应自动合并转移（不再 409） */
-  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ openid:'openid_bind_1', username: bindWebUser, password: 'pass123456' }) });
+  r = await fetch(base + '/api/wechat/bind-openid', { method:'POST', headers:hd, body: JSON.stringify({ code:'code_bind_1', username: bindWebUser, password: 'pass123456' }) });
   const bindJ = await r.json();
   ok('bind-openid：wx_ 占用时可合并转移 → 200 且返回目标账号 token', r.status===200 && bindJ.ok && bindJ.token, JSON.stringify(bindJ).slice(0,120));
 

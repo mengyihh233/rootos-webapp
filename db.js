@@ -139,10 +139,12 @@ async function cloudProfileUpdatedAt(uid, preferFile) {
       try { const j = JSON.parse(raw); if (j && j.updatedAt) { const d = new Date(j.updatedAt); if (!isNaN(d.getTime())) return d.toISOString(); } } catch (e) { /* 兜底 */ }
     }
   }
-  /* 🔴 getFileInfo 结果缓存 30s（miniprogram 每 5 分钟调一次 meta，缓存命中率 90%） */
+  /* 🔴 getFileInfo 结果缓存 60s（miniprogram 每 5 分钟调一次 meta，缓存命中率 90%+；
+   * L1 优化：TTL 30s→60s 减半 COS 读次数；404 无文件也缓存，避免每次轮询都打 getFileInfo） */
   const META_KEY = 'meta:' + uid;
+  const META_TTL_MS = 60000;
   const mc = _memCache.get(META_KEY);
-  if (mc && (Date.now() - mc.ts) < CACHE_TTL_MS) return mc.data;
+  if (mc && (Date.now() - mc.ts) < META_TTL_MS) return mc.data;
   try {
     const fileID = cloudFileID(uid);
     if (fileID) {
@@ -155,6 +157,10 @@ async function cloudProfileUpdatedAt(uid, preferFile) {
           _memCache.set(META_KEY, { data: result, ts: Date.now() });
           return result;
         }
+      } else if (item.code && /NONEXIST|NOT_FOUND|NOEXIST|NOTFOUND/i.test(String(item.code))) {
+        /* 🔴 404 缓存 60s：新用户/未建档时每次轮询都打 COS 是浪费，缓存 null 防止重复读 */
+        _memCache.set(META_KEY, { data: null, ts: Date.now() });
+        return null;
       }
     }
   } catch (e) { /* 返回 null */ }
@@ -168,6 +174,8 @@ async function cloudProfileSet(uid, dataStr) {
   if (res.code && res.code !== 'SUCCESS' && res.code !== 0) throw new Error('云存储上传失败: ' + (res.message || res.code));
   /* 写穿缓存：上传成功后更新内存快照（读路径 COS 故障时可降级返回） */
   _memCache.set('profile:' + uid, { data: dataStr, ts: Date.now() });
+  /* 🔴 同步更新 meta 缓存（写后 meta 探测立即反映新版本，不被 60s 404 缓存误导） */
+  _memCache.set('meta:' + uid, { data: new Date().toISOString(), ts: Date.now() });
   /* 从上传返回的权威 fileID 提取 envId.bucketId 缓存（cloud://<env>.<bucket>/<path>） */
   if (res && res.fileID && /^cloud:\/\//.test(res.fileID)) {
     try {

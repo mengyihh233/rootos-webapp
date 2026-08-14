@@ -476,7 +476,7 @@ async function start() {
   function authOk(ip) { authFails.delete(ip); }
 
   /* 统一鉴权：网页走 session cookie，小程序走 Bearer token；后续逻辑统一用 req.session.userId */
-  function requireAuth(req, res, next) {
+  async function requireAuth(req, res, next) {
     /* 🔴 req.user 中间层：session 和 JWT 的统一身份对象。
      * 当前 session 仍为主路径（向后兼容），req.user 为新代码提供无状态入口。
      * 未来迁移 JWT 完全化时，只需改这里——消费端不用动。 */
@@ -487,6 +487,16 @@ async function start() {
     }
     const uid = wxUidFromReq(req);
     if (!uid) return res.status(401).json({ error: '未登录' });
+    /* 🔴 修复孤儿 JWT：注销后的旧 token 30 天内仍可解析出 uid，
+     * 若用户已不存在（注销/被删），必须拒绝——否则孤儿 token 可继续调接口。
+     * cloudUserById/userById 走内存索引 O(1)，只对 JWT 路径多查一次，可接受。 */
+    try {
+      const u = await db.userById(uid);
+      if (!u) return res.status(401).json({ error: '账号不存在或已注销，请重新登录' });
+    } catch (e) {
+      /* 查询失败不阻断（防误杀）：回落到原有逻辑，由具体接口的 userById 校验兜底 */
+      console.warn('⚠️ requireAuth 校验用户存在失败:', (e && e.message) || e);
+    }
     req.session.userId = uid; /* 兼容旧代码（未来可删） */
     req.user = { id: uid, isAdmin: false /* 小程序无 admin */ };
     globalThis.__incUsageApi && globalThis.__incUsageApi();
@@ -755,22 +765,34 @@ async function start() {
   /* ⑥b 小程序绑定 web 账号：code 或 openid + 网页账号密码 → 关联并签发 token（IP 限流防爆破） */
   app.post('/api/wechat/bind-openid', wrap(async (req, res) => {
     const ip = req.ip;
-    /* 🔴 支持两种入参：①code（前端未登录态首选——服务端做 code2session）②openid（已登录态绑定复用） */
-    let openid = String(req.body.openid || '').trim();
+    /* 🔴 安全加固：仅接受 wx.login 的 code，openid 一律服务端 code2session 换取——
+     * 拒绝客户端直传 openid（否则 openid 一旦泄露可被他人绑定劫持微信登录）。
+     * code 是一次性凭证且需通过微信服务器验证，无法伪造。 */
     const code = String(req.body.code || '').trim();
     const username = String(req.body.username || '').trim();
     const password = String(req.body.password || '');
-    if (code && WX_APPID && WX_SECRET && !openid) {
-      try {
+    if (!code || !WX_APPID || !WX_SECRET) return res.status(400).json({ error: '缺少微信 code 或服务未配置微信登录' });
+    let openid = '';
+    try {
+      /* 🔴 测试钩子：仅当显式设置 WX_TEST_CODE_MAP（JSON: code→openid）时走映射，跳过真实微信调用。
+       * 生产环境绝不设置该变量 → 恒走 code2session，openid 不可伪造。 */
+      const testMap = process.env.WX_TEST_CODE_MAP;
+      if (testMap) {
+        try {
+          const m = JSON.parse(testMap);
+          if (m && typeof m === 'object') openid = m[code] || '';
+        } catch (e) { /* 非法映射忽略，走真实微信 */ }
+      }
+      if (!openid) {
         const wxUrl = `https://api.weixin.qq.com/sns/jscode2session?appid=${encodeURIComponent(WX_APPID)}&secret=${encodeURIComponent(WX_SECRET)}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`;
         const wxR = await fetch(wxUrl); const wxJ = await wxR.json();
         if (wxJ.errcode) return res.status(400).json({ error: '微信登录失败：' + (wxJ.errmsg || ('errcode ' + wxJ.errcode)) });
         openid = wxJ.openid || '';
-      } catch (e) {
-        return res.status(502).json({ error: '微信服务暂不可用，请稍后再试' });
       }
+    } catch (e) {
+      return res.status(502).json({ error: '微信服务暂不可用，请稍后再试' });
     }
-    if (!openid) return res.status(400).json({ error: '缺少 openid 或微信 code' });
+    if (!openid) return res.status(400).json({ error: '微信登录失败，请重试' });
     const u = await db.userByName(username) || await db.userByNameCI(username); /* 大小写不敏感 */
     if (!u || !u.pw_hash || !bcrypt.compareSync(password, u.pw_hash)) {
       if (authFail(ip)) return res.status(429).json({ error: '尝试过于频繁，请 15 分钟后再试' });
@@ -1397,11 +1419,18 @@ async function start() {
   /* 解析上传的文档（.docx/.txt/.md）→ 返回纯文本，供「规划·资源」导入收藏
    * 前端把文件读成 base64 传上来（避免 multipart 依赖），服务端解码后用 mammoth 抽 docx 文本 */
   app.post('/api/parse-doc', requireAuth, wrap(async (req, res) => {
+    /* 🔴 滥用防护：复用保存限流（防登录用户高频提交大文件触发 mammoth 解析 CPU DoS） */
+    if (!saveRateOk(req.session.userId)) return res.status(429).json({ error: '操作过于频繁，请稍后再试' });
     const filename = String(req.body.filename || '');
     const b64 = String(req.body.data || '');
     if (!b64) return res.status(400).json({ error: '文件内容为空' });
+    /* 🔴 大小上限：base64 每 4 字符≈3 字节 → 1.5MB base64 ≈ 1.1MB 原始文件。
+     * 原代码无限制，60MB body 可被反复提交触发 mammoth 解析耗尽 CPU/内存 */
+    if (b64.length > 2 * 1024 * 1024) return res.status(413).json({ error: '文件过大（>1.5MB），请精简后重试' });
     let buf;
     try { buf = Buffer.from(b64, 'base64'); } catch (e) { return res.status(400).json({ error: '文件解码失败' }); }
+    /* 🔴 文件名白名单：仅允许文档扩展名，防路径/内容混淆 */
+    if (!/^[\w\u4e00-\u9fa5.-]{1,100}\.(docx|doc|txt|md|markdown)$/i.test(filename)) return res.status(400).json({ error: '仅支持 .docx/.txt/.md 文件' });
     const lower = filename.toLowerCase();
     if (lower.endsWith('.docx')) {
       try {
